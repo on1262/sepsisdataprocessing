@@ -2,37 +2,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import scipy
-from sklearn.metrics import auc as sk_auc
 import pandas as pd
 from collections.abc import Iterable
 import os, sys
 import subprocess
 import missingno as msno
 from .generic import reinit_dir
+from .colorful_logging import logger
 
-
-def plot_roc(fprs:np.ndarray, tprs:np.ndarray, thres:np.ndarray, title='roc', disp=False, save_path=None):
-    if len(fprs.shape) == 1:
-        fprs, tprs = fprs.reshape(1, fprs.shape[0]), tprs.reshape(1, tprs.shape[0])
-    aucs = []
-    random_guess = [x for x in np.linspace(start=0, stop=1, num=10)]
-    plt.plot(random_guess, random_guess, dashes=[6, 2])
-    for idx in range(fprs.shape[0]):
-        aucs.append(sk_auc(fprs[idx,:], tprs[idx,:]))
-        plt.plot(fprs[idx,:], tprs[idx,:])
-    auc_str = f'AUC={aucs[0]:.3f}' if len(aucs) == 1 else f'AUC={np.asarray(aucs).mean():.3f} ({np.asarray(aucs).std():.3f})'
-
-    plt.annotate(auc_str, xy=[0.7, 0.05], fontsize=12)
-    plt.title(title)
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    if disp:
-        plt.show()
-    elif save_path is not None:
-        plt.savefig(save_path)
-    plt.close()
 
 def plot_loss(data, title='Title'):
     plt.plot(data)
@@ -134,28 +111,32 @@ def plot_dis_correlation(X:np.ndarray, fea_names, Y:np.ndarray, target_name, wri
             corr = np.corrcoef(x=x_valid, y=Y_valid, rowvar=False)[0,1]
             convert_list.append(corr)
         except Exception as e:
-            print(f'Warning: Can not convert {name} to float.')
+            logger.info(f'plot_dis_correlation: No correlation for {name}.')
             convert_list.append(-2)
     idx_list = list(range(len(fea_names)))
     idx_list = sorted(idx_list, key= lambda idx:abs(convert_list[idx]), reverse=True)
     for rank, idx in enumerate(idx_list):
+        logger.debug(f'Plot correlation: {fea_names[idx]}')
+        name = fea_names[idx]
         if convert_list[idx] > -1:
-            name = fea_names[idx]
             df = pd.DataFrame(data=np.stack([X[:, idx].astype(float),Y],axis=1), columns=[name,'y'])
             df = df[df[name] > -0.5] # remove missing value
-            sns.displot(
-                data=df, x=name, hue='y', kind='hist', stat='proportion', common_norm=False, bins=20
+        else:
+            df = pd.DataFrame(data=np.stack([X[:, idx].astype(str),Y],axis=1), columns=[name,'y'])
+        sns.displot(
+            data=df, x=name, hue='y', kind='hist', stat='proportion', common_norm=False, bins=20
+        )
+        if convert_list[idx] > -1:
+            plt.annotate(f'corr={convert_list[idx]:.3f}', xy=(0.05, 0.95), xycoords='axes fraction')
+        if write_dir_path is None:
+            plt.show()
+        else:
+            plt.savefig(
+                os.path.join(write_dir_path, rf'{rank}.png')
             )
-            plt.annotate(f'corr={convert_list[idx]}', xy=(0.05, 0.95), xycoords='axes fraction')
-            if write_dir_path is None:
-                plt.show()
-            else:
-                plt.savefig(
-                    os.path.join(write_dir_path, rf'{rank}.png')
-                )
-            plt.close()
+        plt.close()
     if write_dir_path is not None:
-        print(f'dis correlation is saved in {write_dir_path}')
+        logger.info(f'dis correlation is saved in {write_dir_path}')
 
 
 def plot_na(data:pd.DataFrame, mode='matrix', disp=False, save_path=None):

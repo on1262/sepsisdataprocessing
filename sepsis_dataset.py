@@ -4,60 +4,77 @@ import pandas_profiling as ppf
 import json, os
 import matplotlib.pyplot as plt
 import numpy as np
-from tools import *
+import tools
+from tools.colorful_logging import logger
+
 
 
 class SepsisDataset():
-    def __init__(self, data_path, from_pkl=False):
-        self.data_path = data_path
-        self.csv_path = os.path.join(data_path, 'sepsis_fixed.csv') # origin data
-        self.conf_cache_path = os.path.join(data_path, 'configs_cache.json')
-        self.conf_manual_path = os.path.join(data_path, 'configs_manual.json')
-        self.profile_conf_path = os.path.join(data_path, 'profile_conf.yaml')
-        self.profile_save_path = os.path.join(data_path, 'profile.html')
-        self.output_cleaned_path = os.path.join(data_path, 'cleaned.csv')
-        self.dataframe_save_path = os.path.join(data_path, 'dataframe.pkl')
+    def __init__(self, from_pkl=False):
+        self.conf_loder = tools.GLOBAL_CONF_LOADER["dataset_static"]['paths']
+        self.csv_path = self.conf_loder['csv_origin_path'] # origin data
+        self.conf_cache_path = self.conf_loder['conf_cache_path']
+        self.conf_manual_path = self.conf_loder['conf_manual_path']
+        self.profile_conf_path = self.conf_loder['profile_conf_path']
+        self.profile_save_path = self.conf_loder['profile_save_path']
+        self.output_cleaned_path = self.conf_loder['output_cleaned_path']
+        self.apriori_df_path = self.conf_loder['apriori_df_path']
+        self.dataframe_save_path = self.conf_loder['dataframe_save_path']
+        self.out_path = self.conf_loder['out_dir']
 
         with open(self.csv_path, 'r', encoding='utf-8') as f:
             self.data_pd = pd.read_csv(f, encoding='utf-8')
 
         self.load_configs()
-
-        if from_pkl and os.path.exists(self.dataframe_save_path):
-            print(f'loading data from {self.dataframe_save_path}')
-            self.data_pd = pd.read_pickle(self.dataframe_save_path)
-        else:
-            self.create_death_label()
-            self.feature_check()
-            self.data_pd = one_hot_decoding(self.data_pd, cluster_dict=self.configs['one_hot_decoding'])
-            self.plot_na('bar')
-            self.data_pd = select_na(self.data_pd, col_thres=0.5, row_thres=0.7)
-
-            self.type_dict = check_fea_types(self.data_pd)
-            self.data_pd = remove_invalid_rows(self.data_pd, self.type_dict)
-            self.data_pd.reset_index(drop=True, inplace=True)
-            self.apriori_pd = self.data_pd.copy(deep=True)
-
-            self.category_dict = detect_category_fea(self.data_pd, self.type_dict, cluster_perc=0.01)
-            self.configs['type_dict'] = self.type_dict
-            self.configs['category_dict'] = self.category_dict
-
-            # data cleaning
-            self.data_pd = apply_category_fea(self.data_pd, self.category_dict)
-            fill_default(self.data_pd, self.configs['fill_default'])
-            self.data_pd = select_na(self.data_pd, col_thres=0.5, row_thres=0.87)
-            self.plot_na('matrix')
-            self.plot_na('sample')
-            self.plot_correlation()
-            plot_category_dist(data=self.data_pd, type_dict=self.type_dict,
-                output_dir=os.path.join(self.data_path, 'category_dist'))
-            
-            self.dump_configs()
-            self.data_pd.to_csv(self.output_cleaned_path, index=False)
-            self.data_pd.to_pickle(self.dataframe_save_path)
-            # self.profile(self.profile_save_path)
-
         self.target_fea = 'ARDS'
+
+        if from_pkl and os.path.exists(self.dataframe_save_path) and os.path.exists(self.apriori_df_path):
+            if self.configs['origin_md5'] == tools.cal_file_md5(self.csv_path):
+                logger.info(f'loading data from {self.dataframe_save_path}')
+                self.data_pd = pd.read_pickle(self.dataframe_save_path)
+                self.apriori_pd = pd.read_pickle(self.apriori_df_path)
+                return
+            else:
+                logger.warning('MD5 validation failed, change from_pkl=false')
+
+        self.create_death_label()
+        self.feature_check()
+        self.data_pd = tools.one_hot_decoding(self.data_pd, cluster_dict=self.configs['one_hot_decoding'])
+        self.plot_na('bar')
+        self.data_pd = tools.select_na(self.data_pd,
+            col_thres=self.configs['select_na']['1st_col_thres'], 
+            row_thres=self.configs['select_na']['1st_row_thres'])
+
+        self.type_dict = tools.check_fea_types(self.data_pd)
+        self.data_pd = tools.remove_invalid_rows(self.data_pd, self.type_dict)
+        self.data_pd.reset_index(drop=True, inplace=True)
+        self.apriori_pd = self.data_pd.copy(deep=True)
+
+        self.category_dict = tools.detect_category_fea(self.data_pd, self.type_dict, cluster_perc=self.configs['cluster_perc'])
+        self.configs['type_dict'] = self.type_dict
+        self.configs['category_dict'] = self.category_dict
+
+        # data cleaning
+        self.data_pd = tools.apply_category_fea(self.data_pd, self.category_dict)
+        tools.fill_default(self.data_pd, self.configs['fill_default'])
+        self.data_pd = tools.select_na(self.data_pd,
+            col_thres=self.configs['select_na']['2nd_col_thres'],
+            row_thres=self.configs['select_na']['2nd_row_thres'])
+        self.plot_na('matrix')
+        self.plot_na('sample')
+        self.plot_correlation()
+        tools.plot_category_dist(data=self.data_pd, type_dict=self.type_dict,
+            output_dir=os.path.join(self.out_path, 'category_dist'))
+        
+
+        # data should write before configs: to avoid md5 validation failure.
+        self.data_pd.to_csv(self.output_cleaned_path, index=False)
+        self.data_pd.to_pickle(self.dataframe_save_path)
+        self.apriori_pd.to_pickle(self.apriori_df_path)
+        self.configs['origin_md5'] = tools.cal_file_md5(self.csv_path)
+        self.dump_configs()
+
+
         
     def get_numeric_feas(self):
         fea_list = []
@@ -119,55 +136,58 @@ class SepsisDataset():
         for idx in days_fea.keys():
             for name in template_fea_names:
                 if name not in days_fea[idx]:
-                    print(f'Warning: feature {name} not in day {idx}')
+                    logger.warning(f'feature {name} not in day {idx}')
                     assert(0)
         self.configs['basic_fea'] = basic_fea
         self.configs['days_fea'] = template_fea_names
         # remove days feature
-        print('dropping feature')
+        logger.info('dropping feature')
         self.data_pd = self.data_pd.loc[:,self.configs['used_feature']]
         self.data_pd.drop(labels=self.configs['high_correlation'], axis=1, inplace=True)
-        # self.data_pd.drop(labels='df_index', axis=1, inplace=True)
-        print(f'{len(self.data_pd.columns)} feature used')
-        print(self.data_pd.columns)
-        print('Feature check OK')
+        logger.info(f'{len(self.data_pd.columns)} feature used')
+        logger.info(self.data_pd.columns)
+        logger.info('Feature check OK')
 
 
     def plot_correlation(self):
         data_pd = self.data_pd.copy(deep=True)
-        plot_dis_correlation(
+        tools.plot_dis_correlation(
             X=data_pd.to_numpy()[:,1:],
             Y=data_pd['ARDS'].to_numpy(),
             target_name='ARDS',
             fea_names=list(data_pd.columns)[1:],
-            write_dir_path=os.path.join(self.data_path, 'dis_corr')
+            write_dir_path=os.path.join(self.out_path, 'dis_corr')
         )
 
     def plot_na(self, mode='matrix', disp=False):
-        plot_na(data=self.data_pd, save_path=os.path.join(self.data_path, f'missing_{mode}.png'), mode=mode, disp=disp)
+        tools.plot_na(data=self.data_pd, save_path=os.path.join(self.out_path, f'missing_{mode}.png'), mode=mode, disp=disp)
 
-    def profile(self, output_path):
+    def profile(self):
         profile = ppf.profile_report.ProfileReport(
             df = self.data_pd,
             # config_file=self.profile_conf_path
         )
-        profile.to_file(output_path)
+        profile.to_file(self.profile_save_path)
     
     def dump_configs(self):
-        # deep copy
+        # some item needs deep copy, because type_dict of self.configs will change if using shallow copy
+        # It is not needed when items not change in dumping procedure.
         configs = {}
-        if self.configs.get('one_hot_decoding') is not None:
-            configs['one_hot_decoding'] = {}
-            for name in self.configs['one_hot_decoding'].keys():
-                configs['one_hot_decoding'][name] = list(self.configs['one_hot_decoding'][name])
-        if self.configs.get('type_dict') is not None:
-            configs['type_dict'] = {}
-            for name in self.configs['type_dict'].keys():
-                configs['type_dict'][name] = self.configs['type_dict'][name].__name__
+        for key in self.configs.keys():
+            if key == 'one_hot_decoding':
+                configs['one_hot_decoding'] = {}
+                for name in self.configs['one_hot_decoding'].keys():
+                    configs['one_hot_decoding'][name] = list(self.configs['one_hot_decoding'][name])
+            elif key == 'type_dict':
+                configs['type_dict'] = {}
+                for name in self.configs['type_dict'].keys():
+                    configs['type_dict'][name] = self.configs['type_dict'][name].__name__
+            else:
+                configs[key] = self.configs[key]
 
         with open(self.conf_cache_path, 'w', encoding='utf-8') as f:
             json.dump(configs, f, ensure_ascii=False) # allow utf-8 characters not converted into \uXXX
-        print('Data configs dumped at', self.conf_cache_path)
+        logger.debug('Data configs dumped at', self.conf_cache_path)
 
 
     def load_configs(self):
@@ -175,7 +195,7 @@ class SepsisDataset():
             with open(self.conf_cache_path,'r', encoding='utf-8') as f:
                 self.configs = json.load(f)
         except Exception as e:
-            print('open json error')
+            logger.error('open json error')
             self.configs = {}
         try:
             with open(self.conf_manual_path, 'r', encoding='utf-8') as fc:
@@ -189,10 +209,10 @@ class SepsisDataset():
                 for name in self.configs['one_hot_decoding'].keys():
                     self.configs['one_hot_decoding'][name] = list(self.configs['one_hot_decoding'][name])
         except Exception as e:
-            print('Config load error')
+            logger.error('Config load error')
             self.configs = {}
 
 
 if __name__ == '__main__':
-    set_chinese_font()
-    dataset = SepsisDataset('F:\\Project\\DiplomaProj\\data', from_pkl=False)
+    tools.set_chinese_font()
+    dataset = SepsisDataset(from_pkl=False)

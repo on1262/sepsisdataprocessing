@@ -9,7 +9,8 @@ from collections.abc import Iterable
 import os, sys
 import subprocess
 import missingno as msno
-
+import hashlib
+from .colorful_logging import logger
 '''
 清除并且重建一个文件夹和其中所有的内容
 '''
@@ -28,33 +29,22 @@ def set_chinese_font():
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 
 #  清空文件
-def flush_log_file(log_file):
-    with open(log_file, 'w+'):
+def clear_file(name):
+    with open(name, 'w+'):
         pass
 
 def set_sk_random_seed(seed:int=100):
     sk_random.seed(seed)
 
 '''
-计算ROC, 返回fpr值和tpr值
+输入文件名, 返回文件的MD5字符串
 '''
-def cal_roc(Y_test, Y_pred, n_thres=11, log_file='ROC_cal.log', comment=""):
-    with open(log_file, 'a') as f:
-        f.write(f'Start {comment} \n')
-        tpr = []
-        fpr = []
-        thres_list = np.linspace(0,1, num=n_thres)
-        for thres in thres_list:
-            tp = np.sum(Y_pred[Y_test > 0.5] > thres)
-            fp = np.sum(Y_pred[Y_test < 0.5] > thres)
-            fn = np.sum(Y_pred[Y_test > 0.5] < thres)
-            tn = np.sum(Y_pred[Y_test < 0.5] < thres)
-            f.write(f"tp={tp}, fp={fp}, fn={fn}, tn={tn}, acc={(tp+tn)/(tp+fp+tn+fn):.3f}, tpr={(tp/(tp+fn)):.3f}, fpr={(fp/(fp+tn)):.3f}, sens={(tp/(tp+fn)):3f}, spec={(tn/(tn+fp)):.3f}, thres={thres:3f}\n")
-            tpr.append(tp/(tp+fn))
-            fpr.append(fp/(fp+tn))
-    fpr, tpr = np.asarray(fpr), np.asarray(tpr)
-    
-    return fpr, tpr, thres_list
+def cal_file_md5(filename:str) -> str:
+    with open(filename, 'rb') as fp:
+        data = fp.read()
+    file_md5= hashlib.md5(data).hexdigest()
+    return file_md5
+
 
 
 def select_na(data:pd.DataFrame, col_thres=0.5, row_thres=0.7): # 获取超过thres的非na比例的数据
@@ -164,16 +154,16 @@ def apply_category_fea(data:pd.DataFrame, category_dict:dict):
     
 def create_4_cls_label(y_ards:np.ndarray, y_death:np.ndarray):
     Y_4cls = (y_ards * y_death) + 2*(y_ards * np.invert(y_death)) + 3*((np.invert(y_ards) * y_death))
-    print('4 cls label:')
-    print('+ards+death:', (Y_4cls == 1).mean())
-    print('+ards-death:', (Y_4cls == 2).mean())
-    print('-ards+death:', (Y_4cls == 3).mean())
-    print('-ards-death:', (Y_4cls == 0).mean())
+    logger.debug('4 cls label:')
+    logger.debug('+ards+death:', (Y_4cls == 1).mean())
+    logger.debug('+ards-death:', (Y_4cls == 2).mean())
+    logger.debug('-ards+death:', (Y_4cls == 3).mean())
+    logger.debug('-ards-death:', (Y_4cls == 0).mean())
     return Y_4cls
 
 
 def one_hot_decoding(data:pd.DataFrame, cluster_dict:dict):
-    print('one hot decoding')
+    logger.debug('one hot decoding')
     # cluster_dict = {'new_name1':{'old1','old2',...}}
     for new_name in cluster_dict.keys():
         new_col = [0 for _ in range(len(data))]
@@ -193,6 +183,7 @@ def one_hot_decoding(data:pd.DataFrame, cluster_dict:dict):
     return data
 
 def fill_default(data:pd.DataFrame, default_dict:dict):
+    logger.debug('fill_default')
     na_dict = {}
     for key in default_dict.keys():
         assert(key in data.columns)

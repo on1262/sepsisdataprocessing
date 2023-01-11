@@ -121,6 +121,13 @@
         "28天death",
         "ICUdeath"
     ],
+    "cluster_perc": 0.01,
+    "select_na": {
+        "1st_row_thres": 0.7,
+        "1st_col_thres": 0.5,
+        "2nd_row_thres": 0.87,
+        "2nd_col_thres": 0.5
+    },
     "fill_default": {
         "是否存在急性肾衰" : [0],
         "基础疾病1" : ["","无"],

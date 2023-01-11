@@ -13,6 +13,7 @@ import numpy as np
 from itertools import chain, combinations
 from collections import defaultdict
 from optparse import OptionParser
+from tools.colorful_logging import logger
 
 
 
@@ -69,7 +70,7 @@ def runApriori(df:pd.DataFrame, consequents, max_iter=4, minSupport=0.1, minConf
     """
     consequents = [frozenset(c) for c in consequents]
     itemSet, transactionList = getItemSetTransactionList(df)
-    print(f"Apriori: detected item={len(itemSet)}, transcation={len(transactionList)}")
+    logger.info(f"Apriori: detected item={len(itemSet)}, transcation={len(transactionList)}")
     freqSet = defaultdict(int) # 记录所有项对应的出现次数
     largeSet = dict() # largeset[k]存储k组合的项集合, k>=1
     # Global dictionary which stores (key=n-itemSets,value=support)
@@ -83,7 +84,7 @@ def runApriori(df:pd.DataFrame, consequents, max_iter=4, minSupport=0.1, minConf
     currentLSet = oneCSet
     k = 2
     while currentLSet != set([]) and k-1 <= max_iter: # 一直组合到没有满足min_support的结论
-        print(f'Apriori: K={k-1}, set size={len(currentLSet)}')
+        logger.info(f'Apriori: K={k-1}, set size={len(currentLSet)}')
         largeSet[k - 1] = currentLSet
         currentLSet = joinSet(currentLSet, k) # 基于k-1项集, 制作长度为k的全部组合项集
         # 相消情况: [ab, bc]能组合成[abc]

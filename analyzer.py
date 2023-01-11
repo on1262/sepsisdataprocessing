@@ -1,7 +1,6 @@
 import sklearn as sk
 import pandas as pd
 import numpy as np
-import seaborn as sns
 import tools
 from os.path import join as osjoin
 
@@ -9,48 +8,56 @@ from sklearn.model_selection import KFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsRegressor
 from catboost import CatBoostClassifier, Pool
-from catboost import cv as catboost_cv
-from sklearn.metrics import roc_curve
 from sepsis_dataset import SepsisDataset
-from sklearn.model_selection import train_test_split 
+from sklearn.model_selection import train_test_split
 from neural_network import NNTrainer
+import apriori
 
 
-class Analyzer:
-    def __init__(self, dataset:pd.DataFrame, target_col:str, type_dict:dict):
-        self.na_dict = {'_default': -1}
-        self.dataset = tools.convert_type(self.na_dict, dataset, type_dict)
-        self.target = target_col
-        self.plots_path = osjoin('plots')
-        self.feas = list(dataset.columns)
-        self.feas.remove(self.target)
-        self.Y = dataset[target_col].to_numpy(float)
-        # for ROC log
-        self.roc_log_path = 'ROC_cal.log'
-        tools.set_sk_random_seed(100)
-        tools.flush_log_file(self.roc_log_path)
+class StaticAnalyzer:
+    def __init__(self, dataset:pd.DataFrame, target_col:str, type_dict:dict=None):
+        self.conf = tools.GLOBAL_CONF_LOADER['static_analyzer']
+        if type_dict is not None: # classification mode
+            self.dataset = tools.convert_type({'_default': -1}, dataset, type_dict)
+            self.target = target_col
+            self.plots_path = self.conf['paths']['plot_dir']
+            self.feas = list(dataset.columns)
+            self.feas.remove(self.target)
+            self.Y = dataset[target_col].to_numpy(float)
+            # for ROC log
+            self.roc_log_path = self.conf['paths']['ROC_path']
+            tools.set_sk_random_seed(100)
+            tools.clear_file(self.roc_log_path)
 
-        # for catboost only
-        self.register_values = {}
-        self.shap_names = {u"超敏C反应蛋白_D1": (0, 400), u"A-ado2": (0, 700), u"SOFA_氧合指数": (0, 800), u"PaO2": (0, 400)}
+            # for catboost only
+            self.register_values = {}
+            self.shap_names = self.conf['shap_names'] # value是显示范围, 手动设置要注意左边-1项不需要, 右边太大的项要限制
 
-        # configs:
-        self.k_fold = 5
-        self.methods = {
-            # 'logistic_regression': self.logistic_reg,
-            # 'KNN_reg': self.KNN_reg,
-            'catboost_reg': self.catboost_reg,
-            # 'neural_network': self.neural_network
-            # 'logistic_regression_4_cls' : self.logistic_regression_4_cls
-        }
+            # configs:
+            self.k_fold = 5
+            # change available methods in this line
+            self.methods = {
+                # 'logistic_regression': self.logistic_reg,
+                # 'KNN_reg': self.KNN_reg,
+                'catboost_reg': self.catboost_reg,
+                # 'neural_network': self.neural_network
+                # 'logistic_regression_4_cls' : self.logistic_regression_4_cls
+            }
+        else: # apriori mode
+            self.dataset = dataset
+            df = tools.feature_discretization(config_path=self.conf['fea_discrt_conf'],
+                df=self.dataset)
+            df.to_csv(self.conf['feature_discretization_out'])
+            self.dataset = df
 
         # self.X = dataset.loc[self.feas]
 
     def sepsis_baseline(self, numeric_feas):
         numeric_feas, _ = numeric_feas
         kf = KFold(n_splits=self.k_fold, shuffle=True)
-        
-        for idx, sofa_name in enumerate([u'SOFA_氧合指数', u'SOFA分值', u'A-ado2']):
+        metric = tools.DichotomyMetric()
+        for idx, sofa_name in enumerate(self.conf['baseline_names']):
+            metric.clear()
             data_num = self.dataset[sofa_name].to_numpy(np.float32)
             tprs = []
             fprs = []
@@ -64,12 +71,21 @@ class Analyzer:
                     Y_sofa = 100.0 / Y_sofa
                 else:
                     Y_sofa = (Y_sofa - Y_sofa.min()) / (Y_sofa.max() - Y_sofa.min()) # to 0->1
-                thres = self._add_roc(Y_gt, Y_sofa, fprs, tprs, comment=f"{sofa_name} k-idx={k_idx}")
+                metric.add_prediction(pred=Y_sofa, gt=Y_gt)
             title = f'{sofa_name} ROC'
             fprs, tprs = np.asarray(fprs), np.asarray(tprs)
-            tools.plot_roc(fprs, tprs, thres, title=title, disp=False,
-                save_path=osjoin(self.plots_path, title))
-        
+            metric.plot_roc(title=title, disp=False, save_path=osjoin(self.plots_path, title))
+
+    def apriori(self):
+        consequents = [{item} for item in self.conf['apriori_consequents']]
+        result = apriori.runApriori(df=self.dataset, 
+            consequents=consequents, 
+            max_iter=self.conf['apriori_iter'], 
+            minSupport=self.conf['apriori_min_support'], 
+            minConfidence=self.conf['apriori_min_confidence'])
+        result[0].to_csv(self.conf['paths']['apriori_items'])
+        result[1].to_csv(self.conf['paths']['apriori_rules'])
+
     def classification(self, numeric_feas, category_feas, death_label:str):
         numeric_feas, n_idx = numeric_feas
         category_feas, c_idx = category_feas
@@ -82,8 +98,7 @@ class Analyzer:
         
         kf = KFold(n_splits=self.k_fold, shuffle=True)
         for key in self.methods.keys():
-            fprs = []
-            tprs = []
+            metric = tools.DichotomyMetric()
             if key == 'logistic_regression_4_cls':
                 y_ards = self.Y.copy().astype(bool)
                 y_death = self.dataset[death_label].to_numpy(bool)
@@ -97,7 +112,7 @@ class Analyzer:
                     X_train, X_test = data_others[train_index,:], data_others[test_index,:]
                     Y_train, Y_test = Y_4cls[train_index], Y_4cls[test_index]
                     Y_pred = self.methods[key](X_train, Y_train, X_test)
-                    thres = self._add_roc(Y_test, Y_pred, fprs, tprs)
+                    metric.add_prediction(pred=Y_pred, gt=Y_test)
             elif key == 'catboost_reg':
                 # kf.get_n_splits(data_all)
                 params = None
@@ -108,20 +123,21 @@ class Analyzer:
                     Y_data = self.Y[train_index]
                     Y_test = self.Y[test_index]
                     Y_pred, params = self.catboost_reg(idx, X_data, X_test, Y_data, category_index, params, fea_name)
-                    thres = self._add_roc(Y_test, Y_pred, fprs, tprs, comment=f"catboost, k_idx={idx}")
+                    metric.add_prediction(pred=Y_pred, gt=Y_test)
                 # plot fea importance
                 items = list(self.register_values['shap'].items())
                 items = np.asarray(sorted(items, key= lambda x:x[1]))
                 shap_vals = np.asarray(items[:, 1], dtype=np.float32)/self.k_fold
-                with open('plots/SHAP_values.txt', 'w') as fp:
+                with open(self.conf['paths']['shap_values'], 'w') as fp:
                     for i in reversed(range(shap_vals.shape[0])):
                         fp.write(f"{shap_vals[i]},{str(items[i,0])}\n")
                 tools.plot_fea_importance(
-                    shap_vals, items[:, 0], save_path="plots/shap_importance.png")
+                    shap_vals, items[:, 0], save_path=self.conf['paths']['fea_importance'])
                 # plot single feature importance
                 if 'shap_arr' in self.register_values.keys():
                     for fea_name, vals in self.register_values['shap_arr'].items():
-                        tools.plot_shap_scatter(fea_name, vals[:, 0], vals[:, 1], self.shap_names[fea_name], 'plots')
+                        tools.plot_shap_scatter(fea_name, vals[:, 0], vals[:, 1], self.shap_names[fea_name], 
+                        self.conf['paths']['plot_dir'])
             elif key == 'neural_network':
                 data_nn = tools.target_statistic(data_all, self.Y,
                     ctg_feas=category_index, mode='greedy')
@@ -134,10 +150,9 @@ class Analyzer:
                     Y_train, Y_test = self.Y[train_index], self.Y[test_index]
                     Y_pred, valid_loss = self.methods[key](X_train, Y_train, X_test)
                     valid_losses.append(valid_loss)
-                    thres = self._add_roc(Y_test, Y_pred, fprs, tprs)
+                    metric.add_prediction(pred=Y_pred, gt=Y_test)
                 valid_losses = np.asarray(valid_losses).T
                 tools.plot_loss(valid_losses, title='Neural Network Validation Loss')
-
             else:
                 data_others = tools.target_statistic(data_all, self.Y,
                     ctg_feas=category_index, mode='greedy')
@@ -148,17 +163,9 @@ class Analyzer:
                     X_train, X_test = data_others[train_index,:], data_others[test_index,:]
                     Y_train, Y_test = self.Y[train_index], self.Y[test_index]
                     Y_pred = self.methods[key](X_train, Y_train, X_test)
-                    thres = self._add_roc(Y_test, Y_pred, fprs, tprs)
-            fprs, tprs = np.asarray(fprs), np.asarray(tprs)
+                    metric.add_prediction(pred=Y_pred, gt=Y_test)
             title = f'{key} ROC for K-fold {self.k_fold}'
-            tools.plot_roc(fprs, tprs, thres, title=title, disp=False, 
-                save_path=osjoin(self.plots_path, title))
-
-    def _add_roc(self,Y_test, Y_pred, fprs, tprs, comment=""):
-        fpr, tpr, thres = tools.cal_roc(Y_test, Y_pred, n_thres=21, log_file=self.roc_log_path, comment=comment)
-        fprs.append(fpr)
-        tprs.append(tpr)
-        return thres
+            metric.plot_roc(title=title, disp=False, save_path=osjoin(self.plots_path, title))
 
     def logistic_reg(self, X_train:np.ndarray, Y_train:np.ndarray, X_test:np.ndarray):
         model = LogisticRegression(solver='lbfgs', max_iter=5000)
@@ -198,7 +205,7 @@ class Analyzer:
         
         # plot_shap_idx = []
         # for name in :
-        #     
+        # 
         # tools.plot_shap_scatter(model, pool_valid, , write_dir_path='plots')
         if idx == 0:
             self.register_values['shap'] = {}
@@ -241,18 +248,11 @@ class Analyzer:
 if __name__ == '__main__':
     tools.set_chinese_font()
     mode = 'classification'
+    dataset = SepsisDataset(from_pkl=True)
     if mode == 'classification':
-        dataset = SepsisDataset('F:\\Project\\DiplomaProj\\data', from_pkl=True)
-        analyzer = Analyzer(dataset=dataset.data_pd, target_col=dataset.target_fea, type_dict=dataset.get_type_dict())
+        analyzer = StaticAnalyzer(dataset=dataset.data_pd, target_col=dataset.target_fea, type_dict=dataset.get_type_dict())
         analyzer.sepsis_baseline(dataset.get_numeric_feas())
         analyzer.classification(dataset.get_numeric_feas(), dataset.get_category_feas(), dataset.get_death_label())
     else:
-        dataset = SepsisDataset('F:\\Project\\DiplomaProj\\data', from_pkl=False)
-        import apriori
-        df = tools.feature_discretization(config_path=u'F:\\Project\\DiplomaProj\\data\\第一次数据.json', 
-            df=dataset.apriori_pd)
-        df.to_csv('F:\\Project\\DiplomaProj\\data\\data_for_apriori.csv')
-        consequents = [{u'ARDS=1'}, {u'ARDS=0'}, {u'年龄=>65'}, {u'年龄=45-65'}, {u'年龄=<45'}]
-        result = apriori.runApriori(df=df, consequents=consequents, max_iter=3, minSupport=0.05, minConfidence=0)
-        result[0].to_csv('F:\\Project\\DiplomaProj\\data\\apriori_items.csv')
-        result[1].to_csv('F:\\Project\\DiplomaProj\\data\\apriori_rules.csv')
+        analyzer = StaticAnalyzer(dataset=dataset.data_pd, target_col=dataset.target_fea, type_dict=None)
+        analyzer.apriori()

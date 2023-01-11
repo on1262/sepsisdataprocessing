@@ -1,0 +1,34 @@
+{
+    "work_dir": "F:\\Project\\DiplomaProj",
+    "dataset_static": {
+        "paths":{
+            "csv_origin_path": "data_static/sepsis_fixed.csv",
+            "conf_cache_path": "data_static/configs_cache.json",
+            "conf_manual_path": "data_static/configs_manual.json",
+            "profile_conf_path": "data_static/profile_conf.yaml",
+            "profile_save_path": "static_model_out/profile.html",
+            "output_cleaned_path": "data_static/cleaned.csv",
+            "apriori_df_path": "data_static/data_apriori.pkl",
+            "dataframe_save_path": "data_static/data_cache.pkl",
+            "out_dir": "static_model_out"
+        }
+    },
+    "static_analyzer": {
+        "shap_names": {"超敏C反应蛋白_D1": [0, 400], "A-ado2": [0, 700], "SOFA_氧合指数": [0, 800], "PaO2": [0, 400]},
+        "baseline_names": ["SOFA_氧合指数", "SOFA分值", "A-ado2"],
+        "apriori_consequents": ["ARDS=1", "ARDS=0", "年龄=>65", "年龄=45-65", "年龄=<45"],
+        "apriori_iter": 3,
+        "apriori_min_support": 0.05,
+        "apriori_min_confidence": 0,
+        "paths":{
+            "plot_dir": "static_model_out",
+            "feature_discretization_out": "static_model_out/data_for_apriori.csv",
+            "fea_discrt_conf": "data_static/第一次数据.json",
+            "shap_values": "static_model_out/SHAP_values.txt",
+            "fea_importance": "static_model_out/shap_importance.png",
+            "ROC_path": "static_model_out/ROC_cal.log", 
+            "apriori_items": "static_model_out/apriori_items.csv",
+            "apriori_rules": "static_model_out/apriori_rules.csv"
+        }
+    }
+}
