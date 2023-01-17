@@ -1,4 +1,6 @@
 import matplotlib.pyplot as plt
+from matplotlib.path import Path
+from matplotlib.patches import PathPatch
 import numpy as np
 import seaborn as sns
 import scipy
@@ -19,18 +21,27 @@ def plot_loss(data, title='Title'):
     plt.show()
     plt.close()
 
-def plot_single_dist(data:np.ndarray, data_name:str):
+def replace_invalid_filename(filename:str):
+    return filename.replace('/', '_slash_')
+
+# 从源数据直接打印直方图
+def plot_single_dist(data:np.ndarray, data_name:str, save_path=None):
     (mu, sigma) = scipy.stats.norm.fit(data)
 
-    ax = sns.histplot(data=data, stat='proportion',kde=True)
-    x0, x1 = ax.get_xlim()  # extract the endpoints for the x-axis
-    x_pdf = np.linspace(x0, x1, 100)
-    y_pdf = scipy.stats.norm.pdf(x_pdf, loc = mu, scale=sigma) # add norm information
-    ax.plot(x_pdf, y_pdf, 'gray', lw=2, label='pdf')                                                     
-    plt.title('distribution for ' + data_name, fontsize = 13)
+    ax = sns.histplot(data=data, stat='proportion', discrete=True)
+    # x0, x1 = ax.get_xlim()  # extract the endpoints for the x-axis
+    # x_pdf = np.linspace(x0, x1, 100)
+    # y_pdf = scipy.stats.norm.pdf(x_pdf, loc = mu, scale=sigma) # add norm information
+    # ax.plot(x_pdf, y_pdf, 'gray', lw=2, label='pdf')                                                     
+    plt.title('Distribution for ' + data_name, fontsize = 13)
     plt.legend(['data', 'Normal dist. ($\mu=$ {:.2f} and $\sigma=$ {:.2f} )'.format(mu, sigma)],
                 loc='best')
-    plt.show()
+    if save_path is None:
+        plt.show()
+    else:
+        plt.savefig(save_path)
+    plt.close()
+
 
 def plot_hotspot(data:np.ndarray, fea_names:list):
     mat = np.corrcoef(x=data, rowvar=False)
@@ -44,33 +55,51 @@ def plot_hotspot(data:np.ndarray, fea_names:list):
     plt.title('Pearson Correlation Matrix', fontsize = 13)
     plt.show()
 
+
 '''
 生成X的每一列关于Y的线性回归, 用来探究单变量对目标的影响
 write_dir_path: 将每个变量保存为一张图, 放在给定文件夹中
 '''
-def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_name: str, write_dir_path=None):
+def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_name: str, 
+    restrict_area=False, write_dir_path=None):
     if write_dir_path is not None:
         os.makedirs(write_dir_path, exist_ok=True)
-    ymin = Y.min()
-    ymax = Y.max()
+    Y = Y.reshape(Y.shape[0], 1)
+    ymin, ymax = np.inf, -np.inf
+    X,Y =  X.astype(np.float32), Y.astype(np.float32)
+    x_valid = ((1 - np.isnan(X)) * (1 - np.isnan(Y))).astype(bool) # 两者都是true才行
     corr_list = []
     for idx, _ in enumerate(fea_names):
-        corr = np.corrcoef(x=X[:,idx], y=Y, rowvar=False)[0,1]
+        x,y = X[x_valid[:, idx],idx], Y[x_valid[:, idx]]
+        ymin, ymax = min(ymin, y.min()), max(ymax, y.max())
+        corr = np.corrcoef(x=x, y=y, rowvar=False)[1][0] # 相关矩阵, 2*2
         corr_list.append(corr)
     idx_list = list(range(len(fea_names)))
-    idx_list = sorted(idx_list, key= lambda idx:corr_list[idx], reverse=True)
-    for idx in idx_list:
+    idx_list = sorted(idx_list, key = lambda idx:abs(corr_list[idx]), reverse=True) # 按相关系数绝对值排序
+    for rank, idx in enumerate(idx_list):
         name = fea_names[idx]
+        logger.debug(f'Plot correlation: {name}')
         plt.figure(figsize = (12,6))
-        sns.regplot(x=X[:, idx], y=Y, scatter_kws={'alpha':0.2})
+        sns.regplot(x=X[x_valid[:, idx], idx], y=Y[x_valid[:, idx]], scatter_kws={'alpha':0.2})
         plt.title(f'{name} vs {target_name}', fontsize = 12)
-        plt.ylim(bottom=ymin, top=ymax)
+        if restrict_area and Y.shape[0] > 20:
+            # 去除20个极值, 使得显示效果更好
+            Y_sorted = np.sort(Y[x_valid[:, idx], 0], axis=0)
+            X_sorted = np.sort(X[x_valid[:, idx], idx], axis=0)
+            Y_span = Y_sorted[-10] - Y_sorted[10]
+            X_span = X_sorted[-10] - X_sorted[10]
+            plt.ylim(bottom=Y_sorted[10]-Y_span*0.05, top=Y_sorted[-10]+Y_span*0.05)
+            plt.xlim(left=X_sorted[10]-X_span*0.05, right=X_sorted[-10]+X_span*0.05)
+        else:
+            plt.ylim(bottom=ymin, top=ymax)
+        plt.xlabel(name)
+        plt.ylabel(target_name)
         plt.legend(['$Pearson=$ {:.2f}'.format(corr_list[idx])], loc = 'best')
         if write_dir_path is None:
             plt.show()
         else:
             plt.savefig(
-                os.path.join(write_dir_path, rf'{fea_names[idx]}_vs_{target_name}.png')
+                os.path.join(write_dir_path, replace_invalid_filename(rf'{rank}@{fea_names[idx]}_vs_{target_name}.png'))
             )
         plt.close()
 
@@ -198,3 +227,29 @@ def plot_fea_importance(shap_vals, sorted_names, save_path=None):
     else:
         plt.show()
     plt.close()
+
+# 绘制标准差条块
+def draw_band(ax, x, y, err, **kwargs):
+    if not isinstance(x, np.ndarray):
+        x = np.asarray(x)
+    if not isinstance(y, np.ndarray):
+        y = np.asarray(y)
+    # Calculate normals via centered finite differences (except the first point
+    # which uses a forward difference and the last point which uses a backward
+    # difference).
+    dx = np.concatenate([[x[1] - x[0]], x[2:] - x[:-2], [x[-1] - x[-2]]])
+    dy = np.concatenate([[y[1] - y[0]], y[2:] - y[:-2], [y[-1] - y[-2]]])
+    l = np.hypot(dx, dy)
+    nx = dy / l
+    ny = -dx / l
+    # end points of errors
+    xp = x + nx * err
+    yp = y + ny * err
+    xn = x - nx * err
+    yn = y - ny * err
+    vertices = np.block([[xp, xn[::-1]],
+                         [yp, yn[::-1]]]).T
+    codes = np.full(len(vertices), Path.LINETO)
+    codes[0] = Path.MOVETO
+    path = Path(vertices, codes)
+    ax.add_patch(PathPatch(path, **kwargs))

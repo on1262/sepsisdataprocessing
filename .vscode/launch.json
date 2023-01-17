@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "Current File",
             "type": "python",
             "request": "launch",
             "program": "${file}",
@@ -13,10 +13,26 @@
             "justMyCode": true
         },
         {
-            "name": "Analyzer",
+            "name": "StaticAnalyzer",
             "type": "python",
             "request": "launch",
-            "program": "${cwd}\\analyzer.py",
+            "program": "${cwd}\\static_analyzer.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "DynamicAnalyzer",
+            "type": "python",
+            "request": "launch",
+            "program": "${cwd}\\dynamic_analyzer.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Scripts",
+            "type": "python",
+            "request": "launch",
+            "program": "${cwd}\\run_scripts.py",
             "console": "integratedTerminal",
             "justMyCode": true
         }

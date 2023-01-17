@@ -8,7 +8,7 @@ from sklearn.model_selection import KFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsRegressor
 from catboost import CatBoostClassifier, Pool
-from sepsis_dataset import SepsisDataset
+from static_sepsis_dataset import StaticSepsisDataset
 from sklearn.model_selection import train_test_split
 from neural_network import NNTrainer
 import apriori
@@ -35,7 +35,7 @@ class StaticAnalyzer:
 
             # configs:
             self.k_fold = 5
-            # change available methods in this line
+            # change available methods in t his line
             self.methods = {
                 # 'logistic_regression': self.logistic_reg,
                 # 'KNN_reg': self.KNN_reg,
@@ -47,7 +47,7 @@ class StaticAnalyzer:
             self.dataset = dataset
             df = tools.feature_discretization(config_path=self.conf['fea_discrt_conf'],
                 df=self.dataset)
-            df.to_csv(self.conf['feature_discretization_out'])
+            df.to_csv(self.conf['feature_discretization_out'], index=False)
             self.dataset = df
 
         # self.X = dataset.loc[self.feas]
@@ -83,8 +83,8 @@ class StaticAnalyzer:
             max_iter=self.conf['apriori_iter'], 
             minSupport=self.conf['apriori_min_support'], 
             minConfidence=self.conf['apriori_min_confidence'])
-        result[0].to_csv(self.conf['paths']['apriori_items'])
-        result[1].to_csv(self.conf['paths']['apriori_rules'])
+        result[0].to_csv(self.conf['paths']['apriori_items'], index=False)
+        result[1].to_csv(self.conf['paths']['apriori_rules'], index=False)
 
     def classification(self, numeric_feas, category_feas, death_label:str):
         numeric_feas, n_idx = numeric_feas
@@ -248,7 +248,7 @@ class StaticAnalyzer:
 if __name__ == '__main__':
     tools.set_chinese_font()
     mode = 'classification'
-    dataset = SepsisDataset(from_pkl=True)
+    dataset = StaticSepsisDataset(from_pkl=True)
     if mode == 'classification':
         analyzer = StaticAnalyzer(dataset=dataset.data_pd, target_col=dataset.target_fea, type_dict=dataset.get_type_dict())
         analyzer.sepsis_baseline(dataset.get_numeric_feas())

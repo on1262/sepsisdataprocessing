@@ -30,5 +30,25 @@
             "apriori_items": "static_model_out/apriori_items.csv",
             "apriori_rules": "static_model_out/apriori_rules.csv"
         }
+    },
+    "dataset_dynamic": {
+        "paths":{
+            "csv_origin_path": "data_dynamic/data_combined.csv",
+            "csv_raw_new_path": "data_dynamic/data_raw_new.csv",
+            "conf_cache_path": "data_dynamic/configs_cache.json",
+            "conf_manual_path": "data_dynamic/configs_manual.json",
+            "profile_conf_path": "data_dynamic/profile_conf.yaml",
+            "profile_save_path": "dynamic_model_out/profile.html",
+            "output_cleaned_path": "data_dynamic/dyn_cleaned.csv",
+            "dataframe_save_path": "data_dynamic/dyn_data_cache.pkl",
+            "fea_manager_save_path": "data_dynamic/fea_manager.pkl",
+            "out_dir": "dynamic_model_out"
+        }
+    },
+    "dynamic_analyzer": {
+        "paths": {
+            "out_dir": "dynamic_model_out"
+        }
     }
+    
 }

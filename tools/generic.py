@@ -5,26 +5,94 @@ import scipy
 from sklearn import random as sk_random
 from sklearn.metrics import auc as sk_auc
 import pandas as pd
+import re
 from collections.abc import Iterable
 import os, sys
 import subprocess
 import missingno as msno
 import hashlib
 from .colorful_logging import logger
+
+'''
+    管理静态特征+动态特征
+'''
+class FeatureManager():
+    def __init__(self):
+        self.dyn_fea_names = {} # key=name, value=time list
+        self.sta_fea_names = []
+        # attributes below are dirty updated. They should be accessed by function
+        
+    # origin_name: 和dataframe的columns保持一致, fea_name和configs保持一致
+    def add_dyn(self, origin_name:str, fea_name:str, time=float):
+        if self.dyn_fea_names.get(fea_name) is None:
+            self.dyn_fea_names[fea_name] = [(time, origin_name)]
+        else:
+            self.dyn_fea_names[fea_name].append((time, origin_name))
+            # 保持序列整齐
+            self.dyn_fea_names[fea_name] = sorted(self.dyn_fea_names[fea_name], key=lambda x: x[0])
+    
+    def add_sta(self, fea_name):
+        self.sta_fea_names.append(fea_name)
+
+    def remove_fea(self, fea_name:str):
+        if fea_name in self.sta_fea_names:
+            self.sta_fea_names.remove(fea_name)
+        elif fea_name in self.dyn_fea_names.keys():
+            self.dyn_fea_names.pop(fea_name)
+        else:
+            logger.warning(f"FeatureManager: feature not founded: {fea_name}")
+    
+    # 获取所有特征的名称, expand_dyn表示将动态特征的时间展开
+    def get_names(self, sta=False, dyn=False, expand_dyn=False):
+        result = []
+        if sta:
+            result += self.sta_fea_names
+        if dyn:
+            if expand_dyn:
+                for vlist in self.dyn_fea_names.values():
+                    result += [val[1] for val in vlist]
+            else:
+                result += list(self.dyn_fea_names.keys())
+        return result
+
+    # 获取一个动态特征对应的所有名字和对应的时间
+    def get_expanded_fea(self, dyn_name:str) -> list:
+        assert(dyn_name in self.dyn_fea_names.keys()), f"dyn_name {dyn_name} should in dyn_fea_names"
+        return self.dyn_fea_names[dyn_name].copy()
+
+    # 获取一个动态特征最靠近某个时间点的名字
+    def get_nearest_fea(self, dyn_name:str, time:float) -> str:
+        assert(dyn_name in self.dyn_fea_names.keys()), f"dyn_name {dyn_name} should in dyn_fea_names"
+        delta = abs(self.dyn_fea_names[dyn_name][0][0]-time)+1
+        best_fea = None
+        for item in self.dyn_fea_names[dyn_name]:
+            if abs(item[0]-time) < delta:
+                best_fea = item[1]
+        return best_fea
+
+
+
 '''
 清除并且重建一个文件夹和其中所有的内容
 '''
-def reinit_dir(write_dir_path=None):
+def reinit_dir(write_dir_path=None, build=True):
     if write_dir_path is not None:
         if os.path.exists(write_dir_path):
             for name in os.listdir(write_dir_path):
-                os.remove(os.path.join(write_dir_path, name))
-        os.makedirs(write_dir_path, exist_ok=True)
+                p = os.path.join(write_dir_path, name)
+                if os.path.isdir(p):
+                    reinit_dir(p, build=False)
+                    os.removedirs(p)
+                elif os.path.isfile(p):
+                    os.remove(p)
+        if build:
+            os.makedirs(write_dir_path, exist_ok=True)
 
 '''
 设置matplotlib显示中文, 对于pandas_profile不可用
 '''
 def set_chinese_font():
+    logger.info("Set Chinese Font in Matplotlib")
     from matplotlib import pyplot as plt
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 
@@ -46,28 +114,77 @@ def cal_file_md5(filename:str) -> str:
     return file_md5
 
 
-
-def select_na(data:pd.DataFrame, col_thres=0.5, row_thres=0.7): # 获取超过thres的非na比例的数据
-    # del column na
-    df = msno.nullity_filter(data, filter='top', p=col_thres)
-    data = data[df.columns]
-    # del row na
-    na_mat = data.isna().to_numpy(dtype=np.int32)
-    valid_mat = 1 - np.mean(na_mat, axis=1)
-    data = data.iloc[valid_mat > row_thres]
+# 获取超过thres的非na比例的数据
+def select_na(data:pd.DataFrame, col_thres=0.5, row_thres=0.7, fea_manager:FeatureManager=None):
+    if fea_manager is None:
+        # del column na
+        valid_cols = msno.nullity_filter(data, filter='top', p=col_thres).columns
+        data = data[valid_cols]
+        # del row na
+        na_mat = data.isna().to_numpy(dtype=np.int32)
+        valid_mat = 1 - np.mean(na_mat, axis=1)
+        data = data.iloc[valid_mat > row_thres]
+    else:
+        dyn_check_names = [] # 动态特征只check第一天
+        static_check_names = fea_manager.get_names(sta=True)
+        dyn_feas = fea_manager.get_names(dyn=True)
+        for fea_name in dyn_feas:
+            name = fea_manager.get_expanded_fea(fea_name)[0][1]
+            dyn_check_names.append(name)
+        data_check = data.loc[:, dyn_check_names + static_check_names]
+        valid_cols = set(msno.nullity_filter(data_check, filter='top', p=col_thres).columns)
+        col_expanded = set() # 需要把之后的特征加在第一天特征的后面(如果第一天有效)
+        for idx, name in enumerate(dyn_check_names):
+            if name in valid_cols:
+                col_expanded.update([vol[1] for vol in fea_manager.get_expanded_fea(dyn_feas[idx])])
+            else:
+                fea_manager.remove_fea(dyn_feas[idx]) # remove dynamic features
+        for col in valid_cols:
+            if col not in col_expanded:
+                col_expanded.add(col)
+        dropped_cols = 0
+        static_check_names = set(static_check_names)
+        for col in data.columns:
+            if col not in col_expanded:
+                if col in static_check_names:
+                    fea_manager.remove_fea(col) # remove static featur
+                logger.warning(f"select na: feature {col} dropped")
+                dropped_cols += 1
+        logger.info(f"select na: drop {dropped_cols} features")
+        data = data[list(col_expanded)]
+        na_mat = data_check.isna().to_numpy(dtype=np.int32)
+        valid_mat = 1 - np.mean(na_mat, axis=1)
+        logger.info(f"select na: drop {len(data) - (valid_mat > row_thres).sum()}/{len(data)} na rows")
+        data = data.iloc[valid_mat > row_thres]
     return data
 
-def remove_invalid_rows(data:pd.DataFrame, type_dict:dict) -> pd.DataFrame:
+'''
+移除不符合类型要求的行
+条件1: 存在某个特征不符合type_dict的类型
+条件2: 存在某个特征不符合interval_dict的正常范围
+条件3: target_fea的最大连续长度小于2
+'''
+def remove_invalid_rows(data:pd.DataFrame, type_dict:dict, interval_dict:dict, expanded_target:list) -> pd.DataFrame:
+    data.reset_index(drop=True, inplace=True)
     na_table = data.isna()
     select_table = pd.Series([True for _ in range(len(data.index))], index=data.index, name='bools')
     for col in data.columns:
+        flag_numeric = True if (type_dict[col] != str and col in interval_dict.keys()) else False
+        if flag_numeric:
+            interval_min = interval_dict[col][0]
+            interval_max = interval_dict[col][1]
         for idx in data.index:
             if not na_table.at[idx, col]:
                 try:
                     tmp = type_dict[col](data.at[idx, col])
+                    if flag_numeric: # 检查是否超出正常范围
+                        assert(tmp >= interval_min and tmp <= interval_max)
                 except Exception as e:
                     select_table[idx] = False
-    data = data[select_table.values]
+    ori_len = len(data)
+    duration = cal_available_time(data, expanded_target=expanded_target)[:,1]
+    data = data.iloc[select_table.values * (duration > 24)]
+    logger.info(f"remove_invalid_rows: {(ori_len - len(data))}/{ori_len} rows are removed.")
     return data
 
 # all type will be converted to str/float when data is sent to trainer
@@ -83,42 +200,61 @@ def convert_type(na_values:dict, data:pd.DataFrame, type_dict:dict):
     data = data.astype(dtype=apply_dict, copy=True)
     return data
 
-# TODO: convention should rely on multiple samples. Feature type is the marjority type of a subset samples.
 # Detailed feature type is necessary to detect illegal data, which could be a float in a bool type feature.
-def check_fea_types(data:pd.DataFrame) -> dict:
+# type_dict[col] = type
+def check_fea_types(data:pd.DataFrame, max_err_rows=10) -> dict:
+    logger.debug('Checking feature types')
     eps = 1e-5
     type_dict = {}
     nas = data.isna()
-    priority = {float:0, int:1, bool:2, str:3}
+    priority = [bool, int, float, str] # left-right, high-low
 
     for col in data.columns: # prevent bad data of str types. Manual check is needed if other type occurs
         type_dict[col] = None
+        n_sample = min(200, len(data))
+        table = {float:0, int:0, bool:0, str:0}
         # random sample 100 non-na values:
-        na_fea = np.asarray(nas[col])
-        for idx, val in enumerate(data[col]):
-            
-            if na_fea[idx] == False:
-                s_val = str(val)
-                num_flag = True
-                try:
-                    float(s_val)
-                except ValueError:
-                    num_flag = False
-                if num_flag: # str will be covered by numeric
-                    f_val = float(s_val)
-                    if abs(f_val - round(f_val)) > eps: # bool, int will be covered by float
-                        type_dict[col] = (float, priority[float])
-                    elif int(f_val) not in [0,1]: # bool will be covered by int
-                        if type_dict[col] is None or type_dict[col][1] > priority[int]:
-                            type_dict[col] = (int, priority[int])
-                    elif type_dict[col] is None or type_dict[col][1] > priority[bool]:
-                        type_dict[col] = (bool, priority[bool])
+        valid_rows = np.asarray(1 - nas[col], dtype=bool)
+        col_valid = data.iloc[valid_rows][col].values
+        for val in sk_random.sample(col_valid, k=n_sample):
+            s_val = str(val)
+            num_flag = True
+            try:
+                float(s_val)
+            except ValueError:
+                num_flag = False
+            if num_flag: # str will be covered by numeric
+                f_val = float(s_val)
+                if abs(f_val - round(f_val)) > eps: # bool, int will be covered by float
+                    table[float] += 1
+                    # type_dict[col] = (float, priority[float])
+                elif int(f_val) not in [0,1]: # bool will be covered by int
+                    table[int] += 1
                 else:
-                    if type_dict[col] is None:
-                        type_dict[col] = (str, priority[str])
-    for key in type_dict.keys():
-        type_dict[key] = type_dict[key][0]
+                    table[bool] += 1
+            else:
+                table[str] += 1
+        
+        for key in reversed(priority):
+            if table[key] > max_err_rows:
+                type_dict[col] = key
+                break
+        assert(type_dict[col] is not None)
     return type_dict
+
+# 只能在NA填充之后才使用
+def apply_fea_types(data:pd.DataFrame, type_dict:dict) -> pd.DataFrame:
+    type_dict = type_dict.copy()
+    for key in type_dict.keys():
+        if type_dict[key] == str:
+            type_dict[key] = 'str'
+        elif type_dict[key] == float:
+            type_dict[key] = 'float32'
+        if type_dict[key] == int:
+            type_dict[key] = 'int32'
+        if type_dict[key] == bool:
+            type_dict[key] = 'bool'
+    return data.astype(type_dict)
 
 # 将str类型的特征解析成有限个类别
 def detect_category_fea(data:pd.DataFrame, type_dict:dict, cluster_perc=0.05):
@@ -162,7 +298,7 @@ def create_4_cls_label(y_ards:np.ndarray, y_death:np.ndarray):
     return Y_4cls
 
 
-def one_hot_decoding(data:pd.DataFrame, cluster_dict:dict):
+def one_hot_decoding(data:pd.DataFrame, cluster_dict:dict, fea_manager:FeatureManager=None):
     logger.debug('one hot decoding')
     # cluster_dict = {'new_name1':{'old1','old2',...}}
     for new_name in cluster_dict.keys():
@@ -180,13 +316,18 @@ def one_hot_decoding(data:pd.DataFrame, cluster_dict:dict):
                 new_col[idx] = '+'.join(np.asarray(old_names)[row])
         data[new_name] = new_col
         data.drop(old_names, axis=1, inplace=True)
+        if fea_manager is not None:
+            for name in old_names:
+                fea_manager.remove_fea(name)
     return data
 
 def fill_default(data:pd.DataFrame, default_dict:dict):
     logger.debug('fill_default')
     na_dict = {}
     for key in default_dict.keys():
-        assert(key in data.columns)
+        if key not in data.columns:
+            logger.warning(f"fill_default: feature not founded: {key}")
+            continue
         if len(default_dict[key]) == 1:
             na_dict[key] = default_dict[key][0]
         else:
@@ -236,4 +377,68 @@ def fill_avg(X:np.ndarray, num_feas:list, na_sign=-1, eps=1e-3):
         X_avg[choosed, c_idx] = avg_dict[c_idx]
     return X_avg, avg_dict
 
+# 验证name是否可以表现为prefix+name(in name_set)的形式
+# time_prefix: ['day_','[day]','_T_', '[period]']
+# name_set: {'feature1', 'feature2'} 不需要带前缀
+# 返回值: (name, hours) 其中name在name_set中, hours是前缀解析得到的
+def match_dyn_feature(name:str, time_prefix:list, name_set:set, signs={"[day]", "[period]"}):
+    m_str = ""
+    hours = 0
+    for p_str in time_prefix:
+        assert(isinstance(p_str, str))
+        if p_str in signs:
+            m_str += "(\d)"
+        else:
+            m_str += p_str
+    result = re.match(pattern=m_str, string=name)
+    if result is None:
+        return None
 
+    residual = name.replace(result.group(0), "")
+    if residual not in name_set:
+        return None
+
+    idx = 1 # group(0) is the entire string
+    for p_str in time_prefix:
+        if p_str == "[day]":
+            hours += 24 * (int(result.group(idx))-1)
+            idx += 1
+        elif p_str == "[period]":
+            hours += 6 * (int(result.group(idx))-1)
+            idx += 1
+    return (residual, hours)
+    
+'''
+计算可用的时间分布, 第一段连续的非NA值
+input: 
+    expanded_target: list((time, old_name)) 升序排列
+return:
+    array[:,0]: 起始时间, array[:,1]: 持续时间
+'''
+def cal_available_time(data:pd.DataFrame, expanded_target:list):
+    assert(isinstance(expanded_target[0], tuple))
+    # expanded_target = self.fea_manager.get_expanded_fea(dyn_fea)
+    offset = expanded_target[1][0]
+    names = [val[1] for val in expanded_target]
+    valid_mat = (1 - data[names].isna()).astype(bool)
+    result = np.empty((len(data),2)) # start_time, duration
+    for r_idx in range(len(data)):
+        end_time = -1
+        start_time = 0
+        for time, name in expanded_target:
+            # TODO: this '==' can not written as 'is'for unknown reason
+            if valid_mat.at[r_idx, name] == True:
+                end_time = time + offset
+            else:
+                if end_time > 0:
+                    break
+                start_time = time + offset
+        duration = end_time - start_time if end_time - start_time > 0 else 0
+        start_time = start_time if duration > 0 else 0
+        result[r_idx, 0] = start_time
+        result[r_idx, 1] = duration
+    return result
+
+
+set_chinese_font()
+    

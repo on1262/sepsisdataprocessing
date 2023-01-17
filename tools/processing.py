@@ -1,6 +1,4 @@
 import matplotlib.pyplot as plt
-from matplotlib.path import Path
-from matplotlib.patches import PathPatch
 import numpy as np
 import scipy
 from scipy.interpolate import interp1d
@@ -8,6 +6,7 @@ import pandas as pd
 import json
 from sklearn.metrics import auc as sk_auc
 from .colorful_logging import logger
+from .plot import draw_band
 
 '''
 合并两个文件中cmp_cols都相同的样本, 同时列标签加上new和old
@@ -85,10 +84,10 @@ def feature_discretization(config_path:str, df:pd.DataFrame):
     return df
 
 """
-第一次数据存在一些问题, 这段代码将第二次数据的PaO2/FiO2拷贝到第一次数据的氧合指数上, 并且从出院诊断中重建ARDS标签
+第一次数据存在一些问题, 这段代码将第二次数据的PaO2/FiO2拷贝到第一次数据的氧合指数上
 拼接依赖于唯一码, 这段代码应当只用一次
 """
-def fix_feature_error_in_old_sys(old_csv: str, combined:str, output:str):
+def fix_feature_error_in_old_sys(old_csv: str, new_csv:str, output:str, rebuild_ards=False):
     def detect_ards_label(in_str:str)->bool:
         for fea in [u'ARDS', u'急性呼吸窘迫综合征']:
             if fea in in_str:
@@ -96,43 +95,64 @@ def fix_feature_error_in_old_sys(old_csv: str, combined:str, output:str):
         return False
 
     old_data = pd.read_csv(old_csv, encoding='utf-8')
-    combined_data = pd.read_csv(combined, encoding='utf-8')
+    new_data = pd.read_csv(new_csv, encoding='utf-8')
     try:
-        for fea in [u'ARDS', u'唯一码', u'姓名', u'SOFA_氧合指数', u'SOFA_氧合指数分值', u'出院诊断/死亡诊断']:
+        now_fea = None
+        now_file = 'old'
+        for fea in [
+            u'ARDS', u'唯一号', u'姓名', u'SOFA_氧合指数', \
+            u'CIS诊断', u'CIS诊断1', u'出院诊断/死亡诊断','PaO2' \
+            ]:
+            now_fea = fea
             assert(fea in old_data.columns)
-        for fea in [u'oldsys_唯一号', u'oldsys_姓名', u'newsys_D1_PaO2/FiO2']:
-            assert(fea in combined_data.columns)
+        now_file = 'new'
+        for fea in [u'唯一号', u'姓名', u'D1_PaO2/FiO2', u'D1_PaO2']:
+            now_fea = fea
+            assert(fea in new_data.columns)
     except Exception as e:
-        logger.error('特征缺失')
+        logger.error(f'fix_feature_error_in_old_sys: 特征缺失: {now_fea} in {now_file}')
         return
     # 统计信息
     statistics = {'hash_target':0, 'ARDS_target':0}
-    # 重建ARDS标签
     old_data.reset_index(drop=True, inplace=True)
-    combined_data.reset_index(drop=True, inplace=True)
-    for r_idx in range(len(old_data)):
-        in_str = str(old_data.at[r_idx, u'出院诊断/死亡诊断'])
-        if detect_ards_label(in_str):
-            old_data.at[r_idx, u'ARDS'] = 1
-            statistics['ARDS_target'] += 1
-        else:
-            old_data.at[r_idx, u'ARDS'] = 0
+    new_data.reset_index(drop=True, inplace=True)
+    # ARDS 标签不一定重建, 按需要调整, 
+    logger.info(f'Rebuild ARDS Switch={rebuild_ards}')
+    if not rebuild_ards:
+        for r_idx in range(len(old_data)):
+            if old_data.at[r_idx, u'ARDS'] == 1:
+                statistics['ARDS_target'] += 1
+    else:
+        for r_idx in range(len(old_data)):
+            in_str = str(old_data.at[r_idx, u'出院诊断/死亡诊断']) + \
+                str(old_data.at[r_idx, u'CIS诊断']) + str(old_data.at[r_idx, u'CIS诊断1'])
+            in_str = str(old_data.at[r_idx, u'CIS诊断']) + str(old_data.at[r_idx, u'CIS诊断1'])
+            if detect_ards_label(in_str):
+                old_data.at[r_idx, u'ARDS'] = 1
+                statistics['ARDS_target'] += 1
+            else:
+                old_data.at[r_idx, u'ARDS'] = 0
     # 构建氧合指数哈希表
     hash_dict = {}
-    for r_idx in range(len(combined_data)):
-        hash_dict['+'.join([combined_data.at[r_idx, u'oldsys_唯一号'], combined_data.at[r_idx, u'oldsys_姓名']])] = \
-            combined_data.at[r_idx, u'newsys_D1_PaO2/FiO2']
+    for r_idx in range(len(new_data)):
+        hash_dict['+'.join([new_data.at[r_idx, u'唯一号'], new_data.at[r_idx, u'姓名']])] = \
+            (new_data.at[r_idx, u'D1_PaO2/FiO2'], new_data.at[r_idx, u'D1_PaO2'])
     for r_idx in range(len(old_data)):
         result = hash_dict.get(
-            '+'.join([old_data.at[r_idx, u'唯一码'], old_data.at[r_idx, u'姓名']])
+            '+'.join([old_data.at[r_idx, u'唯一号'], old_data.at[r_idx, u'姓名']])
         )
         if result is not None:
             statistics['hash_target'] += 1
-        old_data.at[r_idx, u'SOFA_氧合指数'] = result
-    old_data.to_csv(output, encoding='utf-8')
-    logger.info(f'combined_data样本量={len(combined_data)}, \
-        old_data样本量={len(old_data)}, hash_table命中=', statistics['hash_target'])
-    logger.info('ARDS标签占比=', statistics['ARDS_target'] / len(old_data))
+            old_data.at[r_idx, u'SOFA_氧合指数'] = result[0]
+            old_data.at[r_idx, u'PaO2'] = result[1]
+        else:
+            old_data.at[r_idx, u'SOFA_氧合指数'] = None
+            old_data.at[r_idx, u'PaO2'] = None
+
+    old_data.to_csv(output, encoding='utf-8', index=False)
+    logger.info(f'new_data样本量={len(new_data)}, \
+        old_data样本量={len(old_data)}, hash_table命中=%d' % statistics['hash_target'])
+    logger.info('ARDS标签占比=%.3f' % (statistics['ARDS_target'] / len(old_data)))
     logger.info(f'Output to {output}')
 
 
@@ -298,7 +318,7 @@ class DichotomyMetric:
                 arrowprops=dict(arrowstyle="->", color='tab:blue',alpha=0.7))
 
         # draw std band
-        self._draw_band(ax=plt.gca(), x=self.combined_points['fpr'], y=self.combined_points['tpr'], \
+        draw_band(ax=plt.gca(), x=self.combined_points['fpr'], y=self.combined_points['tpr'], \
             err=self.tpr_std, facecolor=f"C0", edgecolor="none", alpha=.2)
         auc_str = f'AUC={aucs[0]:.3f}' if len(aucs) == 1 else f'AUC={np.asarray(aucs).mean():.3f} (std {np.asarray(aucs).std():.3f})'
 
@@ -314,31 +334,6 @@ class DichotomyMetric:
             plt.savefig(save_path)
         plt.close()
     
-    def _draw_band(self, ax, x, y, err, **kwargs):
-        x = np.asarray(x)
-        y = np.asarray(y)
-        # Calculate normals via centered finite differences (except the first point
-        # which uses a forward difference and the last point which uses a backward
-        # difference).
-        dx = np.concatenate([[x[1] - x[0]], x[2:] - x[:-2], [x[-1] - x[-2]]])
-        dy = np.concatenate([[y[1] - y[0]], y[2:] - y[:-2], [y[-1] - y[-2]]])
-        l = np.hypot(dx, dy)
-        nx = dy / l
-        ny = -dx / l
-
-        # end points of errors
-        xp = x + nx * err
-        yp = y + ny * err
-        xn = x - nx * err
-        yn = y - ny * err
-
-        vertices = np.block([[xp, xn[::-1]],
-                             [yp, yn[::-1]]]).T
-        codes = np.full(len(vertices), Path.LINETO)
-        codes[0] = Path.MOVETO
-        path = Path(vertices, codes)
-        ax.add_patch(PathPatch(path, **kwargs))
-
     # 生成需要关注的信息
     def generate_info(self):
         assert(self.is_calculated == True)

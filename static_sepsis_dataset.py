@@ -9,18 +9,18 @@ from tools.colorful_logging import logger
 
 
 
-class SepsisDataset():
+class StaticSepsisDataset():
     def __init__(self, from_pkl=False):
-        self.conf_loder = tools.GLOBAL_CONF_LOADER["dataset_static"]['paths']
-        self.csv_path = self.conf_loder['csv_origin_path'] # origin data
-        self.conf_cache_path = self.conf_loder['conf_cache_path']
-        self.conf_manual_path = self.conf_loder['conf_manual_path']
-        self.profile_conf_path = self.conf_loder['profile_conf_path']
-        self.profile_save_path = self.conf_loder['profile_save_path']
-        self.output_cleaned_path = self.conf_loder['output_cleaned_path']
-        self.apriori_df_path = self.conf_loder['apriori_df_path']
-        self.dataframe_save_path = self.conf_loder['dataframe_save_path']
-        self.out_path = self.conf_loder['out_dir']
+        self.conf_loader = tools.GLOBAL_CONF_LOADER["dataset_static"]['paths']
+        self.csv_path = self.conf_loader['csv_origin_path'] # origin data
+        self.conf_cache_path = self.conf_loader['conf_cache_path']
+        self.conf_manual_path = self.conf_loader['conf_manual_path']
+        self.profile_conf_path = self.conf_loader['profile_conf_path']
+        self.profile_save_path = self.conf_loader['profile_save_path']
+        self.output_cleaned_path = self.conf_loader['output_cleaned_path']
+        self.apriori_df_path = self.conf_loader['apriori_df_path']
+        self.dataframe_save_path = self.conf_loader['dataframe_save_path']
+        self.out_path = self.conf_loader['out_dir']
 
         with open(self.csv_path, 'r', encoding='utf-8') as f:
             self.data_pd = pd.read_csv(f, encoding='utf-8')
@@ -215,4 +215,4 @@ class SepsisDataset():
 
 if __name__ == '__main__':
     tools.set_chinese_font()
-    dataset = SepsisDataset(from_pkl=False)
+    dataset = StaticSepsisDataset(from_pkl=False)
