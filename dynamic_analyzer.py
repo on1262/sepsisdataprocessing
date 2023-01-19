@@ -4,8 +4,6 @@ import os
 import numpy as np
 import pandas as pd
 from tools import logger as logger
-import random
-import seaborn as sns
 import matplotlib.pyplot as plt
 
 
@@ -17,16 +15,17 @@ class DynamicAnalyzer:
         self.type_dict = dataset.get_type_dict()
         self.target_fea = dataset.target_fea
         self.fea_manager = dataset.fea_manager
+        # init time arr
+        self.target_time_arr = tools.cal_available_time(
+            data=self.data_pd,
+            expanded_target=self.fea_manager.get_expanded_fea(self.target_fea)
+        ) # [:,0]=start_time, [:,1]=duration
 
     def feature_explore(self):
         logger.info('Analyzer: Feature explore')
         out_dir = self.conf['paths']['out_dir']
         # target feature avaliable days
-        target_time_arr = tools.cal_available_time(
-            data=self.data_pd,
-            expanded_target=self.fea_manager.get_expanded_fea(self.target_fea)
-        )[:, 1]
-        tools.plot_single_dist(target_time_arr / 24, f"Available Days: {self.target_fea}", \
+        tools.plot_single_dist(self.target_time_arr[:,1] / 24, f"Available Days: {self.target_fea}", \
             save_path=os.path.join(out_dir, 'target_available_days.png'))
         # first ards days
         first_ards_days = self._cal_first_ards_days(self.data_pd, self.fea_manager.get_expanded_fea(self.target_fea))
@@ -36,8 +35,64 @@ class DynamicAnalyzer:
         self._plot_time_series_samples(self.target_fea, n_sample=400, n_per_plots=40, \
             write_dir=os.path.join(out_dir, "samples_plot"))
         # plot fourier tranform result
-        self._plot_fourier_transform(self.target_fea, target_time_arr, save_dir=out_dir)
+        self._plot_fourier_transform(self.target_fea, self.target_time_arr[:,1], save_dir=out_dir)
 
+    
+    '''
+    生成动态模型所需的时间切片
+    mode: 
+        'target_time' 适用于只看目标历史数据的方法
+        'k_slice' 适用于只用T-k天预测第T天数据的方法
+    '''
+    def make_slice(self, mode:str='target_time', k=None)->dict:
+        # 将开始和持续时间变成整数
+        step = times[1] - times[0]
+        start_idx = np.round(self.target_time_arr[:,0] / step)
+        dur_len = np.round(self.target_time_arr[:,1] / step)
+        if mode == 'target_time':
+            expanded = self.fea_manager.get_expanded_fea(self.target_fea)
+            names = [val[1] for val in expanded]
+            times = np.asarray([val[0] for val in expanded])
+            result = self.data_pd[names].to_numpy(dtype=float)
+            assert(start_idx.shape[0] == dur_len.shape[0] and start_idx.shape[0] == result.shape[0])
+            return {'data':result, 'start_idx': start_idx, 'dur_len':dur_len} # dict{key:ndarray}
+        elif mode == 'k_slice':
+            assert(k is not None)
+            data = self.data_pd[dur_len > k, :]
+            dur_len = dur_len[dur_len > k]
+            start_idx = start_idx[dur_len > k]
+            data.reset_index(drop=True, inplace=True)
+            sta_names = set(self.fea_manager.get_names(sta=True))
+            dyn_names = set(self.fea_manager.get_names(dyn=True))
+            dyn_dict = {key:[val[1] for val in self.fea_manager.get_expanded_fea(key)] for key in dyn_names} # old name
+            dyn_names.remove(self.target_fea)
+            result = pd.DataFrame(columns=sta_names + dyn_names)
+            # 0 1 2 3 4
+            # 0 1 2
+            for r_idx in range(len(data)):
+                for delta in range(dur_len[r_idx] - k): # duration=N, k=1, delta=0,1,2,...,N-2
+                    new_row = {}
+                    for name in sta_names:
+                        new_row[name] = data[r_idx, name]
+                    for name in dyn_names:
+                        new_row[name] = data[r_idx, dyn_dict[name][start_idx[r_idx] + delta]]
+                    new_row[self.target_fea] = data[r_idx, dyn_dict[self.target_fea][start_idx[r_idx] + delta + k]]
+                    result.loc[len(result)] = new_row
+            logger.info(f'Extended Datasets size={len(result)}, with {len(result.columns)} features')
+            # generate new type dict
+            new_type_dict = self.generate_dyn_type_dict()
+            for name in result.columns:
+                if name not in dyn_dict.keys():
+                    new_type_dict[name] = self.dataset.type_dict[name]
+            return {'data':result, 'type_dict':new_type_dict}
+
+
+    def generate_dyn_type_dict(self) -> dict:
+        dyn_names = set(self.fea_manager.get_names(dyn=True))
+        result = {}
+        for name in dyn_names:
+            result[name] = self.dataset.type_dict[self.fea_manager.get_expanded_fea(name)[0,1]]
+        return result
 
     def _cal_first_ards_days(self, data:pd.DataFrame, expanded_target:list):
         assert(isinstance(expanded_target[0], tuple))
