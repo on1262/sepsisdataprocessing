@@ -5,3 +5,4 @@ catboost_info/time_left.tsv
 catboost_info/learn/events.out.tfevents
 catboost_info/test/events.out.tfevents
 __pycache__/apriori.cpython-37.pyc
+data_dynamic/configs_cache.json

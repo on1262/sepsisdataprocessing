@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 from tools import logger as logger
 import matplotlib.pyplot as plt
+from sklearn.model_selection import KFold
+from dynamic_model import baseline as Baseline
 
 
 class DynamicAnalyzer:
@@ -13,14 +15,13 @@ class DynamicAnalyzer:
         self.conf = tools.GLOBAL_CONF_LOADER['dynamic_analyzer']
         self.data_pd = dataset.data_pd
         self.type_dict = dataset.get_type_dict()
-        self.target_fea = dataset.target_fea
+        self.target_fea = dataset.target_fea # only one name
         self.fea_manager = dataset.fea_manager
-        # init time arr
-        self.target_time_arr = tools.cal_available_time(
-            data=self.data_pd,
-            expanded_target=self.fea_manager.get_expanded_fea(self.target_fea)
-        ) # [:,0]=start_time, [:,1]=duration
+        self.n_fold = 5
 
+    '''
+        生成数据集的总体特征, 这个方法不是必须运行的
+    '''
     def feature_explore(self):
         logger.info('Analyzer: Feature explore')
         out_dir = self.conf['paths']['out_dir']
@@ -37,62 +38,52 @@ class DynamicAnalyzer:
         # plot fourier tranform result
         self._plot_fourier_transform(self.target_fea, self.target_time_arr[:,1], save_dir=out_dir)
 
-    
-    '''
-    生成动态模型所需的时间切片
-    mode: 
-        'target_time' 适用于只看目标历史数据的方法
-        'k_slice' 适用于只用T-k天预测第T天数据的方法
-    '''
-    def make_slice(self, mode:str='target_time', k=None)->dict:
-        # 将开始和持续时间变成整数
-        step = times[1] - times[0]
-        start_idx = np.round(self.target_time_arr[:,0] / step)
-        dur_len = np.round(self.target_time_arr[:,1] / step)
-        if mode == 'target_time':
-            expanded = self.fea_manager.get_expanded_fea(self.target_fea)
-            names = [val[1] for val in expanded]
-            times = np.asarray([val[0] for val in expanded])
-            result = self.data_pd[names].to_numpy(dtype=float)
-            assert(start_idx.shape[0] == dur_len.shape[0] and start_idx.shape[0] == result.shape[0])
-            return {'data':result, 'start_idx': start_idx, 'dur_len':dur_len} # dict{key:ndarray}
-        elif mode == 'k_slice':
-            assert(k is not None)
-            data = self.data_pd[dur_len > k, :]
-            dur_len = dur_len[dur_len > k]
-            start_idx = start_idx[dur_len > k]
-            data.reset_index(drop=True, inplace=True)
-            sta_names = set(self.fea_manager.get_names(sta=True))
-            dyn_names = set(self.fea_manager.get_names(dyn=True))
-            dyn_dict = {key:[val[1] for val in self.fea_manager.get_expanded_fea(key)] for key in dyn_names} # old name
-            dyn_names.remove(self.target_fea)
-            result = pd.DataFrame(columns=sta_names + dyn_names)
-            # 0 1 2 3 4
-            # 0 1 2
-            for r_idx in range(len(data)):
-                for delta in range(dur_len[r_idx] - k): # duration=N, k=1, delta=0,1,2,...,N-2
-                    new_row = {}
-                    for name in sta_names:
-                        new_row[name] = data[r_idx, name]
-                    for name in dyn_names:
-                        new_row[name] = data[r_idx, dyn_dict[name][start_idx[r_idx] + delta]]
-                    new_row[self.target_fea] = data[r_idx, dyn_dict[self.target_fea][start_idx[r_idx] + delta + k]]
-                    result.loc[len(result)] = new_row
-            logger.info(f'Extended Datasets size={len(result)}, with {len(result.columns)} features')
-            # generate new type dict
-            new_type_dict = self.generate_dyn_type_dict()
-            for name in result.columns:
-                if name not in dyn_dict.keys():
-                    new_type_dict[name] = self.dataset.type_dict[name]
-            return {'data':result, 'type_dict':new_type_dict}
+    def baseline_methods(self, models:set, params=None):
+        log_path = os.path.join(self.conf['paths']['out_dir'], 'baseline_result.log')
+        tools.clear_file(log_path)
+        kf = KFold(n_splits=self.n_fold, shuffle=True)
+        for model_name in models:
+            logger.info(f'Evaluating baseline methods:{model_name}')
+            metric = tools.DynamicPredictionMetric(target_name=self.target_fea,
+                expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir'])
+            if 'simple' in model_name: # simple_nearest simple_average simple_holt
+                predictor = Baseline.SimpleTimeSeriesPredictor()
+                slice_dict = self.dataset.target_time_dict
+                dataset = slice_dict['data'].copy()
+                dataset = tools.convert_type({'_default': -1}, dataset, {k:float for k in dataset.columns}).to_numpy()
+                for idx, (train_index, test_index) in enumerate(kf.split(X=dataset)):
+                    X_test = dataset[test_index, :]
+                    start_idx_test = slice_dict['start_idx'][test_index]
+                    duration_test = slice_dict['dur_len'][test_index]
+                    result = predictor.predict(X_test, start_idx=start_idx_test, duration=duration_test, mode=model_name.split('simple_')[1], params=params)
+                    metric.add_prediction(prediction=result, gt=X_test, start_idx=start_idx_test, duration=duration_test)
+            elif model_name == 'slice_linear_reg':
+                slice_dict = self.dataset.slice_dict
+                dataset = slice_dict['data'].copy()
+                dataset = tools.convert_type({'_default': -1}, dataset, slice_dict['type_dict'])
+                try:
+                    assert(not np.any(dataset.isna().to_numpy()))
+                except Exception as e:
+                    na_mat = dataset.isna()
+                    for col in dataset.columns:
+                        if np.any(na_mat[col].to_numpy()):
+                            logger.error(f'NA in feature:{col}')
+                Y_pred = -np.ones(slice_dict['gt_table'].shape)
+                train_cols = list(dataset.columns)
+                train_cols.remove(self.target_fea)
+                for idx, (train_index, test_index) in enumerate(kf.split(X=dataset)):
+                    model = Baseline.SliceLinearRegression(slice_dict['type_dict'], params=params['slice_linear_reg'])
+                    X_train = dataset.loc[train_index, train_cols]
+                    X_test = dataset.loc[test_index, train_cols]
+                    Y_train = dataset.loc[train_index, self.target_fea]
+                    model.train(X_train, Y_train)
+                    result = model.predict(X_test=X_test)
+                    Y_pred = model.map_result(Y_pred=Y_pred, result=result, map_table=slice_dict['map_table'], index=test_index)
+                metric.add_prediction(prediction=Y_pred, gt=slice_dict['gt_table'].to_numpy(), start_idx=slice_dict['start_idx'], duration=slice_dict['dur_len'])
+            metric.write_result(model_name, log_path=log_path)
+            metric.plot(model_name)
 
 
-    def generate_dyn_type_dict(self) -> dict:
-        dyn_names = set(self.fea_manager.get_names(dyn=True))
-        result = {}
-        for name in dyn_names:
-            result[name] = self.dataset.type_dict[self.fea_manager.get_expanded_fea(name)[0,1]]
-        return result
 
     def _cal_first_ards_days(self, data:pd.DataFrame, expanded_target:list):
         assert(isinstance(expanded_target[0], tuple))
@@ -155,10 +146,26 @@ class DynamicAnalyzer:
 
 
 
-
-
-
 if __name__ == "__main__":
     dataset = DynamicSepsisDataset(from_pkl=True)
     analyzer = DynamicAnalyzer(dataset=dataset)
-    analyzer.feature_explore()
+    baseline_models = {
+        'simple_nearest',
+        'simple_average',
+        'simple_holt'
+    }
+    params = {
+        'holt':{
+            'alpha': 0.5,
+            'beta':0.5,
+            'step':1
+        },
+        'slice_linear_reg':{
+            'ts_mode':'greedy'
+        }
+    }
+    # module test
+    # analyzer.feature_explore()
+    # analyzer.baseline_methods(models=baseline_models, params=holt_params)
+    analyzer.baseline_methods(models={'slice_linear_reg'}, params=params)
+

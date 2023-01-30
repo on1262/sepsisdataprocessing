@@ -1,12 +1,14 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
+import os
 from scipy.interpolate import interp1d
 import pandas as pd
 import json
 from sklearn.metrics import auc as sk_auc
 from .colorful_logging import logger
-from .plot import draw_band
+from .generic import reinit_dir, remove_slash, clear_file
+from .plot import draw_band, plot_single_dist, plot_reg_correlation
 
 '''
 合并两个文件中cmp_cols都相同的样本, 同时列标签加上new和old
@@ -344,3 +346,89 @@ class DichotomyMetric:
                 result['best_acc'] = self.combined_points['acc'][idx]
                 result['best_acc_thres'] = self.combined_points['thres'][idx]
         return result
+
+
+class DynamicPredictionMetric:
+    def __init__(self, target_name:str, expanded_fea:list, out_dir:str) -> None:
+        self.target_name = target_name
+        self.fea_list = expanded_fea # [(time, expanded_name)]
+        self.records = None
+        self.out_dir = out_dir
+    
+    
+    # 要求对每个可行点都预测, prediction中-1代表无效数据
+    def add_prediction(self, prediction:np.ndarray, gt:np.ndarray, start_idx:np.ndarray, duration:np.ndarray):
+        if self.records is None:
+            self.records = {
+                'pred': prediction.copy(),
+                'gt': gt.copy(),
+                'start_idx': start_idx.copy(),
+                'duration':duration.copy()
+            }
+        else:
+            # 所有记录的行都累积起来
+            self.records['pred'] = np.concatenate((self.records['pred'], prediction),axis=0)
+            self.records['gt'] = np.concatenate((self.records['gt'], gt), axis=0)
+            self.records['start_idx'] = np.concatenate((self.records['start_idx'], start_idx), axis=0)
+            self.records['duration'] = np.concatenate((self.records['duration'], duration), axis=0)
+
+    def plot(self, method_name:str):
+        # 清空输出
+        reinit_dir(write_dir_path=os.path.join(self.out_dir, remove_slash(method_name)))
+        corr_dir = os.path.join(self.out_dir, remove_slash(method_name), 'correlation')
+        res_dir = os.path.join(self.out_dir, remove_slash(method_name), 'residual')
+        self.plot_residual(res_dir=res_dir)
+        self.plot_corr(corr_dir=corr_dir)
+
+    def write_result(self, method_name:str, log_path:str):
+        valid_mat = self.records['pred'] > 0
+        pred = self.records['pred'][valid_mat]
+        gt = self.records['gt'][valid_mat]
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write('='*10 + f'Method: {method_name}' + '='*10 + '\n')
+            f.write(f'Error mean={np.abs(pred - gt).mean()}'+ '\n')
+            f.write(f'Error std={(pred - gt).std()}'+ '\n')
+            f.write(f'Error bias={(pred - gt).mean()}'+ '\n')
+            f.write('END')
+        
+
+    # 绘制残差分布
+    def plot_residual(self, res_dir:str):
+        logger.info('DynamicPredictionMetric: Plotting residual')
+        
+        os.makedirs(res_dir)
+        if self.records is None:
+            logger.error('DynamicPredictionMetric: no record')
+            return
+        for idx, (time, old_name) in enumerate(self.fea_list):
+            valid_mat = self.records['pred'][:, idx] > 0
+            if np.any(valid_mat):
+                pred = self.records['pred'][:,idx][valid_mat]
+                gt = self.records['gt'][:,idx][valid_mat]
+                res = pred - gt
+                plot_single_dist(data=res, data_name='Residual distribution: ' + old_name, save_path=os.path.join(res_dir, f'{time}_name={remove_slash(old_name)}.png'), discrete=False)
+            else:
+                logger.warning(f'Plot residual: no valid row in name={old_name}')
+
+    # 绘制预测值和真实值的关联度
+    def plot_corr(self, corr_dir:str):
+        logger.info('DynamicPredictionMetric: Plotting Correlation')
+        
+        os.makedirs(corr_dir)
+        if self.records is None:
+            logger.error('DynamicPredictionMetric: no record')
+            return
+        for idx, (time, old_name) in enumerate(self.fea_list):
+            valid_mat = self.records['pred'][:, idx] > 0
+            if np.any(valid_mat):
+                pred = self.records['pred'][:,idx][valid_mat]
+                gt = self.records['gt'][:,idx][valid_mat]
+                plot_reg_correlation(X=gt[:,None], fea_names=[f'GT_T={time}' + '_' + remove_slash(old_name)], Y=pred, target_name='Prediction', \
+                    restrict_area=True, write_dir_path=corr_dir)
+            else:
+                logger.warning(f'Plot residual: no valid row in name={old_name}')
+        # plot all correlation
+        valid_mat = self.records['pred'] > 0
+        pred = self.records['pred'][valid_mat]
+        gt = self.records['gt'][valid_mat]
+        plot_reg_correlation(X=gt[:,None], fea_names=['ALL_gt'], Y=pred, target_name='ALL_Prediction', restrict_area=True, write_dir_path=corr_dir)

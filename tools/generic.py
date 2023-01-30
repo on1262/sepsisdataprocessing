@@ -82,7 +82,7 @@ def reinit_dir(write_dir_path=None, build=True):
                 p = os.path.join(write_dir_path, name)
                 if os.path.isdir(p):
                     reinit_dir(p, build=False)
-                    os.removedirs(p)
+                    os.rmdir(p)
                 elif os.path.isfile(p):
                     os.remove(p)
         if build:
@@ -103,6 +103,9 @@ def clear_file(name):
 
 def set_sk_random_seed(seed:int=100):
     sk_random.seed(seed)
+
+def remove_slash(name:str):
+    return name.replace('/','%')
 
 '''
 输入文件名, 返回文件的MD5字符串
@@ -211,12 +214,13 @@ def check_fea_types(data:pd.DataFrame, max_err_rows=10) -> dict:
 
     for col in data.columns: # prevent bad data of str types. Manual check is needed if other type occurs
         type_dict[col] = None
-        n_sample = min(200, len(data))
+        
         table = {float:0, int:0, bool:0, str:0}
         # random sample 100 non-na values:
         valid_rows = np.asarray(1 - nas[col], dtype=bool)
         col_valid = data.iloc[valid_rows][col].values
-        for val in sk_random.sample(col_valid, k=n_sample):
+        n_sample = min(200, len(col_valid))
+        for val in sk_random.sample(list(col_valid), k=n_sample):
             s_val = str(val)
             num_flag = True
             try:
@@ -340,42 +344,89 @@ def normalize(x:np.ndarray, axis=1):
     x = (x - x.mean(axis=axis, keepdims=True)) / x_std
     return x
 
-def target_statistic(X:np.ndarray, Y:np.ndarray, ctg_feas:list, mode='greedy'):
+'''
+    进行训练时和测试时的正则化
+    norm_dict: 每个key表示一个column名字, value=(coeff, bias) 给出正则化的参数
+    如果没有norm_dict, 则代表训练模式, 会返回计算好的normdict
+    如果有norm_dict, 则代表测试模式, 按照给定的参数进行正则化
+'''
+def feature_normalization(data:np.ndarray, num_feas:list, norm_dict=None):
+    if norm_dict is not None:
+        for idx in num_feas:
+            if np.abs(norm_dict[idx][1]) > 1e-4: 
+                data[:,idx] = (data[:,idx] - norm_dict[idx][0]) / norm_dict[idx][1]
+            else:
+                data[:,idx] = (data[:,idx] - norm_dict[idx][0])
+        return data
+    else:
+        norm_dict = {}
+        for idx in num_feas:
+            arr = data[:,idx]
+            mean = np.nanmean(arr)
+            std = np.nanstd(arr)
+            norm_dict[idx] = [mean, std]
+            if std < 1e-4:
+                logger.warning(f'Std near zero in normalization: {idx}, std ignored')
+                arr = arr - mean
+            else:
+                arr = (arr - mean) / std
+            data[:, idx] = arr
+        return data, norm_dict
+
+
+def target_statistic(X:np.ndarray, Y:np.ndarray, ctg_feas:list, mode='greedy', hist_val=None):
+    if len(ctg_feas) == 0:
+        logger.warning('Target statistic: len(ctg_feas)=0')
+        return X
     X_ts = X.copy()
     assert(mode=='greedy')
-    hist_val = {}
+    return_flag = 0
+    if hist_val is None:
+        return_flag = 1
+        alpha = round(0.01*X.shape[0])
+        prior = Y.mean()
+        hist_val = {}
+        for r_idx in range(X.shape[0]):
+            for c_idx in ctg_feas:
+                if c_idx not in hist_val.keys():
+                    hist_val[c_idx] = {}
+                if X[r_idx, c_idx] not in hist_val[c_idx].keys():
+                    hist_val[c_idx][X[r_idx, c_idx]] = (Y[r_idx],1)
+                else:
+                    val,count = hist_val[c_idx][X[r_idx, c_idx]]
+                    hist_val[c_idx][X[r_idx, c_idx]] = (val+Y[r_idx], count+1)
+        for ctg_fea_idx in hist_val:
+            for cls in hist_val[ctg_fea_idx]:
+                val, count = hist_val[ctg_fea_idx][cls] 
+                hist_val[ctg_fea_idx][cls] = (val + alpha * prior) / (count + alpha)
+    
     for r_idx in range(X.shape[0]):
         for c_idx in ctg_feas:
-            if c_idx not in hist_val.keys():
-                hist_val[c_idx] = {}
-            if X[r_idx, c_idx] not in hist_val[c_idx].keys():
-                hist_val[c_idx][X[r_idx, c_idx]] = (Y[r_idx],1)
-            else:
-                val,count = hist_val[c_idx][X[r_idx, c_idx]]
-                hist_val[c_idx][X[r_idx, c_idx]] = (val+Y[r_idx], count+1)
+            X_ts[r_idx, c_idx] = hist_val[c_idx].get(X[r_idx, c_idx])
+            assert(X_ts is not None) # 测试时出现不存在的类别, 还没想好咋办
 
-    alpha = round(0.01*X.shape[0])
-    prior = Y.mean()
-    for ctg_fea_idx in hist_val:
-        for cls in hist_val[ctg_fea_idx]:
-            val, count = hist_val[ctg_fea_idx][cls] 
-            hist_val[ctg_fea_idx][cls] = (val + alpha * prior) / (count + alpha)
-    for r_idx in range(X.shape[0]):
-        for c_idx in ctg_feas:
-            X_ts[r_idx, c_idx] = hist_val[c_idx][X[r_idx, c_idx]]
     X_ts = X_ts.astype(dtype=np.float32)
-    return X_ts
+    if return_flag == 1:
+        return X_ts, hist_val
+    else:
+        return X_ts
 
 
 # use feature average value to fill na values, used for better linear model performance
-def fill_avg(X:np.ndarray, num_feas:list, na_sign=-1, eps=1e-3):
+def fill_avg(X:np.ndarray, num_feas:list, na_sign=-1, eps=1e-3, avg_dict=None):
     X_avg = X.copy()
-    avg_dict = {}
-    for c_idx in num_feas:
-        choosed = (X_avg[:,c_idx] < na_sign + eps) * (X_avg[:,c_idx] > na_sign - eps)
-        avg_dict[c_idx] = X_avg[np.invert(choosed), c_idx].mean()
-        X_avg[choosed, c_idx] = avg_dict[c_idx]
-    return X_avg, avg_dict
+    if avg_dict is None:
+        avg_dict = {}
+        for c_idx in num_feas:
+            choosed = (X_avg[:,c_idx] < na_sign + eps) * (X_avg[:,c_idx] > na_sign - eps)
+            avg_dict[c_idx] = X_avg[np.invert(choosed), c_idx].mean()
+            X_avg[choosed, c_idx] = avg_dict[c_idx]
+        return X_avg, avg_dict
+    else:
+        for c_idx in num_feas:
+            choosed = (X_avg[:,c_idx] < na_sign + eps) * (X_avg[:,c_idx] > na_sign - eps)
+            X_avg[choosed, c_idx] = avg_dict[c_idx]
+        return X_avg
 
 # 验证name是否可以表现为prefix+name(in name_set)的形式
 # time_prefix: ['day_','[day]','_T_', '[period]']

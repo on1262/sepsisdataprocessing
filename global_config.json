@@ -35,12 +35,15 @@
         "paths":{
             "csv_origin_path": "data_dynamic/data_combined.csv",
             "csv_raw_new_path": "data_dynamic/data_raw_new.csv",
+            "csv_slice_path": "data_dynamic/data_slice.csv",
+            "csv_target_time_path": "data_dynamic/data_target_time.csv",
             "conf_cache_path": "data_dynamic/configs_cache.json",
             "conf_manual_path": "data_dynamic/configs_manual.json",
             "profile_conf_path": "data_dynamic/profile_conf.yaml",
             "profile_save_path": "dynamic_model_out/profile.html",
             "output_cleaned_path": "data_dynamic/dyn_cleaned.csv",
             "dataframe_save_path": "data_dynamic/dyn_data_cache.pkl",
+            "slice_result_save_path": "data_dynamic/slice_data.pkl",
             "fea_manager_save_path": "data_dynamic/fea_manager.pkl",
             "out_dir": "dynamic_model_out"
         }

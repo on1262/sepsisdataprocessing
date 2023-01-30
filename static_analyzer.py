@@ -104,7 +104,7 @@ class StaticAnalyzer:
                 y_death = self.dataset[death_label].to_numpy(bool)
                 Y_4cls = tools.create_4_cls_label(y_ards, y_death)
 
-                data_others = tools.target_statistic(data_all, Y_4cls, ctg_feas=category_index, mode='greedy')
+                data_others,_ = tools.target_statistic(data_all, Y_4cls, ctg_feas=category_index, mode='greedy')
                 data_others, _ = tools.fill_avg(data_others, num_feas=numeric_index)
                 data_others = tools.normalize(data_others, axis=1)
                 # kf.get_n_splits(data_others)
@@ -139,7 +139,7 @@ class StaticAnalyzer:
                         tools.plot_shap_scatter(fea_name, vals[:, 0], vals[:, 1], self.shap_names[fea_name], 
                         self.conf['paths']['plot_dir'])
             elif key == 'neural_network':
-                data_nn = tools.target_statistic(data_all, self.Y,
+                data_nn,_ = tools.target_statistic(data_all, self.Y,
                     ctg_feas=category_index, mode='greedy')
                 data_nn, _ = tools.fill_avg(data_nn, num_feas=numeric_index)
                 data_nn = tools.normalize(data_nn, axis=1)
@@ -154,7 +154,7 @@ class StaticAnalyzer:
                 valid_losses = np.asarray(valid_losses).T
                 tools.plot_loss(valid_losses, title='Neural Network Validation Loss')
             else:
-                data_others = tools.target_statistic(data_all, self.Y,
+                data_others,_ = tools.target_statistic(data_all, self.Y,
                     ctg_feas=category_index, mode='greedy')
                 data_others, _ = tools.fill_avg(data_others, num_feas=numeric_index)
                 data_others = tools.normalize(data_others, axis=1)
