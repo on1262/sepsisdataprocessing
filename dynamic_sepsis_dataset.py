@@ -51,6 +51,7 @@ class DynamicSepsisDataset():
                     self.k = tmp[0]
                     self.slice_dict = tmp[1]
                     self.target_time_dict = tmp[2]
+                self.print_features()
                 return
             else:
                 logger.warning('MD5 validation failed, change from_pkl=false')

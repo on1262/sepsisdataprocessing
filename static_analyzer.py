@@ -127,7 +127,7 @@ class StaticAnalyzer:
                 # plot fea importance
                 items = list(self.register_values['shap'].items())
                 items = np.asarray(sorted(items, key= lambda x:x[1]))
-                shap_vals = np.asarray(items[:, 1], dtype=np.float32)/self.k_fold
+                shap_vals = np.asarray(items[:, 1], dtype=np.float32) / self.k_fold
                 with open(self.conf['paths']['shap_values'], 'w') as fp:
                     for i in reversed(range(shap_vals.shape[0])):
                         fp.write(f"{shap_vals[i]},{str(items[i,0])}\n")

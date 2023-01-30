@@ -20,6 +20,10 @@ class DynamicAnalyzer:
         self.fea_manager = dataset.fea_manager
         self.n_fold = 5
 
+        # for feature importance
+        self.register_values = {}
+        self.shap_names = self.conf['shap_names'] # value是显示范围, 手动设置要注意左边-1项不需要, 右边太大的项要限
+
     '''
         生成数据集的总体特征, 这个方法不是必须运行的
     '''
@@ -40,10 +44,12 @@ class DynamicAnalyzer:
         self._plot_fourier_transform(self.target_fea, self.target_time_arr[:,1], save_dir=out_dir)
 
     def baseline_methods(self, models:set, params=None):
-        log_path = os.path.join(self.conf['paths']['out_dir'], 'baseline_result.log')
-        tools.clear_file(log_path)
         kf = KFold(n_splits=self.n_fold, shuffle=True)
         for model_name in models:
+            self.register_values.clear()
+            tools.reinit_dir(os.path.join(self.conf['paths']['out_dir'], model_name), build=True)
+            log_path = os.path.join(self.conf['paths']['out_dir'], model_name, 'result.log')
+            tools.clear_file(log_path)
             logger.info(f'Evaluating baseline methods:{model_name}')
             metric = tools.DynamicPredictionMetric(target_name=self.target_fea,
                 expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir'])
@@ -58,6 +64,7 @@ class DynamicAnalyzer:
                     duration_test = slice_dict['dur_len'][test_index]
                     result = predictor.predict(X_test, start_idx=start_idx_test, duration=duration_test, mode=model_name.split('simple_')[1], params=params)
                     metric.add_prediction(prediction=result, gt=X_test, start_idx=start_idx_test, duration=duration_test)
+
             elif model_name == 'slice_linear_reg':
                 slice_dict = self.dataset.slice_dict
                 dataset = slice_dict['data'].copy()
@@ -74,12 +81,86 @@ class DynamicAnalyzer:
                     model.train(X_train, Y_train)
                     result = model.predict(X_test=X_test)
                     Y_pred = model.map_result(Y_pred=Y_pred, result=result, map_table=slice_dict['map_table'], index=test_index)
-                metric.add_prediction(prediction=Y_pred, gt=slice_dict['gt_table'].to_numpy(), start_idx=slice_dict['start_idx'], duration=slice_dict['dur_len'])
+                metric.add_prediction(
+                    prediction=Y_pred, gt=slice_dict['gt_table'].to_numpy(), start_idx=slice_dict['start_idx'], duration=slice_dict['dur_len'])
+
+            elif model_name == 'slice_catboost_reg':
+                slice_dict = self.dataset.slice_dict
+                dataset = slice_dict['data'].copy()
+                dataset = tools.convert_type({'_default': -1}, dataset, slice_dict['type_dict'])
+                tools.assert_no_na(dataset)
+                Y_pred = -np.ones(slice_dict['gt_table'].shape)
+                train_cols = list(dataset.columns)
+                train_cols.remove(self.dynamic_target_name)
+                for idx, (train_index, test_index) in enumerate(kf.split(X=dataset)):
+                    model = Baseline.SliceCatboostRegression(slice_dict['type_dict'], params=params['slice_catboost_reg'])
+                    X_train = dataset.loc[train_index, train_cols]
+                    X_test = dataset.loc[test_index, train_cols]
+                    Y_train = dataset.loc[train_index, self.dynamic_target_name]
+                    model.train(X_train, Y_train)
+                    result = model.predict(X_test=X_test)
+                    Y_pred = model.map_result(Y_pred=Y_pred, result=result, map_table=slice_dict['map_table'], index=test_index)
+                    shap_array, shap, sorted_names = model.model_explanation()
+                    # 注册每个样本的每个特征对应的shap值
+                    if idx == 0:
+                        self.register_values['shap'] = {}
+                        self.register_values['shap_arr'] = {}
+                    for fea_idx, name in enumerate(train_cols):
+                        if name not in self.shap_names.keys():
+                            continue
+                        pairs = np.concatenate((shap_array[:, [fea_idx]], model.X_valid[:, [fea_idx]].astype(np.float32)), axis=1)
+                        if self.register_values['shap_arr'].get(name) is None:
+                            self.register_values['shap_arr'][name] = pairs
+                        else:
+                            self.register_values['shap_arr'][name] = np.concatenate((self.register_values['shap_arr'][name], pairs), axis=0)
+                    # 将每次得到的shap值相加, 便于计算k_fold的平均重要性
+                    for i in range(len(shap)):
+                        if self.register_values['shap'].get(sorted_names[i]) is None:
+                            self.register_values['shap'][sorted_names[i]] = shap[i]
+                        else:
+                            self.register_values['shap'][sorted_names[i]] += shap[i]
+                    self._plot_fea_importance(model_name)
+                metric.add_prediction(
+                    prediction=Y_pred, gt=slice_dict['gt_table'].to_numpy(), start_idx=slice_dict['start_idx'], duration=slice_dict['dur_len'])
             metric.write_result(model_name, log_path=log_path)
             metric.plot(model_name)
+        self.create_final_result()
+
+    # 收集各个文件夹里面的result.log, 合并为final result
+    def create_final_result(self):
+        logger.info('Creating final result')
+        out_dir = self.conf['paths']['out_dir']
+        with open(os.path.join(out_dir, 'final_result.log'), 'w') as final_f:
+            for dir in os.listdir(out_dir):
+                p = os.path.join(out_dir, dir)
+                if os.path.isdir(p):
+                    if 'result.log' in os.listdir(p):
+                        rp = os.path.join(p, 'result.log')
+                        logger.info(f'Find: {rp}')
+                        with open(rp, 'r') as f:
+                            final_f.write(f.read())
+                            final_f.write('\n')
+        logger.info(f'Final result saved at ' + os.path.join(out_dir, 'final_result.log'))
+                
 
 
 
+    def _plot_fea_importance(self, model_name):
+        # 得到整体的特征重要性表
+        items = list(self.register_values['shap'].items())
+        items = np.asarray(sorted(items, key= lambda x:x[1]))
+        shap_vals = np.asarray(items[:, 1], dtype=np.float32) / self.n_fold
+        with open(os.path.join(self.conf['paths']['out_dir'], model_name,'shap.log'), 'w') as fp:
+            fp.write(f'Slice CatBoost Regressor feature importance \n')
+            for i in reversed(range(shap_vals.shape[0])):
+                fp.write(f"{shap_vals[i]},{str(items[i,0])}\n")
+        tools.plot_fea_importance(shap_vals[-10:], items[-10:, 0], save_path=os.path.join(self.conf['paths']['out_dir'], model_name,'shap.png'))
+        # 给出单个特征的重要性图
+        if 'shap_arr' in self.register_values.keys():
+            for fea_name, vals in self.register_values['shap_arr'].items():
+                tools.plot_shap_scatter(fea_name, vals[:, 0], vals[:, 1], self.shap_names[fea_name], 
+                    os.path.join(self.conf['paths']['out_dir'], model_name))
+    
     def _cal_first_ards_days(self, data:pd.DataFrame, expanded_target:list):
         assert(isinstance(expanded_target[0], tuple))
         # expanded_target = self.fea_manager.get_expanded_fea(dyn_fea)
@@ -148,20 +229,32 @@ if __name__ == "__main__":
         'simple_nearest',
         'simple_average',
         'simple_holt',
-        'slice_linear_reg'
+        'slice_linear_reg',
+        'slice_catboost_reg'
     }
     params = {
         'holt':{
             'alpha': 0.5,
-            'beta':0.5,
+            'beta':0.05,
             'step':1
         },
         'slice_linear_reg':{
             'ts_mode':'greedy'
+        },
+        'slice_catboost_reg':{
+            'ts_mode':'greedy',
+            'loss_function': 'RMSE',
+            'iterations': 400,
+            'depth': 5,
+            'learning_rate': 0.04,
+            'od_type' : "Iter",
+            'od_wait' : 100,
+            'verbose': 1
         }
     }
     # module test
     # analyzer.feature_explore()
     analyzer.baseline_methods(models=baseline_models, params=params)
     # analyzer.baseline_methods(models={'slice_linear_reg'}, params=params)
+    # analyzer.baseline_methods(models={}, params=params)
 

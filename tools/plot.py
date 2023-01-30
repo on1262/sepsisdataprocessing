@@ -9,8 +9,9 @@ from collections.abc import Iterable
 import os, sys
 import subprocess
 import missingno as msno
-from .generic import reinit_dir
+from .generic import reinit_dir, remove_slash
 from .colorful_logging import logger
+
 
 
 def plot_loss(data, title='Title'):
@@ -53,6 +54,7 @@ def plot_hotspot(data:np.ndarray, fea_names:list):
     plt.yticks(rotation=0)
     plt.title('Pearson Correlation Matrix', fontsize = 13)
     plt.show()
+    plt.close()
 
 
 '''
@@ -117,8 +119,9 @@ def plot_shap_scatter(fea_name:str, shap:np.ndarray, values:np.ndarray, x_lim=(0
         plt.show()
     else:
         plt.savefig(
-            os.path.join(write_dir_path, f'shap_scatter_{fea_name}.png')
+            os.path.join(write_dir_path, f'shap_scatter_{remove_slash(fea_name)}.png')
         )
+    plt.close()
 
 '''
 生成X的每一列关于Y的条件分布, 用来探究单变量对目标的影响, 要求Y能转换为Bool型
@@ -191,8 +194,6 @@ def plot_na(data:pd.DataFrame, mode='matrix', disp=False, save_path=None):
         plt.savefig(save_path)
     if disp:
         plt.show()
-    
-    
     plt.close()
 
 def plot_category_dist(data:pd.DataFrame, type_dict:dict, output_dir=None):

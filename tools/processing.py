@@ -373,10 +373,10 @@ class DynamicPredictionMetric:
             self.records['duration'] = np.concatenate((self.records['duration'], duration), axis=0)
 
     def plot(self, method_name:str):
-        # 清空输出
-        reinit_dir(write_dir_path=os.path.join(self.out_dir, remove_slash(method_name)))
         corr_dir = os.path.join(self.out_dir, remove_slash(method_name), 'correlation')
         res_dir = os.path.join(self.out_dir, remove_slash(method_name), 'residual')
+        reinit_dir(write_dir_path=corr_dir)
+        reinit_dir(write_dir_path=res_dir)
         self.plot_residual(res_dir=res_dir)
         self.plot_corr(corr_dir=corr_dir)
 
@@ -389,14 +389,14 @@ class DynamicPredictionMetric:
             f.write(f'Error mean={np.abs(pred - gt).mean()}'+ '\n')
             f.write(f'Error std={(pred - gt).std()}'+ '\n')
             f.write(f'Error bias={(pred - gt).mean()}'+ '\n')
-            f.write('END')
+            f.write('END\n')
         
 
     # 绘制残差分布
     def plot_residual(self, res_dir:str):
         logger.info('DynamicPredictionMetric: Plotting residual')
         
-        os.makedirs(res_dir)
+        os.makedirs(res_dir,exist_ok=True)
         if self.records is None:
             logger.error('DynamicPredictionMetric: no record')
             return
@@ -414,7 +414,7 @@ class DynamicPredictionMetric:
     def plot_corr(self, corr_dir:str):
         logger.info('DynamicPredictionMetric: Plotting Correlation')
         
-        os.makedirs(corr_dir)
+        os.makedirs(corr_dir, exist_ok=True)
         if self.records is None:
             logger.error('DynamicPredictionMetric: no record')
             return
