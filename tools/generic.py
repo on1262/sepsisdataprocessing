@@ -400,10 +400,16 @@ def target_statistic(X:np.ndarray, Y:np.ndarray, ctg_feas:list, mode='greedy', h
                 val, count = hist_val[ctg_fea_idx][cls] 
                 hist_val[ctg_fea_idx][cls] = (val + alpha * prior) / (count + alpha)
     
+    # produce average val for unknown category
+    avg_val = {key:np.asarray(list(hist_val[key].values())).mean() for key in hist_val.keys()}
     for r_idx in range(X.shape[0]):
         for c_idx in ctg_feas:
-            X_ts[r_idx, c_idx] = hist_val[c_idx].get(X[r_idx, c_idx])
-            assert(X_ts is not None) # 测试时出现不存在的类别, 还没想好咋办
+            val = hist_val[c_idx].get(X[r_idx, c_idx])
+            if val is not None:
+                X_ts[r_idx, c_idx] = val
+            else:
+                logger.warning(f'Unknown category {X[r_idx, c_idx]} in target statistic')
+                X_ts[r_idx, c_idx] = avg_val[c_idx]
 
     X_ts = X_ts.astype(dtype=np.float32)
     if return_flag == 1:
@@ -490,6 +496,15 @@ def cal_available_time(data:pd.DataFrame, expanded_target:list):
         result[r_idx, 1] = duration
     return result
 
+def assert_no_na(dataset:pd.DataFrame):
+    try:
+        assert(not np.any(dataset.isna().to_numpy()))
+    except Exception as e:
+        na_mat = dataset.isna()
+        for col in dataset.columns:
+            if np.any(na_mat[col].to_numpy()):
+                logger.error(f'assert_na: NA in feature:{col}')
+                assert(0)
 
 set_chinese_font()
     

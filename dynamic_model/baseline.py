@@ -47,8 +47,9 @@ class SimpleTimeSeriesPredictor:
             for r_idx in range(len(data)):
                 s,d = start_idx[r_idx],duration[r_idx]
                 if d >= 2:
-                    result[r_idx, s+1:s+d] = \
-                        np.mean(data[r_idx, s:s+d-1])
+                    for offset in range(s+1, s+d,1):
+                        result[r_idx, offset] = \
+                            np.mean(data[r_idx, s:offset])
         return result
 
 class SliceLinearRegression:
@@ -62,6 +63,7 @@ class SliceLinearRegression:
         self.ts_val = None
         self.ctg_feas = None
         self.num_feas = None
+        self.columns = None
 
     def train(self, X_train:pd.DataFrame, Y_train:pd.DataFrame):
         ctg_feas = []
@@ -72,17 +74,21 @@ class SliceLinearRegression:
             else:
                 num_feas.append(idx)
         self.ctg_feas, self.num_feas = ctg_feas, num_feas
+        self.columns = list(X_train.columns)
         X_train, self.ts_val = tools.target_statistic(X_train.to_numpy(), Y_train.to_numpy(), ctg_feas=ctg_feas, mode=self.params['ts_mode'])
         X_train, self.avg_dict = tools.fill_avg(X_train, num_feas=num_feas)
-        X_train, self.norm_dict = tools.feature_normalization(X_train, num_feas=num_feas, norm_dict=None)
+        # normalize时前面TS的也要考虑, 所以不是原来的num_feas
+        X_train, self.norm_dict = tools.feature_normalization(X_train, num_feas=list(range(len(self.columns))), norm_dict=None)
         assert(not np.isnan(X_train).any())
         self.model.fit(X_train, Y_train)
 
 
     def predict(self, X_test:pd.DataFrame):
+        assert(list(X_test.columns) == self.columns) # 确保序号对的上
         X_test = tools.target_statistic(X_test.to_numpy(), Y=None, ctg_feas=self.ctg_feas, mode=self.params['ts_mode'], hist_val=self.ts_val)
         X_test = tools.fill_avg(X_test, num_feas=self.num_feas, avg_dict=self.avg_dict)
-        X_test = tools.feature_normalization(X_test, num_feas=self.num_feas, norm_dict=self.norm_dict)
+        # normalize时前面TS的也要考虑, 所以不是原来的num_feas
+        X_test = tools.feature_normalization(X_test, num_feas=list(range(len(self.columns))), norm_dict=self.norm_dict)
         Y_pred = self.model.predict(X_test)
         return Y_pred
 
@@ -91,13 +97,3 @@ class SliceLinearRegression:
             r_idx, c_idx = map_table[index[idx]][0],map_table[index[idx]][1]
             Y_pred[r_idx, c_idx] = result[idx]
         return Y_pred
-
-
-        
-           
-           
-           
-                    
-
-
-

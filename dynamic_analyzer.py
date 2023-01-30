@@ -16,6 +16,7 @@ class DynamicAnalyzer:
         self.data_pd = dataset.data_pd
         self.type_dict = dataset.get_type_dict()
         self.target_fea = dataset.target_fea # only one name
+        self.dynamic_target_name = self.conf['dynamic_target_name'] # 这个是动态模型的k+1天特征
         self.fea_manager = dataset.fea_manager
         self.n_fold = 5
 
@@ -61,21 +62,15 @@ class DynamicAnalyzer:
                 slice_dict = self.dataset.slice_dict
                 dataset = slice_dict['data'].copy()
                 dataset = tools.convert_type({'_default': -1}, dataset, slice_dict['type_dict'])
-                try:
-                    assert(not np.any(dataset.isna().to_numpy()))
-                except Exception as e:
-                    na_mat = dataset.isna()
-                    for col in dataset.columns:
-                        if np.any(na_mat[col].to_numpy()):
-                            logger.error(f'NA in feature:{col}')
+                tools.assert_no_na(dataset)
                 Y_pred = -np.ones(slice_dict['gt_table'].shape)
                 train_cols = list(dataset.columns)
-                train_cols.remove(self.target_fea)
+                train_cols.remove(self.dynamic_target_name)
                 for idx, (train_index, test_index) in enumerate(kf.split(X=dataset)):
                     model = Baseline.SliceLinearRegression(slice_dict['type_dict'], params=params['slice_linear_reg'])
                     X_train = dataset.loc[train_index, train_cols]
                     X_test = dataset.loc[test_index, train_cols]
-                    Y_train = dataset.loc[train_index, self.target_fea]
+                    Y_train = dataset.loc[train_index, self.dynamic_target_name]
                     model.train(X_train, Y_train)
                     result = model.predict(X_test=X_test)
                     Y_pred = model.map_result(Y_pred=Y_pred, result=result, map_table=slice_dict['map_table'], index=test_index)
@@ -152,7 +147,8 @@ if __name__ == "__main__":
     baseline_models = {
         'simple_nearest',
         'simple_average',
-        'simple_holt'
+        'simple_holt',
+        'slice_linear_reg'
     }
     params = {
         'holt':{
@@ -166,6 +162,6 @@ if __name__ == "__main__":
     }
     # module test
     # analyzer.feature_explore()
-    # analyzer.baseline_methods(models=baseline_models, params=holt_params)
-    analyzer.baseline_methods(models={'slice_linear_reg'}, params=params)
+    analyzer.baseline_methods(models=baseline_models, params=params)
+    # analyzer.baseline_methods(models={'slice_linear_reg'}, params=params)
 

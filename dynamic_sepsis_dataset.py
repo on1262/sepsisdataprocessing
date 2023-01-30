@@ -96,8 +96,8 @@ class DynamicSepsisDataset():
         # prepare slice dataset
         self._init_time_arr()
         time_k = 1
-        slice_target_time = self.make_slice(mode='target_time', k=time_k)
-        slice_k = self.make_slice(mode='k_slice', k=time_k)
+        slice_target_time = self._make_slice(mode='target_time', k=time_k)
+        slice_k = self._make_slice(mode='k_slice', k=time_k)
         slice_k['data'].to_csv(self.conf_loader['csv_slice_path'], index=False)
         slice_target_time['data'].to_csv(self.conf_loader['csv_target_time_path'], index=False)
 
@@ -122,11 +122,11 @@ class DynamicSepsisDataset():
     
     '''
     生成动态模型所需的时间切片
-    mode: 
+    mode:
         'target_time' 适用于只看目标历史数据的方法
         'k_slice' 适用于只用T-k天预测第T天数据的方法
     '''
-    def make_slice(self, mode:str='target_time', k=None)->dict:
+    def _make_slice(self, mode:str='target_time', k=None)->dict:
         if self.k is not None and k == self.k:
             logger.info(f'Load slice dataset from pkl')
             if mode == 'target_time':
@@ -149,6 +149,7 @@ class DynamicSepsisDataset():
             return {'data':result, 'start_idx': start_idx, 'dur_len':dur_len} # dict{key:ndarray}
         elif mode == 'k_slice':
             assert(k is not None)
+            dynamic_target_name = tools.GLOBAL_CONF_LOADER["dynamic_analyzer"]['dynamic_target_name']
             data = self.data_pd.loc[dur_len > k]
             dur_len = dur_len[dur_len > k]
             start_idx = start_idx[dur_len > k]
@@ -156,10 +157,9 @@ class DynamicSepsisDataset():
             sta_names = self.fea_manager.get_names(sta=True)
             dyn_names = self.fea_manager.get_names(dyn=True)
             dyn_dict = {key:[val[1] for val in self.fea_manager.get_expanded_fea(key)] for key in dyn_names} # old name
-            result = pd.DataFrame(columns=sta_names + dyn_names) # target_fea 包括在内
-            dyn_names.remove(self.target_fea)
+            result = pd.DataFrame(columns=sta_names + dyn_names + [dynamic_target_name]) # target_fea 包括在内
             map_table = []
-            tmp = self.make_slice(mode='target_time', k=k)
+            tmp = self._make_slice(mode='target_time', k=k)
             for r_idx in tqdm(range(len(data)), desc='Mapping slice dataset'):
                 for delta in range(dur_len[r_idx] - k): # duration=N, k=1, delta=0,1,2,...,N-2
                     new_row = {}
@@ -167,44 +167,27 @@ class DynamicSepsisDataset():
                         new_row[name] = data.at[r_idx, name]
                     for name in dyn_names:
                         new_row[name] = data.at[r_idx, dyn_dict[name][start_idx[r_idx] + delta]]
-                    new_row[self.target_fea] = data.at[r_idx, dyn_dict[self.target_fea][start_idx[r_idx] + delta + k]]
+                    new_row[dynamic_target_name] = data.at[r_idx, dyn_dict[self.target_fea][start_idx[r_idx] + delta + k]]
                     map_table.append([r_idx, start_idx[r_idx] + delta + k])
                     result.loc[len(result)] = new_row
             map_table = np.asarray(map_table, dtype=np.int32)
             logger.info(f'Extended Datasets size={len(result)}, with {len(result.columns)} features')
             # generate new type dict
-            new_type_dict = self.generate_dyn_type_dict()
+            new_type_dict = self._generate_dyn_type_dict()
             for name in result.columns:
-                if name not in dyn_dict.keys():
+                if name == dynamic_target_name:
+                    new_type_dict[name] = float
+                elif name not in dyn_dict.keys():
                     new_type_dict[name] = self.type_dict[name]
             return {'data':result, 'type_dict':new_type_dict, 'gt_table': tmp['data'], 
                 'start_idx':start_idx, 'dur_len':dur_len, 'map_table':map_table}
     
-    def generate_dyn_type_dict(self) -> dict:
+    def _generate_dyn_type_dict(self) -> dict:
         dyn_names = set(self.fea_manager.get_names(dyn=True))
         result = {}
         for name in dyn_names:
             result[name] = self.type_dict[self.fea_manager.get_expanded_fea(name)[0][1]]
         return result
-    
-    def get_category_feas(self):
-        fea_list = []
-        idx_list = []
-        for idx, col in enumerate(self.data_pd.columns):
-            if self.configs['type_dict'][col] == str:
-                fea_list.append(col)
-                idx_list.append(idx)
-        return fea_list, idx_list
-
-    def get_numeric_feas(self):
-        fea_list = []
-        idx_list = []
-        for idx, col in enumerate(self.data_pd.columns):
-            if self.configs['type_dict'][col] != str:
-                fea_list.append(col)
-                idx_list.append(idx)
-        return fea_list, idx_list
-
 
     def get_type_dict(self):
         return self.configs['type_dict'].copy()

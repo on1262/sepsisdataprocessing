@@ -51,7 +51,8 @@
     "dynamic_analyzer": {
         "paths": {
             "out_dir": "dynamic_model_out"
-        }
+        },
+        "dynamic_target_name":"target"
     }
     
 }
