@@ -10,7 +10,7 @@ from sklearn.neighbors import KNeighborsRegressor
 from catboost import CatBoostClassifier, Pool
 from static_sepsis_dataset import StaticSepsisDataset
 from sklearn.model_selection import train_test_split
-from neural_network import NNTrainer
+from static_model.neural_network import NNTrainer
 import apriori
 
 

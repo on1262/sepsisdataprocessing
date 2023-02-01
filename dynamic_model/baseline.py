@@ -30,14 +30,13 @@ class SimpleTimeSeriesPredictor:
                 s = start_idx[r_idx]
                 d = duration[r_idx]
                 if d >= 2: # 趋势至少需要两个已知点
-                    result[r_idx, s+1] = data[r_idx, s] # 第二个点
                     s_mat[r_idx, s] = data[r_idx, s]
-                    t_mat[r_idx, s] = data[r_idx, s+1] - data[r_idx, s]
-                    for t_idx in range(s+2, s+d, 1): # 带趋势的预测会泄露第一个和第二个点, 所以只能从第三个点开始预测
+                    t_mat[r_idx, s] = 0 # 使得beta=0时退化到无趋势的指数平滑
+                    for t_idx in range(s+1, s+d, 1):
                         s_mat[r_idx, t_idx] = alpha*data[r_idx, t_idx] + (1-alpha)*(s_mat[r_idx, t_idx-1] + t_mat[r_idx, t_idx-1]) # a*x_i+(1-a)*(s_i-1+t_i-1)
                         t_mat[r_idx, t_idx] = beta*(s_mat[r_idx, t_idx] - s_mat[r_idx, t_idx-1]) + (1-beta)*t_mat[r_idx, t_idx-1] # b*(s_i-s_i-1)+(1-beta)*t_i-1
                         result[r_idx, t_idx] = s_mat[r_idx, t_idx-1] + step*t_mat[r_idx, t_idx-1] # h_step: s_i+h*t_i
-                    
+        
         elif mode == 'nearest':
             for r_idx in range(len(data)):
                 s,d = start_idx[r_idx],duration[r_idx]
@@ -98,15 +97,33 @@ class SliceLinearRegression:
         return Y_pred
 
 class SliceCatboostRegression:
-    def __init__(self, type_dict:dict, params=None) -> None:
-        self.model = CatBoostRegressor(
-            iterations=params['iterations'],
-            depth=params['depth'],
-            loss_function=params['loss_function'],
-            learning_rate=params['learning_rate'],
-            od_type = params["od_type"],
-            od_wait = params["od_wait"],
-            verbose=params['verbose'])
+    def __init__(self, type_dict:dict, params:dict=None) -> None:
+        # param['quantile'] = [0.25, 0.5, 0.75]
+        # reference: https://catboost.ai/en/docs/concepts/loss-functions-regression
+        # example: Quantile:alpha=0.1
+        self.quantile = None
+        self.models = []
+        if 'quantile' in params.keys():
+            self.quantile = params['quantile']
+            assert(np.abs(self.quantile[round((len(self.quantile) - 1) / 2)] - 0.5) < 1e-4) # 中间一定是0.5, 即MAE
+            for alpha in params['quantile']:
+                self.models.append(CatBoostRegressor(
+                    iterations=params['iterations'],
+                    depth=params['depth'],
+                    loss_function=f'Quantile:alpha={alpha:.2f}',
+                    learning_rate=params['learning_rate'],
+                    od_type = params["od_type"],
+                    od_wait = params["od_wait"],
+                    verbose=params['verbose']))
+        else:
+            self.models.append(CatBoostRegressor(
+                iterations=params['iterations'],
+                depth=params['depth'],
+                loss_function=params['loss_function'],
+                learning_rate=params['learning_rate'],
+                od_type = params["od_type"],
+                od_wait = params["od_wait"],
+                verbose=params['verbose']))
         self.type_dict = type_dict
         self.params = params
         # metadata generated in training phase
@@ -130,22 +147,39 @@ class SliceCatboostRegression:
         pool_valid = Pool(X_valid, Y_valid)
         self.pool_valid = pool_valid
         self.X_valid = X_valid
-        self.model.fit(pool_train, eval_set=pool_valid, use_best_model=True)
+        if self.quantile is None:
+            self.models[0].fit(pool_train, eval_set=pool_valid, use_best_model=True)
+        else:
+            for model in self.models:
+                model.fit(pool_train, eval_set=pool_valid, use_best_model=True)
 
     def model_explanation(self):
-        shap_array, shap, sorted_names = tools.test_fea_importance(self.model, self.pool_valid, self.columns)
+        if self.quantile:
+            idx = round((len(self.quantile) - 1) / 2)
+        else:
+            idx = 0
+        shap_array, shap, sorted_names = tools.test_fea_importance(self.models[idx], self.pool_valid, self.columns)
         return shap_array, shap, sorted_names
 
     
-    def predict(self, X_test:pd.DataFrame):
+    def predict(self, X_test:pd.DataFrame) -> np.ndarray:
         assert(list(X_test.columns) == self.columns) # 确保序号对的上
         X_test = tools.target_statistic(X_test.to_numpy(), Y=None, ctg_feas=self.ctg_feas, mode=self.params['ts_mode'], hist_val=self.ts_val)
         pool_test = Pool(data=X_test)
-        Y_pred = self.model.predict(pool_test)
-        return Y_pred
+        if self.quantile is None:
+            Y_pred = self.models[0].predict(pool_test)
+            return Y_pred
+        else:
+            Y_pred = np.asarray([model.predict(pool_test) for model in self.models])
+            return Y_pred
 
     def map_result(self, Y_pred, result, map_table, index):
-        for idx in range(result.shape[0]):
-            r_idx, c_idx = map_table[index[idx]][0],map_table[index[idx]][1]
-            Y_pred[r_idx, c_idx] = result[idx]
+        if self.quantile is None:
+            for idx in range(result.shape[0]):
+                r_idx, c_idx = map_table[index[idx]][0],map_table[index[idx]][1]
+                Y_pred[r_idx, c_idx] = result[idx]
+        else:
+            for idx in range(result.shape[1]):
+                r_idx, c_idx = map_table[index[idx]][0],map_table[index[idx]][1]
+                Y_pred[:, r_idx, c_idx] = result[:, idx]
         return Y_pred

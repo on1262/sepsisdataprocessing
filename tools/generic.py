@@ -167,12 +167,12 @@ def select_na(data:pd.DataFrame, col_thres=0.5, row_thres=0.7, fea_manager:Featu
 条件2: 存在某个特征不符合interval_dict的正常范围
 条件3: target_fea的最大连续长度小于2
 '''
-def remove_invalid_rows(data:pd.DataFrame, type_dict:dict, interval_dict:dict, expanded_target:list) -> pd.DataFrame:
+def remove_invalid_rows(data:pd.DataFrame, type_dict:dict, interval_dict:dict=None, expanded_target:list=None) -> pd.DataFrame:
     data.reset_index(drop=True, inplace=True)
     na_table = data.isna()
     select_table = pd.Series([True for _ in range(len(data.index))], index=data.index, name='bools')
     for col in data.columns:
-        flag_numeric = True if (type_dict[col] != str and col in interval_dict.keys()) else False
+        flag_numeric = True if (interval_dict is not None and type_dict[col] != str and col in interval_dict.keys()) else False
         if flag_numeric:
             interval_min = interval_dict[col][0]
             interval_max = interval_dict[col][1]
@@ -185,8 +185,11 @@ def remove_invalid_rows(data:pd.DataFrame, type_dict:dict, interval_dict:dict, e
                 except Exception as e:
                     select_table[idx] = False
     ori_len = len(data)
-    duration = cal_available_time(data, expanded_target=expanded_target)[:,1]
-    data = data.iloc[select_table.values * (duration > 24)]
+    if expanded_target is not None:
+        duration = cal_available_time(data, expanded_target=expanded_target)[:,1]
+        data = data.iloc[select_table.values * (duration > 24)]
+    else:
+        data = data.iloc[select_table.values]
     logger.info(f"remove_invalid_rows: {(ori_len - len(data))}/{ori_len} rows are removed.")
     return data
 

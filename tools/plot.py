@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
+from matplotlib.colors import Normalize as ColorNorm
 from matplotlib.patches import PathPatch
 import numpy as np
 import seaborn as sns
@@ -12,7 +13,22 @@ import missingno as msno
 from .generic import reinit_dir, remove_slash
 from .colorful_logging import logger
 
+'''
+    用于分位数回归的作图, 通过线性插值得到待测点所对应的分位数, 使得数据的分布不会改变出图的色彩多样性
+'''
+class HueColorNormlize(ColorNorm):
+    def __init__(self, data:np.ndarray) -> None:
+        super().__init__(vmin=data.min(), vmax=data.max(), clip=False)
+        n_points = 21
+        points = [data.min()]
+        data_sorted = np.sort(data, axis=None)
+        for idx in range(n_points-1):
+            points.append(data_sorted[round(((idx+1)/(n_points-1))*(data.shape[0]-1))])
+        self.x = np.asarray(points)
+        self.y = np.asarray(list(range(len(points)))) / (len(points)-1)
 
+    def __call__(self, value, clip: bool = None):
+        return np.interp(value, self.x, self.y, left=self.vmin, right=self.vmax)
 
 def plot_loss(data, title='Title'):
     plt.plot(data)
@@ -80,8 +96,12 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_
     for rank, idx in enumerate(idx_list):
         name = fea_names[idx]
         logger.debug(f'Plot correlation: {name}')
-        plt.figure(figsize = (12,6))
+        plt.figure(figsize = (12,12))
         sns.regplot(x=X[x_valid[:, idx], idx], y=Y[x_valid[:, idx]], scatter_kws={'alpha':0.2})
+        # plot line y=x
+        d_min, d_max = ymin, ymax
+        plt.plot(np.asarray([d_min, d_max]),np.asarray([d_min, d_max]), 
+            linestyle='dashed', color='C7', label='Y=X')
         plt.title(f'{name} vs {target_name}', fontsize = 12)
         if restrict_area and Y.shape[0] > 20:
             # 去除20个极值, 使得显示效果更好
@@ -101,6 +121,67 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_
         else:
             plt.savefig(
                 os.path.join(write_dir_path, replace_invalid_filename(rf'{rank}@{fea_names[idx]}_vs_{target_name}.png'))
+            )
+        plt.close()
+
+'''
+生成预测值和真实值的散点图, 并用颜色表明分位数的范围, 从而表现出模型认为该预测是否可靠
+默认不生成回归线, 但是会生成一条Y=X线
+不支持生成多个变量, X只能是(quantile, data_len)的形状
+write_dir_path: 将每个变量保存为一张图, 放在给定文件夹中
+'''
+def plot_correlation_with_quantile(X_pred:np.ndarray, x_name:str, Y_gt:np.ndarray, target_name: str, quantile:list, restrict_area=False, write_dir_path=None):
+    if write_dir_path is not None:
+        os.makedirs(write_dir_path, exist_ok=True)
+    Y_gt = Y_gt.reshape(Y_gt.shape[0], 1)
+    assert(len(X_pred.shape) == 2)
+    X_pred, Y_gt =  X_pred.astype(np.float32), Y_gt.astype(np.float32)
+    valid = ((1 - np.isnan(X_pred[0,...])) * (1 - np.isnan(Y_gt[:,0]))).astype(bool) # 两者都是true才行
+    X_pred, Y_gt = X_pred[:, valid], Y_gt[valid,:]
+    
+    median_idx = round((X_pred.shape[0] - 1) / 2)
+    ymin, ymax = Y_gt.min(), Y_gt.max()
+    xmin, xmax = X_pred[median_idx].min(), X_pred[median_idx].min()
+    d_min = min(ymin, xmin)
+    d_max = max(xmax, ymax)
+    # generate dataframe
+    data_arr = np.ndarray((2+median_idx, X_pred.shape[1]), dtype=float)
+    data_arr[0, :] = Y_gt[:,0]
+    data_arr[1,:] = X_pred[median_idx, :]
+    columns = ['gt','pred']
+    for idx in range(1, median_idx+1): # median=2, 1,2->(2-1, 2+1), (2-2,2+2)
+        data_arr[idx+1,:] = X_pred[median_idx+idx,:] - X_pred[median_idx-idx,:]
+        columns.append(f'alpha={quantile[median_idx-idx]:.2f}-{quantile[median_idx+idx]:.2f}')
+    df = pd.DataFrame(data=data_arr.T, columns=columns, index=None)
+    for idx in range(2, len(columns)):
+        logger.debug(f'Plot correlation with quantile: {x_name}, alpha=[{columns[idx]}]]')
+        plt.figure(figsize = (12,12))
+        norm = HueColorNormlize(df[columns[idx]].to_numpy())
+        sns.scatterplot(data=df, x="pred", y="gt", hue_norm=norm,
+            hue=columns[idx], palette=sns.color_palette("coolwarm", as_cmap=True),
+            alpha=0.5, linewidth=0, size=1)
+        # plot line y=x
+        plt.plot(np.asarray([d_min, d_max]),np.asarray([d_min, d_max]), 
+            linestyle='dashed', color='C7', label='Y=X')
+        plt.title(f'{x_name} vs {target_name} quantile={columns[idx]}', fontsize = 12)
+        # if restrict_area and Y.shape[0] > 20:
+        #     # 去除20个极值, 使得显示效果更好
+        #     Y_sorted = np.sort(Y[x_valid[:, idx], 0], axis=0)
+        #     X_sorted = np.sort(X[x_valid[:, idx], idx], axis=0)
+        #     Y_span = Y_sorted[-10] - Y_sorted[10]
+        #     X_span = X_sorted[-10] - X_sorted[10]
+        #     plt.ylim(bottom=Y_sorted[10]-Y_span*0.05, top=Y_sorted[-10]+Y_span*0.05)
+        #     plt.xlim(left=X_sorted[10]-X_span*0.05, right=X_sorted[-10]+X_span*0.05)
+        # else:
+        plt.ylim(bottom=d_min, top=d_max)
+        plt.xlim(left=d_min, right=d_max)
+        plt.xlabel(x_name)
+        plt.ylabel(target_name)
+        if write_dir_path is None:
+            plt.show()
+        else:
+            plt.savefig(
+                os.path.join(write_dir_path, replace_invalid_filename(rf'{x_name}@{columns[idx]}.png'))
             )
         plt.close()
 

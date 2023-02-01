@@ -31,7 +31,7 @@ class DynamicAnalyzer:
         logger.info('Analyzer: Feature explore')
         out_dir = self.conf['paths']['out_dir']
         # target feature avaliable days
-        tools.plot_single_dist(self.target_time_arr[:,1] / 24, f"Available Days: {self.target_fea}", \
+        tools.plot_single_dist(self.dataset.target_time_arr[:,1] / 24, f"Available Days: {self.target_fea}", \
             save_path=os.path.join(out_dir, 'target_available_days.png'))
         # first ards days
         first_ards_days = self._cal_first_ards_days(self.data_pd, self.fea_manager.get_expanded_fea(self.target_fea))
@@ -41,7 +41,7 @@ class DynamicAnalyzer:
         self._plot_time_series_samples(self.target_fea, n_sample=400, n_per_plots=40, \
             write_dir=os.path.join(out_dir, "samples_plot"))
         # plot fourier tranform result
-        self._plot_fourier_transform(self.target_fea, self.target_time_arr[:,1], save_dir=out_dir)
+        self._plot_fourier_transform(self.target_fea, self.dataset.target_time_arr[:,1], save_dir=out_dir)
 
     def baseline_methods(self, models:set, params=None):
         kf = KFold(n_splits=self.n_fold, shuffle=True)
@@ -89,9 +89,16 @@ class DynamicAnalyzer:
                 dataset = slice_dict['data'].copy()
                 dataset = tools.convert_type({'_default': -1}, dataset, slice_dict['type_dict'])
                 tools.assert_no_na(dataset)
-                Y_pred = -np.ones(slice_dict['gt_table'].shape)
                 train_cols = list(dataset.columns)
                 train_cols.remove(self.dynamic_target_name)
+                quantile_flag = False
+                if params['slice_catboost_reg'].get('quantile') is not None:
+                    metric.set_quantile(params['slice_catboost_reg']['quantile'], round((len(params['slice_catboost_reg']['quantile']) - 1) / 2))
+                    logger.info(f'Enable quantile in model {model_name}')
+                    quantile_flag = True
+                    Y_pred = -np.ones((len(params['slice_catboost_reg']['quantile']), slice_dict['gt_table'].shape[0],slice_dict['gt_table'].shape[1]))
+                else:
+                    Y_pred = -np.ones(slice_dict['gt_table'].shape)
                 for idx, (train_index, test_index) in enumerate(kf.split(X=dataset)):
                     model = Baseline.SliceCatboostRegression(slice_dict['type_dict'], params=params['slice_catboost_reg'])
                     X_train = dataset.loc[train_index, train_cols]
@@ -99,7 +106,10 @@ class DynamicAnalyzer:
                     Y_train = dataset.loc[train_index, self.dynamic_target_name]
                     model.train(X_train, Y_train)
                     result = model.predict(X_test=X_test)
-                    Y_pred = model.map_result(Y_pred=Y_pred, result=result, map_table=slice_dict['map_table'], index=test_index)
+                    if quantile_flag:
+                        Y_pred = model.map_result(Y_pred=Y_pred, result=result, map_table=slice_dict['map_table'], index=test_index)
+                    else:
+                        Y_pred = model.map_result(Y_pred=Y_pred, result=result, map_table=slice_dict['map_table'], index=test_index)
                     shap_array, shap, sorted_names = model.model_explanation()
                     # 注册每个样本的每个特征对应的shap值
                     if idx == 0:
@@ -122,6 +132,9 @@ class DynamicAnalyzer:
                     self._plot_fea_importance(model_name)
                 metric.add_prediction(
                     prediction=Y_pred, gt=slice_dict['gt_table'].to_numpy(), start_idx=slice_dict['start_idx'], duration=slice_dict['dur_len'])
+            else:
+                logger.error('Invalid method name')
+                assert(0)
             metric.write_result(model_name, log_path=log_path)
             metric.plot(model_name)
         self.create_final_result()
@@ -141,9 +154,6 @@ class DynamicAnalyzer:
                             final_f.write(f.read())
                             final_f.write('\n')
         logger.info(f'Final result saved at ' + os.path.join(out_dir, 'final_result.log'))
-                
-
-
 
     def _plot_fea_importance(self, model_name):
         # 得到整体的特征重要性表
@@ -235,7 +245,7 @@ if __name__ == "__main__":
     params = {
         'holt':{
             'alpha': 0.5,
-            'beta':0.05,
+            'beta':0,
             'step':1
         },
         'slice_linear_reg':{
@@ -243,7 +253,8 @@ if __name__ == "__main__":
         },
         'slice_catboost_reg':{
             'ts_mode':'greedy',
-            'loss_function': 'RMSE',
+            # 'loss_function': 'RMSE',
+            'quantile':[0.25, 0.5, 0.75],
             'iterations': 400,
             'depth': 5,
             'learning_rate': 0.04,
@@ -253,8 +264,11 @@ if __name__ == "__main__":
         }
     }
     # module test
-    # analyzer.feature_explore()
-    analyzer.baseline_methods(models=baseline_models, params=params)
-    # analyzer.baseline_methods(models={'slice_linear_reg'}, params=params)
-    # analyzer.baseline_methods(models={}, params=params)
+    def module_test():
+        analyzer.feature_explore()
+        analyzer.baseline_methods(models=baseline_models, params=params)
+    
+    # module_test()
+    # analyzer.baseline_methods(models={'simple_holt'}, params=params)
+    analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
 
