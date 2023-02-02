@@ -50,7 +50,8 @@
     },
     "dynamic_analyzer": {
         "paths": {
-            "out_dir": "dynamic_model_out"
+            "out_dir": "dynamic_model_out",
+            "lstm_dataset_save_path": "dynamic_model_out/lstm_dataset.pkl"
         },
         "dynamic_target_name":"target",
         "shap_names": {"dyn_PaO2/FiO2": [0, 600], "sta_PaO2": [0, 500], "sta_SOFA_氧合指数": [0, 800], "dyn_PaO2": [0, 500]}

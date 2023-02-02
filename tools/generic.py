@@ -8,7 +8,6 @@ import pandas as pd
 import re
 from collections.abc import Iterable
 import os, sys
-import subprocess
 import missingno as msno
 import hashlib
 from .colorful_logging import logger
@@ -326,19 +325,34 @@ def one_hot_decoding(data:pd.DataFrame, cluster_dict:dict, fea_manager:FeatureMa
         if fea_manager is not None:
             for name in old_names:
                 fea_manager.remove_fea(name)
+            fea_manager.add_sta(new_name)
     return data
 
-def fill_default(data:pd.DataFrame, default_dict:dict):
+def fill_default(data:pd.DataFrame, sta_dict:dict, dyn_dict:dict=None, fea_manager:FeatureManager=None):
     logger.debug('fill_default')
     na_dict = {}
-    for key in default_dict.keys():
+    for key in sta_dict.keys():
         if key not in data.columns:
             logger.warning(f"fill_default: feature not founded: {key}")
             continue
-        if len(default_dict[key]) == 1:
-            na_dict[key] = default_dict[key][0]
+        if not isinstance(sta_dict[key], list):
+            na_dict[key] = sta_dict[key]
         else:
-            data.replace(default_dict[key][0], {key:default_dict[key][1]}, inplace=True)
+            data.replace(sta_dict[key][0], {key:sta_dict[key][1]}, inplace=True)
+    if dyn_dict is not None and fea_manager is not None:
+        dyn_names = set(fea_manager.get_names(dyn=True))
+        for key in dyn_dict.keys():
+            if key in data.columns: # 静态
+                if not isinstance(dyn_dict[key], list):
+                    na_dict[key] = dyn_dict[key]
+                else:
+                    data.replace(dyn_dict[key][0], {key:dyn_dict[key][1]}, inplace=True)
+            elif key in dyn_names:
+                for name in [val[1] for val in fea_manager.get_expanded_fea(key)]:
+                    if not isinstance(dyn_dict[key], list):
+                        na_dict[name] = dyn_dict[key]
+                    else:
+                        data.replace(dyn_dict[key][0], {name:dyn_dict[key][1]}, inplace=True)
     data.fillna(value=na_dict, inplace=True)
 
 def normalize(x:np.ndarray, axis=1):

@@ -61,6 +61,8 @@ class DynamicSepsisDataset():
             self.data_pd, cluster_dict=self.configs['static']['one_hot_decoding'], fea_manager=self.fea_manager
         )
         self.plot_na('bar')
+        # TODO 这里有个小bug, select_na在fill_default之前运行, 阈值会把还没fill的视为0
+        # 但是也可以解释: 如果非0值很少, fill_default之后也没什么用
         self.data_pd = tools.select_na(self.data_pd,
             col_thres=self.configs['select_na']['1st_col_thres'],
             row_thres=self.configs['select_na']['1st_row_thres'],
@@ -80,7 +82,8 @@ class DynamicSepsisDataset():
 
         # data cleaning
         self.data_pd = tools.apply_category_fea(self.data_pd, self.category_dict)
-        tools.fill_default(self.data_pd, self.configs['static']['fill_default'])
+        tools.fill_default(self.data_pd,
+            self.configs['static']['fill_default'], self.configs['dynamic']['fill_default'], self.fea_manager)
         self.data_pd = tools.select_na(self.data_pd,
             col_thres=self.configs['select_na']['2nd_col_thres'],
             row_thres=self.configs['select_na']['2nd_row_thres'],
@@ -121,6 +124,13 @@ class DynamicSepsisDataset():
             expanded_target=self.fea_manager.get_expanded_fea(self.target_fea)
         ) # [:,0]=start_time, [:,1]=duration
     
+    # 将开始和持续时间变成整数
+    def get_time_target_idx(self):
+        times = [val[0] for val in self.fea_manager.get_expanded_fea(self.target_fea)]
+        step = times[1] - times[0]
+        start_idx = np.round(self.target_time_arr[:,0] / step).astype(np.int32)
+        dur_len = np.round(self.target_time_arr[:,1] / step).astype(np.int32)
+        return start_idx, dur_len
     '''
     生成动态模型所需的时间切片
     mode:
@@ -136,11 +146,8 @@ class DynamicSepsisDataset():
                 return self.slice_dict
         else:
             logger.info('Creating slice dataset. This procedure may be time consuming.')
-        # 将开始和持续时间变成整数
-        times = [val[0] for val in self.fea_manager.get_expanded_fea(self.target_fea)]
-        step = times[1] - times[0]
-        start_idx = np.round(self.target_time_arr[:,0] / step).astype(np.int32)
-        dur_len = np.round(self.target_time_arr[:,1] / step).astype(np.int32)
+        start_idx, dur_len = self.get_time_target_idx()
+        
         if mode == 'target_time':
             expanded = self.fea_manager.get_expanded_fea(self.target_fea)
             names = [val[1] for val in expanded]
@@ -182,6 +189,9 @@ class DynamicSepsisDataset():
                     new_type_dict[name] = self.type_dict[name]
             return {'data':result, 'type_dict':new_type_dict, 'gt_table': tmp['data'], 
                 'start_idx':start_idx, 'dur_len':dur_len, 'map_table':map_table}
+        else:
+            logger.error('make slice: unknown mode')
+            assert(0)
     
     def _generate_dyn_type_dict(self) -> dict:
         dyn_names = set(self.fea_manager.get_names(dyn=True))

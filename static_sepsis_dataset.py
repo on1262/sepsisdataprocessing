@@ -56,7 +56,7 @@ class StaticSepsisDataset():
 
         # data cleaning
         self.data_pd = tools.apply_category_fea(self.data_pd, self.category_dict)
-        tools.fill_default(self.data_pd, self.configs['fill_default'])
+        tools.fill_default(self.data_pd, self.configs['fill_default'], dyn_dict=None, fea_manager=None)
         self.data_pd = tools.select_na(self.data_pd,
             col_thres=self.configs['select_na']['2nd_col_thres'],
             row_thres=self.configs['select_na']['2nd_row_thres'])

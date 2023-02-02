@@ -7,6 +7,9 @@ from tools import logger as logger
 import matplotlib.pyplot as plt
 from sklearn.model_selection import KFold
 from dynamic_model import baseline as Baseline
+import dynamic_model.net as NNet
+from tqdm import tqdm
+import pickle
 
 
 class DynamicAnalyzer:
@@ -42,6 +45,62 @@ class DynamicAnalyzer:
             write_dir=os.path.join(out_dir, "samples_plot"))
         # plot fourier tranform result
         self._plot_fourier_transform(self.target_fea, self.dataset.target_time_arr[:,1], save_dir=out_dir)
+
+    def lstm_model(self, params, load_path:str=None):
+        kf = KFold(n_splits=self.n_fold, shuffle=True)
+        self.register_values.clear()
+        # datasets and params
+        in_channels = None
+        sta_names = None
+        dyn_names = None
+        data_3d = None
+        data_mask = None
+        if load_path is None or not os.path.exists(load_path): # 制作数据集
+            logger.info('Creating dataset for lstm_model, it may take few minutes')
+            sta_names = self.fea_manager.get_names(sta=True)
+            dyn_names = self.fea_manager.get_names(dyn=True)
+            assert(self.target_fea in dyn_names)
+            in_channels = len(sta_names) + len(dyn_names) # 动态计算用到特征的数量,
+            t_channels = len(self.fea_manager.get_expanded_fea(self.target_fea))
+            # 先填充-1, 后续再修正
+            data_df = tools.convert_type({'_default': -1}, self.data_pd.copy(), self.dataset.get_type_dict())
+            # 建立3D array
+            dyn_name_dict = {key:[val[1] for val in self.fea_manager.get_expanded_fea(key)] for key in dyn_names}
+            data_3d = np.empty((len(data_df), in_channels, t_channels)) # size: (sample, [sta_fea, dyn_fea], time)
+            for idx in tqdm(range(len(data_df)), desc='Build array:'):
+                data_3d[idx, :len(sta_names), :] = data_df.loc[idx, sta_names].to_numpy() # copy sta names
+                for d_idx, name in enumerate(dyn_names):
+                    data_3d[idx, len(sta_names) + d_idx, :] = data_df.loc[idx, dyn_name_dict[name]]
+            # 首位对齐和制作mask
+            data_mask = np.zeros((len(data_3d.shape[0], data_3d.shape[2]))) # 可用时间是按照target计算的
+            start, dur = self.dataset.get_time_target_idx()
+            for idx in tqdm(range(len(data_df)), desc='Processing array:'):
+                data_mask[idx, start[idx]:start[idx]+dur[idx]] = True
+                data_3d[idx, 0:dur[idx],:] = data_3d[idx, start[idx]:start[idx]+dur[idx]]
+            data_3d = data_3d * data_mask[...,np.newaxis] # 删除未覆盖的部分
+            # 保存array
+            with open(load_path, 'wb', encoding='utf-8') as f:
+                pickle.dump([data_3d, data_mask, sta_names, dyn_names], f)
+                logger.info(f'Dataset dumped at {load_path}')
+        else:
+            with open(load_path, 'rb', encoding='utf-8') as f:
+                data_3d, data_mask, sta_names, dyn_names = pickle.load(f)
+                in_channels = len(sta_names) + len(dyn_names)
+                logger.info(f'Dataset loaded from {load_path}')
+        metric = tools.DynamicPredictionMetric(target_name=self.target_fea,
+            expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir'])
+        params['in_channels'] = in_channels
+        # 训练集划分
+        for idx, (data_index, test_index) in enumerate(kf.split(X=self.data_pd)):
+            valid_num = round(len(data_index)*0.15)
+            train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
+            
+            dataset = NNet.Dataset(
+                params=params, data=data_3d, mask=data_mask, train_index=train_index, valid_index=valid_index, test_index=test_index)
+            trainer = NNet.Trainer(params, dataset)
+            trainer.train()
+
+
 
     def baseline_methods(self, models:set, params=None):
         kf = KFold(n_splits=self.n_fold, shuffle=True)
@@ -139,7 +198,7 @@ class DynamicAnalyzer:
             metric.plot(model_name)
         self.create_final_result()
 
-    # 收集各个文件夹里面的result.log, 合并为final result
+    # 收集各个文件夹里面的result.log, 合并为final result.log
     def create_final_result(self):
         logger.info('Creating final result')
         out_dir = self.conf['paths']['out_dir']
@@ -230,8 +289,6 @@ class DynamicAnalyzer:
         plt.close()
 
 
-
-
 if __name__ == "__main__":
     dataset = DynamicSepsisDataset(from_pkl=True)
     analyzer = DynamicAnalyzer(dataset=dataset)
@@ -261,14 +318,25 @@ if __name__ == "__main__":
             'od_type' : "Iter",
             'od_wait' : 100,
             'verbose': 1
+        },
+        'lstm_model':{
+            'ts_mode':'greedy',
+            'hidden_size':128,
+            'batch_size':32,
+            'device':'cuda:0',
+            'lr':1e-4,
+            'epochs':50,
+            'quantile':[0.25, 0.5, 0.75]
         }
     }
     # module test
     def module_test():
         analyzer.feature_explore()
-        analyzer.baseline_methods(models=baseline_models, params=params)
+        analyzer.baseline_methods(models=baseline_models, params=params.copy())
     
     # module_test()
+    analyzer.lstm_model(params['lstm_model'].copy(), load_path=tools.GLOBAL_CONF_LOADER['dynamic_analyzer']['paths']['lstm_dataset_save_path'])
+
     # analyzer.baseline_methods(models={'simple_holt'}, params=params)
-    analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
+    # analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
 
