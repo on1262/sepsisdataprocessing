@@ -214,7 +214,6 @@ class DynamicSepsisDataset():
                     interval_dict[name] = interval_dict[key]
                 interval_dict.pop(key)
         return interval_dict
-                
 
     def _feature_select(self):
         static_features_1 = self.configs['static']['features'].copy()

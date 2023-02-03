@@ -49,12 +49,16 @@ class DynamicAnalyzer:
     def lstm_model(self, params, load_path:str=None):
         kf = KFold(n_splits=self.n_fold, shuffle=True)
         self.register_values.clear()
+        model_name = 'LSTM_model'
+        log_path = os.path.join(self.conf['paths']['out_dir'], model_name, 'result.log')
+        
         # datasets and params
         in_channels = None
         sta_names = None
         dyn_names = None
         data_3d = None
         data_mask = None
+        duration = None
         if load_path is None or not os.path.exists(load_path): # 制作数据集
             logger.info('Creating dataset for lstm_model, it may take few minutes')
             sta_names = self.fea_manager.get_names(sta=True)
@@ -73,32 +77,83 @@ class DynamicAnalyzer:
                     data_3d[idx, len(sta_names) + d_idx, :] = data_df.loc[idx, dyn_name_dict[name]]
             # 首位对齐和制作mask
             data_mask = np.zeros((len(data_3d.shape[0], data_3d.shape[2]))) # 可用时间是按照target计算的
-            start, dur = self.dataset.get_time_target_idx()
-            for idx in tqdm(range(len(data_df)), desc='Processing array:'):
-                data_mask[idx, start[idx]:start[idx]+dur[idx]] = True
-                data_3d[idx, 0:dur[idx],:] = data_3d[idx, start[idx]:start[idx]+dur[idx]]
+            start, duration = self.dataset.get_time_target_idx()
+            for idx in tqdm(range(len(data_df)), desc='Create mask:'):
+                data_mask[idx, start[idx]:start[idx]+duration[idx]] = True
+                data_3d[idx, 0:duration[idx],:] = data_3d[idx, start[idx]:start[idx]+duration[idx]]
             data_3d = data_3d * data_mask[...,np.newaxis] # 删除未覆盖的部分
+            # 建立新的type_dict
+            type_dict = {}
+            old_type_dict = self.dataset.get_type_dict()
+            for idx, name in enumerate(sta_names):
+                type_dict[idx] = old_type_dict[name]
+            for idx, name in enumerate(dyn_names):
+                type_dict[idx+len(sta_names)] = old_type_dict[self.fea_manager.get_expanded_fea(name)[0][1]]
+            # 进行TS和插值
+            fea_names = sta_names + dyn_names
+            train_cols = [] # 除了target以外的序号
+            ctg_cols = [] # 类别特征序号
+            for idx,val in type_dict.items():
+                if val == str:
+                    ctg_cols.append(idx)
+            target_col = None
+            for idx, name in enumerate(fea_names):
+                if name == self.target_fea:
+                    target_col = idx
+                else:
+                    train_cols.append(idx)
+            # 这里的target statistic用同一时间的目标值做ts
+            # 如果采样频率足够, 那么相邻时间短平稳性质不会改变
+            # 如果采样频率不足, 为了避免最后一刻时间无法做TS导致的种种问题(类型不匹配), 还是选择直接TS
+            for t_idx in range(data_3d.shape[2]):
+                data_3d[:, train_cols, t_idx], _ = tools.target_statistic(
+                    X=data_3d[:, train_cols, t_idx],Y=data_3d[:,target_col,t_idx], ctg_feas=ctg_cols, mode=params['ts_mode'], hist_val=None)
+            # 插值消除na(线性插值)
+            t_arr = np.linspace(0,1,num=data_3d.shape[2])
+            na_mat = (data_3d <= -1 + 1e-3)
+            valid_mat = np.asarray(1 - na_mat, dtype=bool)
+            for r_idx in tqdm(range(data_3d.shape[0]), desc='Fill NA'):
+                for c_idx in data_3d.shape[1]:
+                    mask_idx = data_mask[r_idx, c_idx]
+                    n_idx = na_mat[r_idx, c_idx,:] * mask_idx # 空缺的有效值
+                    v_idx = valid_mat[r_idx, c_idx,:] * mask_idx # 有效部分
+                    t_x = t_arr[n_idx]
+                    data_3d[r_idx, c_idx, n_idx] = \
+                        np.interp(x=t_x, xp=t_arr[v_idx], fp=data_3d[r_idx, c_idx, v_idx])
             # 保存array
             with open(load_path, 'wb', encoding='utf-8') as f:
-                pickle.dump([data_3d, data_mask, sta_names, dyn_names], f)
+                pickle.dump([data_3d, data_mask, duration, sta_names, dyn_names], f)
                 logger.info(f'Dataset dumped at {load_path}')
         else:
             with open(load_path, 'rb', encoding='utf-8') as f:
-                data_3d, data_mask, sta_names, dyn_names = pickle.load(f)
+                data_3d, data_mask, duration, sta_names, dyn_names = pickle.load(f)
                 in_channels = len(sta_names) + len(dyn_names)
                 logger.info(f'Dataset loaded from {load_path}')
         metric = tools.DynamicPredictionMetric(target_name=self.target_fea,
             expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir'])
+        if 'quantile' in params.keys():
+            metric.set_quantile(params['quantile'], round((len(params['quantile']) - 1) / 2))
+            logger.info(f'Enable quantile in model {model_name}')
         params['in_channels'] = in_channels
+        params['target'] = self.dataset.target_fea
+        params['fea_names'] = sta_names + dyn_names
         # 训练集划分
-        for idx, (data_index, test_index) in enumerate(kf.split(X=self.data_pd)):
+        for (data_index, test_index) in kf.split(X=self.data_pd):
             valid_num = round(len(data_index)*0.15)
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
-            
+            target_col = (params['fea_names'] == params['target'])
+            Y_gt = data_3d[test_index, target_col, :]
             dataset = NNet.Dataset(
                 params=params, data=data_3d, mask=data_mask, train_index=train_index, valid_index=valid_index, test_index=test_index)
             trainer = NNet.Trainer(params, dataset)
             trainer.train()
+            Y_pred = np.asarray(trainer.test())
+            # 生成对齐后的start_idx
+            start_idx = np.zeros((Y_pred.shape[0]), dtype=np.int32)
+            metric.add_prediction(prediction=Y_pred, gt=Y_gt, start_idx=start_idx, duration=duration)
+        metric.write_result(model_name, log_path=log_path)
+        metric.plot(model_name)
+        self.create_final_result()
 
 
 
@@ -150,14 +205,13 @@ class DynamicAnalyzer:
                 tools.assert_no_na(dataset)
                 train_cols = list(dataset.columns)
                 train_cols.remove(self.dynamic_target_name)
-                quantile_flag = False
                 if params['slice_catboost_reg'].get('quantile') is not None:
                     metric.set_quantile(params['slice_catboost_reg']['quantile'], round((len(params['slice_catboost_reg']['quantile']) - 1) / 2))
                     logger.info(f'Enable quantile in model {model_name}')
-                    quantile_flag = True
                     Y_pred = -np.ones((len(params['slice_catboost_reg']['quantile']), slice_dict['gt_table'].shape[0],slice_dict['gt_table'].shape[1]))
                 else:
                     Y_pred = -np.ones(slice_dict['gt_table'].shape)
+                
                 for idx, (train_index, test_index) in enumerate(kf.split(X=dataset)):
                     model = Baseline.SliceCatboostRegression(slice_dict['type_dict'], params=params['slice_catboost_reg'])
                     X_train = dataset.loc[train_index, train_cols]
@@ -165,10 +219,7 @@ class DynamicAnalyzer:
                     Y_train = dataset.loc[train_index, self.dynamic_target_name]
                     model.train(X_train, Y_train)
                     result = model.predict(X_test=X_test)
-                    if quantile_flag:
-                        Y_pred = model.map_result(Y_pred=Y_pred, result=result, map_table=slice_dict['map_table'], index=test_index)
-                    else:
-                        Y_pred = model.map_result(Y_pred=Y_pred, result=result, map_table=slice_dict['map_table'], index=test_index)
+                    Y_pred = model.map_result(Y_pred=Y_pred, result=result, map_table=slice_dict['map_table'], index=test_index)
                     shap_array, shap, sorted_names = model.model_explanation()
                     # 注册每个样本的每个特征对应的shap值
                     if idx == 0:
