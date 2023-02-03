@@ -400,7 +400,7 @@ class DynamicPredictionMetric:
         rmse = np.sqrt(np.mean((pred-gt)**2))
         mae = np.abs(pred - gt).mean()
         bias = (pred - gt).mean()
-        with open(log_path, 'a', encoding='utf-8') as f:
+        with open(log_path, 'w', encoding='utf-8') as f:
             f.write('='*10 + f'Method: {method_name}' + '='*10 + '\n')
             f.write(f'Root Mean Squared Error(RMSE)={rmse}'+ '\t') # 误差的均方根值
             f.write(f'Mean Absolute Error(MAE)={mae}'+ '\t') # 误差的平均值

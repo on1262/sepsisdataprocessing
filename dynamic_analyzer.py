@@ -50,6 +50,7 @@ class DynamicAnalyzer:
         kf = KFold(n_splits=self.n_fold, shuffle=True)
         self.register_values.clear()
         model_name = 'LSTM_model'
+        tools.reinit_dir(os.path.join(self.conf['paths']['out_dir'], model_name), build=True)
         log_path = os.path.join(self.conf['paths']['out_dir'], model_name, 'result.log')
         
         # datasets and params
@@ -69,19 +70,21 @@ class DynamicAnalyzer:
             # 先填充-1, 后续再修正
             data_df = tools.convert_type({'_default': -1}, self.data_pd.copy(), self.dataset.get_type_dict())
             # 建立3D array
-            dyn_name_dict = {key:[val[1] for val in self.fea_manager.get_expanded_fea(key)] for key in dyn_names}
-            data_3d = np.empty((len(data_df), in_channels, t_channels)) # size: (sample, [sta_fea, dyn_fea], time)
+            dyn_name_dict = {}
+            target_times = [val[0] for val in self.fea_manager.get_expanded_fea(self.target_fea)]
+            for key in dyn_names:
+                dyn_name_dict[key] = [self.fea_manager.get_nearest_fea(key, time) for time in target_times]
+            data_3d = np.empty((len(data_df), in_channels, t_channels), dtype=object) # size: (sample, [sta_fea, dyn_fea], time)
             for idx in tqdm(range(len(data_df)), desc='Build array:'):
-                data_3d[idx, :len(sta_names), :] = data_df.loc[idx, sta_names].to_numpy() # copy sta names
+                data_3d[idx, :len(sta_names), :] = data_df.loc[idx, sta_names].to_numpy(dtype=object, copy=True)[...,None] # copy sta names
                 for d_idx, name in enumerate(dyn_names):
                     data_3d[idx, len(sta_names) + d_idx, :] = data_df.loc[idx, dyn_name_dict[name]]
             # 首位对齐和制作mask
-            data_mask = np.zeros((len(data_3d.shape[0], data_3d.shape[2]))) # 可用时间是按照target计算的
+            data_mask = np.zeros((data_3d.shape[0], data_3d.shape[2]), dtype=bool) # 可用时间是按照target计算的
             start, duration = self.dataset.get_time_target_idx()
             for idx in tqdm(range(len(data_df)), desc='Create mask:'):
                 data_mask[idx, start[idx]:start[idx]+duration[idx]] = True
-                data_3d[idx, 0:duration[idx],:] = data_3d[idx, start[idx]:start[idx]+duration[idx]]
-            data_3d = data_3d * data_mask[...,np.newaxis] # 删除未覆盖的部分
+                data_3d[idx, :, 0:duration[idx]] = data_3d[idx, :, start[idx]:start[idx]+duration[idx]]
             # 建立新的type_dict
             type_dict = {}
             old_type_dict = self.dataset.get_type_dict()
@@ -93,39 +96,44 @@ class DynamicAnalyzer:
             fea_names = sta_names + dyn_names
             train_cols = [] # 除了target以外的序号
             ctg_cols = [] # 类别特征序号
-            for idx,val in type_dict.items():
-                if val == str:
-                    ctg_cols.append(idx)
             target_col = None
             for idx, name in enumerate(fea_names):
                 if name == self.target_fea:
                     target_col = idx
                 else:
                     train_cols.append(idx)
+                if type_dict[idx] == str:
+                    ctg_cols.append(idx)
             # 这里的target statistic用同一时间的目标值做ts
             # 如果采样频率足够, 那么相邻时间短平稳性质不会改变
             # 如果采样频率不足, 为了避免最后一刻时间无法做TS导致的种种问题(类型不匹配), 还是选择直接TS
             for t_idx in range(data_3d.shape[2]):
-                data_3d[:, train_cols, t_idx], _ = tools.target_statistic(
-                    X=data_3d[:, train_cols, t_idx],Y=data_3d[:,target_col,t_idx], ctg_feas=ctg_cols, mode=params['ts_mode'], hist_val=None)
+                data_3d[:, :, t_idx], _ = tools.target_statistic(
+                    X=data_3d[:, :, t_idx],Y=data_3d[:,target_col,t_idx], ctg_feas=ctg_cols, mode=params['ts_mode'], hist_val=None)
+            data_3d = data_3d.astype(np.float32) * data_mask[:,np.newaxis,:] # 删除未覆盖的部分
             # 插值消除na(线性插值)
             t_arr = np.linspace(0,1,num=data_3d.shape[2])
             na_mat = (data_3d <= -1 + 1e-3)
             valid_mat = np.asarray(1 - na_mat, dtype=bool)
-            for r_idx in tqdm(range(data_3d.shape[0]), desc='Fill NA'):
-                for c_idx in data_3d.shape[1]:
-                    mask_idx = data_mask[r_idx, c_idx]
-                    n_idx = na_mat[r_idx, c_idx,:] * mask_idx # 空缺的有效值
-                    v_idx = valid_mat[r_idx, c_idx,:] * mask_idx # 有效部分
+            for r_idx in tqdm(range(data_3d.shape[0]), desc='Fill NA part1'):
+                mask_idx = data_mask[r_idx, :]
+                for c_idx in range(data_3d.shape[1]):
+                    n_idx = (na_mat[r_idx, c_idx,:] * mask_idx).astype(bool) # 空缺的有效值
+                    v_idx = (valid_mat[r_idx, c_idx,:] * mask_idx).astype(bool) # 有效部分
+                    if not n_idx.any() or not v_idx.any():
+                        continue
                     t_x = t_arr[n_idx]
                     data_3d[r_idx, c_idx, n_idx] = \
                         np.interp(x=t_x, xp=t_arr[v_idx], fp=data_3d[r_idx, c_idx, v_idx])
+            # 有些全无效的列是保留-1的, 所需还需做均值填充
+            for t_idx in tqdm(range(data_3d.shape[2]), desc='Fill NA part2'):
+                data_3d[:,:,t_idx], _ = tools.fill_avg(data_3d[:,:,t_idx], num_feas=list(range(data_3d.shape[1])))
             # 保存array
-            with open(load_path, 'wb', encoding='utf-8') as f:
+            with open(load_path, 'wb') as f:
                 pickle.dump([data_3d, data_mask, duration, sta_names, dyn_names], f)
                 logger.info(f'Dataset dumped at {load_path}')
         else:
-            with open(load_path, 'rb', encoding='utf-8') as f:
+            with open(load_path, 'rb') as f:
                 data_3d, data_mask, duration, sta_names, dyn_names = pickle.load(f)
                 in_channels = len(sta_names) + len(dyn_names)
                 logger.info(f'Dataset loaded from {load_path}')
@@ -141,21 +149,20 @@ class DynamicAnalyzer:
         for (data_index, test_index) in kf.split(X=self.data_pd):
             valid_num = round(len(data_index)*0.15)
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
-            target_col = (params['fea_names'] == params['target'])
+            target_col = [False if name != params['target'] else True for name in params['fea_names']]
             Y_gt = data_3d[test_index, target_col, :]
             dataset = NNet.Dataset(
                 params=params, data=data_3d, mask=data_mask, train_index=train_index, valid_index=valid_index, test_index=test_index)
             trainer = NNet.Trainer(params, dataset)
             trainer.train()
-            Y_pred = np.asarray(trainer.test())
+            Y_pred =  trainer.test()
+            Y_pred = np.asarray(Y_pred)
             # 生成对齐后的start_idx
             start_idx = np.zeros((Y_pred.shape[0]), dtype=np.int32)
             metric.add_prediction(prediction=Y_pred, gt=Y_gt, start_idx=start_idx, duration=duration)
         metric.write_result(model_name, log_path=log_path)
         metric.plot(model_name)
         self.create_final_result()
-
-
 
     def baseline_methods(self, models:set, params=None):
         kf = KFold(n_splits=self.n_fold, shuffle=True)
@@ -373,9 +380,9 @@ if __name__ == "__main__":
         'lstm_model':{
             'ts_mode':'greedy',
             'hidden_size':128,
-            'batch_size':32,
+            'batch_size':128,
             'device':'cuda:0',
-            'lr':1e-4,
+            'lr':1e-3,
             'epochs':50,
             'quantile':[0.25, 0.5, 0.75]
         }
