@@ -172,7 +172,7 @@ class DynamicAnalyzer:
                 if mode == 'test': # 生成输出采样图
                     if 'quantile' in params.keys():
                         quantile_idx = round(len(params['quantile'][:-1]) / 2)
-                        tools.simple_plot(data=Y_pred[quantile_idx, np.random.random_integers(low=0, high=Y_pred.shape[1]-1, size=(10,)), :], 
+                        tools.simple_plot(data=Y_pred[quantile_idx, np.random.randint(low=0, high=Y_pred.shape[1]-1, size=(10,)), :], 
                             title=f'Random Output Plot idx={idx}', out_path=os.path.join(self.conf['paths']['out_dir'], model_name, f'out_plot_idx={idx}.png'))
                 # 生成对齐后的start_idx, 并不是原来的start_idx
                 start_idx = np.zeros((Y_pred.shape[1 if 'quantile' in params.keys() else 0]), dtype=np.int32)
@@ -420,7 +420,8 @@ if __name__ == "__main__":
             'device':'cuda:0',
             'lr':1e-3,
             'epochs':50,
-            'quantile':[0.25, 0.5, 0.75], # 如果没有quantile, 则应有alpha项, 且默认为0.5(MAE)
+            'quantile':[0.25, 0.5, 0.75], # 可以退化为[0.5], 即0.5*MAE
+            'punish':1.0, # 惩罚分位数违反规律的系数
             'metrics_list': ['train', 'valid', 'test'] # 控制生成的分布图来自哪些数据
         }
     }
