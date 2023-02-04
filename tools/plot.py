@@ -30,16 +30,34 @@ class HueColorNormlize(ColorNorm):
     def __call__(self, value, clip: bool = None):
         return np.interp(value, self.x, self.y, left=self.vmin, right=self.vmax)
 
-def plot_loss(data, title='Title'):
-    plt.plot(data)
+def simple_plot(data, title='Title', out_path=None):
+    plt.figure(figsize = (6,12))
+    for idx in range(data.shape[0]):
+        plt.plot(data[idx, :])
     plt.title(title)
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.show()
+    if out_path is None:
+        plt.show()
+    else:
+        plt.savefig(out_path)
     plt.close()
 
-def replace_invalid_filename(filename:str):
-    return filename.replace('/', '_slash_')
+def plot_loss(data, epoch=None, title='Title', legend=None, out_path=None):
+    plt.figure(figsize = (6,12))
+    if epoch:
+        plt.plot(y=data, x=epoch)
+    else:
+        plt.plot(data)
+    plt.title(title)
+    if legend:
+        plt.legend(legend)
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    if out_path is None:
+        plt.show()
+    else:
+        plt.savefig(out_path)
+    plt.close()
+
 
 # 从源数据直接打印直方图
 def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True):
@@ -78,7 +96,7 @@ def plot_hotspot(data:np.ndarray, fea_names:list):
 write_dir_path: 将每个变量保存为一张图, 放在给定文件夹中
 '''
 def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_name: str, 
-    restrict_area=False, write_dir_path=None, plot_dash=True):
+    restrict_area=False, write_dir_path=None, plot_dash=True, comment:str=''):
     if write_dir_path is not None:
         os.makedirs(write_dir_path, exist_ok=True)
     Y = Y.reshape(Y.shape[0], 1)
@@ -95,7 +113,7 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_
     idx_list = sorted(idx_list, key = lambda idx:abs(corr_list[idx]), reverse=True) # 按相关系数绝对值排序
     for rank, idx in enumerate(idx_list):
         name = fea_names[idx]
-        logger.debug(f'Plot correlation: {name}')
+        logger.debug(f'Plot correlation: {name} cmt=[{comment}]')
         plt.figure(figsize = (12,12))
         sns.regplot(x=X[x_valid[:, idx], idx], y=Y[x_valid[:, idx]], scatter_kws={'alpha':0.2})
         # plot line y=x
@@ -103,7 +121,7 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_
         if plot_dash:
             plt.plot(np.asarray([d_min, d_max]),np.asarray([d_min, d_max]), 
                 linestyle='dashed', color='C7', label='Y=X')
-        plt.title(f'{name} vs {target_name}', fontsize = 12)
+        plt.title(f'{name} vs {target_name} cmt=[{comment}]', fontsize = 12)
         if restrict_area and Y.shape[0] > 20:
             # 去除20个极值, 使得显示效果更好
             Y_sorted = np.sort(Y[x_valid[:, idx], 0], axis=0)
@@ -121,7 +139,7 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_
             plt.show()
         else:
             plt.savefig(
-                os.path.join(write_dir_path, replace_invalid_filename(rf'{rank}@{fea_names[idx]}_vs_{target_name}.png'))
+                os.path.join(write_dir_path, remove_slash(rf'{rank}@{fea_names[idx]}_vs_{target_name}{comment}.png'))
             )
         plt.close()
 
@@ -131,7 +149,9 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_
 不支持生成多个变量, X只能是(quantile, data_len)的形状
 write_dir_path: 将每个变量保存为一张图, 放在给定文件夹中
 '''
-def plot_correlation_with_quantile(X_pred:np.ndarray, x_name:str, Y_gt:np.ndarray, target_name: str, quantile:list, restrict_area=False, write_dir_path=None):
+def plot_correlation_with_quantile(
+    X_pred:np.ndarray, x_name:str, Y_gt:np.ndarray, target_name: str, quantile:list, restrict_area=False, write_dir_path=None, comment:str=''
+):
     if write_dir_path is not None:
         os.makedirs(write_dir_path, exist_ok=True)
     Y_gt = Y_gt.reshape(Y_gt.shape[0], 1)
@@ -164,7 +184,7 @@ def plot_correlation_with_quantile(X_pred:np.ndarray, x_name:str, Y_gt:np.ndarra
         # plot line y=x
         plt.plot(np.asarray([d_min, d_max]),np.asarray([d_min, d_max]), 
             linestyle='dashed', color='C7', label='Y=X')
-        plt.title(f'{x_name} vs {target_name} quantile={columns[idx]}', fontsize = 12)
+        plt.title(f'{x_name} vs {target_name} quantile={columns[idx]} cmt=[{comment}]', fontsize = 12)
         # if restrict_area and Y.shape[0] > 20:
         #     # 去除20个极值, 使得显示效果更好
         #     Y_sorted = np.sort(Y[x_valid[:, idx], 0], axis=0)
@@ -182,7 +202,7 @@ def plot_correlation_with_quantile(X_pred:np.ndarray, x_name:str, Y_gt:np.ndarra
             plt.show()
         else:
             plt.savefig(
-                os.path.join(write_dir_path, replace_invalid_filename(rf'{x_name}@{columns[idx]}.png'))
+                os.path.join(write_dir_path, remove_slash(rf'{x_name}@{columns[idx]}{comment}.png'))
             )
         plt.close()
 

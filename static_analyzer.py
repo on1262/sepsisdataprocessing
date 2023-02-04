@@ -152,7 +152,7 @@ class StaticAnalyzer:
                     valid_losses.append(valid_loss)
                     metric.add_prediction(pred=Y_pred, gt=Y_test)
                 valid_losses = np.asarray(valid_losses).T
-                tools.plot_loss(valid_losses, title='Neural Network Validation Loss')
+                tools.plot_loss(data=valid_losses, title='Neural Network Validation Loss')
             else:
                 data_others,_ = tools.target_statistic(data_all, self.Y,
                     ctg_feas=category_index, mode='greedy')

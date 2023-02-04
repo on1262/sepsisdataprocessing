@@ -52,7 +52,7 @@ class DynamicAnalyzer:
         model_name = 'LSTM_model'
         tools.reinit_dir(os.path.join(self.conf['paths']['out_dir'], model_name), build=True)
         log_path = os.path.join(self.conf['paths']['out_dir'], model_name, 'result.log')
-        
+        metrics_list = params['metrics_list']
         # datasets and params
         in_channels = None
         sta_names = None
@@ -72,8 +72,8 @@ class DynamicAnalyzer:
             # 建立3D array
             dyn_name_dict = {}
             target_times = [val[0] for val in self.fea_manager.get_expanded_fea(self.target_fea)]
-            for key in dyn_names:
-                dyn_name_dict[key] = [self.fea_manager.get_nearest_fea(key, time) for time in target_times]
+            for mode in dyn_names:
+                dyn_name_dict[mode] = [self.fea_manager.get_nearest_fea(mode, time) for time in target_times]
             data_3d = np.empty((len(data_df), in_channels, t_channels), dtype=object) # size: (sample, [sta_fea, dyn_fea], time)
             for idx in tqdm(range(len(data_df)), desc='Build array:'):
                 data_3d[idx, :len(sta_names), :] = data_df.loc[idx, sta_names].to_numpy(dtype=object, copy=True)[...,None] # copy sta names
@@ -139,32 +139,51 @@ class DynamicAnalyzer:
                 data_3d, data_mask, duration, sta_names, dyn_names = pickle.load(f)
                 in_channels = len(sta_names) + len(dyn_names)
                 logger.info(f'Dataset loaded from {load_path}')
-        metric = tools.DynamicPredictionMetric(target_name=self.target_fea,
-            expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir'])
+        metrics = {key:tools.DynamicPredictionMetric(target_name=self.target_fea,
+            expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir']) for key in metrics_list}
         if 'quantile' in params.keys():
-            metric.set_quantile(params['quantile'], round((len(params['quantile']) - 1) / 2))
+            for mode in metrics_list:
+                metrics[mode].set_quantile(params['quantile'], round((len(params['quantile']) - 1) / 2))
             logger.info(f'Enable quantile in model {model_name}')
         params['in_channels'] = in_channels
         params['target'] = self.dataset.target_fea
         params['fea_names'] = sta_names + dyn_names
+        params['cache_path'] = self.conf['paths']['lstm_model_cache_dir']
         # 训练集划分
-        for (data_index, test_index) in kf.split(X=self.data_pd):
+        for idx, (data_index, test_index) in enumerate(kf.split(X=self.data_pd)):
             valid_num = round(len(data_index)*0.15)
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
             target_col = [False if name != params['target'] else True for name in params['fea_names']]
-            Y_gt = data_3d[test_index, target_col, :]
             dataset = NNet.Dataset(
                 params=params, data=data_3d, mask=data_mask, train_index=train_index, valid_index=valid_index, test_index=test_index)
             trainer = NNet.Trainer(params, dataset)
             trainer.train()
-            Y_pred =  trainer.test()
-            Y_pred = np.asarray(Y_pred)
-            # 生成对齐后的start_idx, 并不是原来的start_idx
-            start_idx = np.zeros((Y_pred.shape[1 if 'quantile' in params.keys() else 0]), dtype=np.int32)
-            metric.add_prediction(prediction=Y_pred, gt=Y_gt, \
-                start_idx=start_idx, duration=duration[test_index])
-        metric.write_result(model_name, log_path=log_path)
-        metric.plot(model_name)
+            for mode in metrics_list:
+                index = None
+                if mode == 'test':
+                    index = test_index
+                elif mode == 'valid':
+                    index = valid_index
+                else:
+                    index = train_index
+                Y_gt = data_3d[index, target_col, :]
+                Y_pred =  trainer.predict(mode=mode)
+                Y_pred = np.asarray(Y_pred)
+                if mode == 'test': # 生成输出采样图
+                    if 'quantile' in params.keys():
+                        quantile_idx = round(len(params['quantile'][:-1]) / 2)
+                        tools.simple_plot(data=Y_pred[quantile_idx, np.random.random_integers(low=0, high=Y_pred.shape[1]-1, size=(10,)), :], 
+                            title=f'Random Output Plot idx={idx}', out_path=os.path.join(self.conf['paths']['out_dir'], model_name, f'out_plot_idx={idx}.png'))
+                # 生成对齐后的start_idx, 并不是原来的start_idx
+                start_idx = np.zeros((Y_pred.shape[1 if 'quantile' in params.keys() else 0]), dtype=np.int32)
+                metrics[mode].add_prediction(prediction=Y_pred, gt=Y_gt, start_idx=start_idx, duration=duration[index])
+        metrics['test'].write_result(model_name, log_path=log_path)
+        metrics['test'].plot(model_name)
+        for key in metrics_list:
+            if key != 'test':
+                corr_dir = os.path.join(self.conf['paths']['out_dir'], tools.remove_slash(model_name), f'correlation_{key}')
+                tools.reinit_dir(write_dir_path=corr_dir)
+                metrics[key].plot_corr(corr_dir=corr_dir, comment=key)
         self.create_final_result()
 
     def baseline_methods(self, models:set, params=None):
@@ -175,9 +194,11 @@ class DynamicAnalyzer:
             log_path = os.path.join(self.conf['paths']['out_dir'], model_name, 'result.log')
             tools.clear_file(log_path)
             logger.info(f'Evaluating baseline methods:{model_name}')
-            metric = tools.DynamicPredictionMetric(target_name=self.target_fea,
-                expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir'])
+            metric = None
+            
             if 'simple' in model_name: # simple_nearest simple_average simple_holt
+                metric = tools.DynamicPredictionMetric(target_name=self.target_fea,
+                    expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir'])
                 predictor = Baseline.SimpleTimeSeriesPredictor()
                 slice_dict = self.dataset.target_time_dict
                 dataset = slice_dict['data'].copy()
@@ -190,6 +211,8 @@ class DynamicAnalyzer:
                     metric.add_prediction(prediction=result, gt=X_test, start_idx=start_idx_test, duration=duration_test)
 
             elif model_name == 'slice_linear_reg':
+                metric = tools.DynamicPredictionMetric(target_name=self.target_fea,
+                    expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir'])
                 slice_dict = self.dataset.slice_dict
                 dataset = slice_dict['data'].copy()
                 dataset = tools.convert_type({'_default': -1}, dataset, slice_dict['type_dict'])
@@ -209,6 +232,13 @@ class DynamicAnalyzer:
                     prediction=Y_pred, gt=slice_dict['gt_table'].to_numpy(), start_idx=slice_dict['start_idx'], duration=slice_dict['dur_len'])
 
             elif model_name == 'slice_catboost_reg':
+                metrics_list = params['slice_catboost_reg']['metrics_list']
+                metrics = {
+                    key:tools.DynamicPredictionMetric(
+                        target_name=self.target_fea, \
+                        expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), \
+                        out_dir=self.conf['paths']['out_dir']) for key in metrics_list}
+                metric = metrics['test']
                 slice_dict = self.dataset.slice_dict
                 dataset = slice_dict['data'].copy()
                 dataset = tools.convert_type({'_default': -1}, dataset, slice_dict['type_dict'])
@@ -216,7 +246,8 @@ class DynamicAnalyzer:
                 train_cols = list(dataset.columns)
                 train_cols.remove(self.dynamic_target_name)
                 if params['slice_catboost_reg'].get('quantile') is not None:
-                    metric.set_quantile(params['slice_catboost_reg']['quantile'], round((len(params['slice_catboost_reg']['quantile']) - 1) / 2))
+                    for key in metrics_list:
+                        metrics[key].set_quantile(params['slice_catboost_reg']['quantile'], round((len(params['slice_catboost_reg']['quantile']) - 1) / 2))
                     logger.info(f'Enable quantile in model {model_name}')
                     Y_pred = -np.ones((len(params['slice_catboost_reg']['quantile']), slice_dict['gt_table'].shape[0],slice_dict['gt_table'].shape[1]))
                 else:
@@ -250,6 +281,7 @@ class DynamicAnalyzer:
                         else:
                             self.register_values['shap'][sorted_names[i]] += shap[i]
                     self._plot_fea_importance(model_name)
+                # TODO 增加valid和train的分布太麻烦了, 因为slice dataset本身的划分没有那个粒度, 以后再来看吧
                 metric.add_prediction(
                     prediction=Y_pred, gt=slice_dict['gt_table'].to_numpy(), start_idx=slice_dict['start_idx'], duration=slice_dict['dur_len'])
             else:
@@ -378,16 +410,18 @@ if __name__ == "__main__":
             'learning_rate': 0.04,
             'od_type' : "Iter",
             'od_wait' : 100,
-            'verbose': 1
+            'verbose': 1,
+            'metrics_list': ['train', 'valid', 'test'] # 控制生成的分布图来自哪些数据
         },
         'lstm_model':{
             'ts_mode':'greedy',
             'hidden_size':128,
-            'batch_size':128,
+            'batch_size':256,
             'device':'cuda:0',
             'lr':1e-3,
             'epochs':50,
-            'quantile':[0.25, 0.5, 0.75]
+            'quantile':[0.25, 0.5, 0.75], # 如果没有quantile, 则应有alpha项, 且默认为0.5(MAE)
+            'metrics_list': ['train', 'valid', 'test'] # 控制生成的分布图来自哪些数据
         }
     }
     # module test
@@ -396,8 +430,8 @@ if __name__ == "__main__":
         analyzer.baseline_methods(models=baseline_models, params=params.copy())
     
     # module_test()
-    # analyzer.lstm_model(params['lstm_model'].copy(), load_path=tools.GLOBAL_CONF_LOADER['dynamic_analyzer']['paths']['lstm_dataset_save_path'])
+    analyzer.lstm_model(params['lstm_model'].copy(), load_path=tools.GLOBAL_CONF_LOADER['dynamic_analyzer']['paths']['lstm_dataset_save_path'])
 
-    analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
+    # analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
     # analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
 

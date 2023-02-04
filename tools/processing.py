@@ -440,7 +440,7 @@ class DynamicPredictionMetric:
                 logger.warning(f'Plot residual: no valid row in name={old_name}')
 
     # 绘制预测值和真实值的关联度
-    def plot_corr(self, corr_dir:str):
+    def plot_corr(self, corr_dir:str, comment:str=''):
         logger.info('DynamicPredictionMetric: Plotting Correlation')
         
         os.makedirs(corr_dir, exist_ok=True)
@@ -454,17 +454,28 @@ class DynamicPredictionMetric:
                     pred = self.records['pred'][:,idx][valid_mat]
                     gt = self.records['gt'][:,idx][valid_mat]
                     plot_reg_correlation(X=gt[:,None], fea_names=[f'GT_T={time}' + '_' + remove_slash(old_name)], Y=pred, target_name='Prediction', \
-                        restrict_area=True, write_dir_path=corr_dir)
+                        restrict_area=True, write_dir_path=corr_dir, comment=comment)
                 else:
                     logger.warning(f'Plot residual: no valid row in name={old_name}')
             # plot all correlation
             valid_mat = (self.records['pred'] > 0) * self.records['mask']
             pred = self.records['pred'][valid_mat]
             gt = self.records['gt'][valid_mat]
-            plot_reg_correlation(X=gt[:,None], fea_names=['ALL_gt'], Y=pred, target_name='ALL_Prediction', restrict_area=True, write_dir_path=corr_dir)
+            plot_reg_correlation(
+                X=gt[:,None], fea_names=['ALL_gt'], Y=pred, target_name='ALL_Prediction', restrict_area=True, write_dir_path=corr_dir, comment=comment)
         else:
+            for idx, (time, old_name) in enumerate(self.fea_list):
+                valid_mat = (self.records['pred'][self.quantile_idx, :, idx] > 0) * self.records['mask'][:, idx]
+                if np.any(valid_mat):
+                    pred = self.records['pred'][:, :, idx][:, valid_mat]
+                    gt = self.records['gt'][:, idx][valid_mat]
+                    plot_correlation_with_quantile(X_pred=pred, 
+                        x_name=[f'GT_T={time}' + '_' + remove_slash(old_name)], Y_gt=gt, target_name='Prediction', quantile=self.quantile_list, 
+                        restrict_area=True, write_dir_path=corr_dir, comment=comment)
+                else:
+                    logger.warning(f'Plot residual: no valid row in name={old_name}')
             valid_mat = (self.records['pred'][self.quantile_idx, ...] > 0) * self.records['mask']
             pred = self.records['pred'][:, valid_mat]
             gt = self.records['gt'][valid_mat]
-            plot_correlation_with_quantile(X_pred=pred, x_name=['ALL_Prediction'], Y_gt=gt, target_name='ALL_gt',quantile=self.quantile_list, restrict_area=True, write_dir_path=corr_dir)
+            plot_correlation_with_quantile(X_pred=pred, x_name=['ALL_Prediction'], Y_gt=gt, target_name='ALL_gt',quantile=self.quantile_list, restrict_area=True, write_dir_path=corr_dir, comment=comment)
 

@@ -4,6 +4,7 @@ import torch
 import tools
 from tools import logger as logger
 from torch.utils.data.dataloader import DataLoader
+import os
 from tqdm import tqdm
 
 
@@ -42,7 +43,7 @@ class QuantileLoss(nn.Module):
         pred, gt, mask = _pred[:, :-1], _gt[:, 1:], _mask[:, 1:] # T=1对齐
         grt = (pred <= gt)
         res = torch.abs(pred - gt) * mask
-        return torch.mean(self.alpha * res * grt + (1-self.alpha) * res * torch.logical_not(grt))
+        return torch.sum(self.alpha * res * grt + (1-self.alpha) * res * torch.logical_not(grt)) / torch.sum(mask)
 
 class Dataset():
     def __init__(self, params:dict, data:np.ndarray, mask:np.ndarray, train_index, valid_index, test_index) -> None:
@@ -91,6 +92,8 @@ class Trainer():
     def __init__(self, params:dict, dataset:Dataset) -> None:
         self.params = params
         self.device = torch.device(self.params['device'])
+        self.cache_path = params['cache_path']
+        tools.reinit_dir(self.cache_path, build=True)
         self.quantile = None
         if 'quantile' in self.params.keys():
             self.quantile = self.params['quantile']
@@ -99,14 +102,21 @@ class Trainer():
             self.opts = [torch.optim.Adam(params=self.models[idx].parameters(), lr=params['lr']) for idx in range(len(self.quantile))]
         else:
             self.models = [LSTMPredictor(params['device'], params['in_channels'], out_mean=dataset.target_mean)]
-            self.criterions = [QuantileLoss(alpha=params['alpha'])]
+            self.criterions = [QuantileLoss(alpha=params['alpha'])] # TODO maybe other loss
             self.opts = [torch.optim.Adam(params=self.models[0].parameters(), lr=params['lr'])]
         self.dataset = dataset
         self.target_idx = dataset.target_idx
         self.train_dataloader = DataLoader(dataset=self.dataset, batch_size=params['batch_size'], shuffle=True, collate_fn=collate_fn)
         self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
         self.test_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
+
+        self.register_vals = {'train_loss':[], 'valid_loss':[]}
     
+    def plot_loss(self, out_path:str):
+        data = np.asarray([self.register_vals['train_loss'], self.register_vals['train_loss']])
+        tools.plot_loss(data=data, title='Loss for LSTM model', legend=['train', 'valid'], out_path=out_path)
+    
+
     def train(self):
         if self.quantile is not None:
             for idx,q in enumerate(self.quantile):
@@ -116,9 +126,13 @@ class Trainer():
             self._train(0)
     
     def _train(self, model_idx):
+        cache_path = os.path.join(self.cache_path, str(model_idx))
+        tools.reinit_dir(cache_path)
         self.models[model_idx] = self.models[model_idx].to(self.device)
         with tqdm(total=self.params['epochs']) as tq:
             tq.set_description(f'Training, Epoch')
+            best_epoch = 0
+            best_valid_loss = np.inf
             for epoch in range(self.params['epochs']):
                 register_vals = {'train_loss':0, 'valid_loss':0}
                 # train phase
@@ -131,8 +145,8 @@ class Trainer():
                     self.opts[model_idx].zero_grad()
                     loss.backward()
                     self.opts[model_idx].step()
-                    register_vals['train_loss'] += loss.detach().cpu().item()
-                register_vals['train_loss'] /= len(self.train_dataloader) # 这行不能移到最后, 因为dataloader的长度会随着mode变化
+                    register_vals['train_loss'] += loss.detach().cpu().item() * x.shape[0]
+                register_vals['train_loss'] /= len(self.dataset) # 避免最后一个batch导致计算误差
                 # validation phase
                 self.dataset.set_mode('valid')
                 self.models[model_idx].eval()
@@ -141,29 +155,43 @@ class Trainer():
                         x, mask = data[0].to(self.device), data[1].to(self.device)
                         pred = self.models[model_idx](x, mask)
                         loss = self.criterions[model_idx](pred, x[:,self.target_idx, :], mask)
-                        register_vals['valid_loss'] += loss.detach().cpu().item()
-                register_vals['valid_loss'] /= len(self.valid_dataloader)
+                        register_vals['valid_loss'] += loss.detach().cpu().item() * x.shape[0]
+                register_vals['valid_loss'] /= len(self.dataset)
                 tq.set_postfix(valid_loss=register_vals['valid_loss'],
                     train_loss=register_vals['train_loss'])
                 tq.update(1)
+                if register_vals['valid_loss'] < best_valid_loss:
+                    best_valid_loss = register_vals['valid_loss']
+                    best_epoch = epoch
+                if self.quantile is not None and model_idx == (len(self.quantile)-1) / 2:
+                    self.register_vals['train_loss'].append(register_vals['train_loss'])
+                    self.register_vals['valid_loss'].append(register_vals['valid_loss'])
+                elif self.quantile is None:
+                    self.register_vals['train_loss'].append(register_vals['train_loss'])
+                    self.register_vals['valid_loss'].append(register_vals['valid_loss'])
+                torch.save(self.models[model_idx].state_dict(), os.path.join(cache_path, f'{epoch}.pt'))
+        best_path = os.path.join(cache_path, f'{best_epoch}.pt')
+        self.models[model_idx].load_state_dict(torch.load(best_path, map_location=self.device))
+        logger.info(f'Load best model from {best_path} valid loss={best_valid_loss}')
 
-    def test(self):
+    def predict(self, mode='test'):
         if self.quantile is not None:
             preds = []
             for idx,q in enumerate(self.quantile):
                 logger.info(f'Testing quantile={q}')
-                pred = self._test(idx)
+                pred = self._predict(idx, mode)
                 preds.append(pred)
             return torch.stack(preds, dim=0)
         else:
-            return self._test(0)
+            return self._predict(0)
     
-    def _test(self, model_idx):
-        self.dataset.set_mode('test')
+    def _predict(self, model_idx, mode):
+        assert(mode in ['test', 'train', 'valid'])
+        self.dataset.set_mode(mode)
         self.models[model_idx] = self.models[model_idx].to(self.device).eval()
         register_vals = {'test_loss':0, 'pred':[], 'gt':[]}
         with tqdm(total=len(self.test_dataloader)) as tq:
-            tq.set_description(f'Testing')
+            tq.set_description(f'Testing, data={mode}')
             with torch.no_grad():
                 for idx, data in enumerate(self.test_dataloader):
                     x, mask = data[0].to(self.device), data[1].to(self.device)

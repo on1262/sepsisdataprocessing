@@ -70,8 +70,6 @@ class FeatureManager():
                 delta = abs(item[0]-time)
         return best_fea
 
-
-
 '''
 清除并且重建一个文件夹和其中所有的内容
 '''
