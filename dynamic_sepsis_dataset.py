@@ -151,7 +151,6 @@ class DynamicSepsisDataset():
         if mode == 'target_time':
             expanded = self.fea_manager.get_expanded_fea(self.target_fea)
             names = [val[1] for val in expanded]
-            times = np.asarray([val[0] for val in expanded])
             result = self.data_pd[names]
             assert(start_idx.shape[0] == dur_len.shape[0] and start_idx.shape[0] == result.shape[0])
             return {'data':result, 'start_idx': start_idx, 'dur_len':dur_len} # dict{key:ndarray}
@@ -164,7 +163,8 @@ class DynamicSepsisDataset():
             data.reset_index(drop=True, inplace=True)
             sta_names = self.fea_manager.get_names(sta=True)
             dyn_names = self.fea_manager.get_names(dyn=True)
-            dyn_dict = {key:[val[1] for val in self.fea_manager.get_expanded_fea(key)] for key in dyn_names} # old name
+            target_time = np.asarray([val[0] for val in self.fea_manager.get_expanded_fea(self.target_fea)])
+            dyn_dict = {key:[self.fea_manager.get_nearest_fea(key, t) for t in target_time] for key in dyn_names} # old name
             result = pd.DataFrame(columns=sta_names + dyn_names + [dynamic_target_name]) # target_fea 包括在内
             map_table = []
             tmp = self._make_slice(mode='target_time', k=k)
@@ -263,7 +263,7 @@ class DynamicSepsisDataset():
         logger.debug("Plotting static features' correlation")
         tools.plot_reg_correlation(
             data_static[numeric_static].to_numpy(), numeric_static, target_min, self.target_fea, restrict_area=True,
-            write_dir_path=os.path.join(self.out_path, 'correlation', 'static_feature'))
+            write_dir_path=os.path.join(self.out_path, 'correlation', 'static_feature'), plot_dash=False)
         # 动态特征进行时间轴的合并
         # 按列合并, 相同时间点的所有患者紧邻
         target_expanded = target_expanded.T.reshape((target_expanded.shape[0]*target_expanded.shape[1]))
@@ -284,7 +284,7 @@ class DynamicSepsisDataset():
         logger.debug("Plotting dynamic features' correlation")
         tools.plot_reg_correlation(
             dyn_matrix, dyn_names, target_expanded, self.target_fea, restrict_area=True,
-            write_dir_path=os.path.join(self.out_path, 'correlation', 'dynamic_feature'))
+            write_dir_path=os.path.join(self.out_path, 'correlation', 'dynamic_feature'), plot_dash=False)
         logger.info("Plot correlation: Done")
 
 

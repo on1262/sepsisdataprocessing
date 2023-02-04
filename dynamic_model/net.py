@@ -72,9 +72,9 @@ class Dataset():
         if self.mode == 'train':
             return self.data[self.train_index[idx], :,:], self.mask[self.train_index[idx], :]
         elif self.mode == 'valid':
-            return self.data[self.valid_index[idx], :,:], self.mask[self.train_index[idx], :]
+            return self.data[self.valid_index[idx], :,:], self.mask[self.valid_index[idx], :]
         else:
-            return self.data[self.test_index[idx], :,:], self.mask[self.train_index[idx], :]
+            return self.data[self.test_index[idx], :,:], self.mask[self.test_index[idx], :]
 
     def __len__(self):
         if self.mode == 'train':
@@ -150,12 +150,10 @@ class Trainer():
     def test(self):
         if self.quantile is not None:
             preds = []
-            # gts = []
             for idx,q in enumerate(self.quantile):
                 logger.info(f'Testing quantile={q}')
                 pred = self._test(idx)
                 preds.append(pred)
-                # gts.append(gt)
             return torch.stack(preds, dim=0)
         else:
             return self._test(0)
@@ -171,12 +169,11 @@ class Trainer():
                     x, mask = data[0].to(self.device), data[1].to(self.device)
                     pred = self.models[model_idx](x, mask)
                     register_vals['pred'].append(pred.detach().clone().cpu())
-                    register_vals['gt'].append(x[:, self.target_idx, :].detach().clone().cpu())
+                    # register_vals['gt'].append(x[:, self.target_idx, :].detach().clone().cpu())
                     loss = self.criterions[model_idx](pred, x[:,self.target_idx, :], mask)
                     register_vals['test_loss'] += loss.detach().cpu().item()
                     tq.set_postfix(loss=register_vals['test_loss'] / (idx+1))
                     tq.update(1)
         pred = torch.concat(register_vals['pred'], dim=0)[:, :-1]
         pred = torch.concat([-torch.ones(size=(pred.size(0), 1)), pred], dim=1) # 第一列没有预测
-        # gt = torch.concat(register_vals['gt'], dim=0)
         return pred

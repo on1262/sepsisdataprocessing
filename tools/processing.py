@@ -373,12 +373,23 @@ class DynamicPredictionMetric:
                 'start_idx': start_idx.copy(),
                 'duration':duration.copy()
             }
+            self.records['mask'] = self._make_mask(prediction.shape, start_idx, duration)
         else:
             # 所有记录的行都累积起来
             self.records['pred'] = np.concatenate((self.records['pred'], prediction),axis=(1 if self.quantile_flag else 0))
             self.records['gt'] = np.concatenate((self.records['gt'], gt), axis=0)
             self.records['start_idx'] = np.concatenate((self.records['start_idx'], start_idx), axis=0)
             self.records['duration'] = np.concatenate((self.records['duration'], duration), axis=0)
+            self.records['mask'] = np.concatenate((self.records['mask'], self._make_mask(prediction.shape, start_idx, duration)), axis=0)
+
+    def _make_mask(self, m_shape, start_idx, duration):
+        if self.quantile_flag: # quantile
+            mask = np.zeros((m_shape[1], m_shape[2]), dtype=bool)
+        else:
+            mask = np.zeros((m_shape), dtype=bool)
+        for idx in range(start_idx.shape[0]):
+            mask[idx, start_idx[idx]:start_idx[idx] + duration[idx]] = True
+        return mask
 
     def plot(self, method_name:str):
         corr_dir = os.path.join(self.out_dir, remove_slash(method_name), 'correlation')
@@ -390,11 +401,11 @@ class DynamicPredictionMetric:
 
     def write_result(self, method_name:str, log_path:str):
         if self.quantile_flag:
-            valid_mat = self.records['pred'][self.quantile_idx, ...] > 0
+            valid_mat = (self.records['pred'][self.quantile_idx, ...] > 0) * self.records['mask']
             pred = self.records['pred'][self.quantile_idx, ...][valid_mat]
             gt = self.records['gt'][valid_mat]
         else:
-            valid_mat = self.records['pred'] > 0
+            valid_mat = (self.records['pred'] > 0) * self.records['mask']
             pred = self.records['pred'][valid_mat]
             gt = self.records['gt'][valid_mat]
         rmse = np.sqrt(np.mean((pred-gt)**2))
@@ -419,7 +430,7 @@ class DynamicPredictionMetric:
                 r_pred = self.records['pred'][self.quantile_idx, ...]
             else:
                 r_pred = self.records['pred']
-            valid_mat = r_pred[:, idx] > 0
+            valid_mat = (r_pred[:, idx] > 0) * self.records['mask'][:, idx]
             if np.any(valid_mat):
                 pred = r_pred[:,idx][valid_mat]
                 gt = self.records['gt'][:,idx][valid_mat]
@@ -438,7 +449,7 @@ class DynamicPredictionMetric:
             return
         if not self.quantile_flag:
             for idx, (time, old_name) in enumerate(self.fea_list):
-                valid_mat = self.records['pred'][:, idx] > 0
+                valid_mat = (self.records['pred'][:, idx] > 0) * self.records['mask'][:, idx]
                 if np.any(valid_mat):
                     pred = self.records['pred'][:,idx][valid_mat]
                     gt = self.records['gt'][:,idx][valid_mat]
@@ -447,12 +458,12 @@ class DynamicPredictionMetric:
                 else:
                     logger.warning(f'Plot residual: no valid row in name={old_name}')
             # plot all correlation
-            valid_mat = self.records['pred'] > 0
+            valid_mat = (self.records['pred'] > 0) * self.records['mask']
             pred = self.records['pred'][valid_mat]
             gt = self.records['gt'][valid_mat]
             plot_reg_correlation(X=gt[:,None], fea_names=['ALL_gt'], Y=pred, target_name='ALL_Prediction', restrict_area=True, write_dir_path=corr_dir)
         else:
-            valid_mat = self.records['pred'][self.quantile_idx, ...] > 0
+            valid_mat = (self.records['pred'][self.quantile_idx, ...] > 0) * self.records['mask']
             pred = self.records['pred'][:, valid_mat]
             gt = self.records['gt'][valid_mat]
             plot_correlation_with_quantile(X_pred=pred, x_name=['ALL_Prediction'], Y_gt=gt, target_name='ALL_gt',quantile=self.quantile_list, restrict_area=True, write_dir_path=corr_dir)

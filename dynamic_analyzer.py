@@ -83,7 +83,7 @@ class DynamicAnalyzer:
             data_mask = np.zeros((data_3d.shape[0], data_3d.shape[2]), dtype=bool) # 可用时间是按照target计算的
             start, duration = self.dataset.get_time_target_idx()
             for idx in tqdm(range(len(data_df)), desc='Create mask:'):
-                data_mask[idx, start[idx]:start[idx]+duration[idx]] = True
+                data_mask[idx, 0:duration[idx]] = True
                 data_3d[idx, :, 0:duration[idx]] = data_3d[idx, :, start[idx]:start[idx]+duration[idx]]
             # 建立新的type_dict
             type_dict = {}
@@ -109,8 +109,9 @@ class DynamicAnalyzer:
             # 如果采样频率不足, 为了避免最后一刻时间无法做TS导致的种种问题(类型不匹配), 还是选择直接TS
             for t_idx in range(data_3d.shape[2]):
                 data_3d[:, :, t_idx], _ = tools.target_statistic(
-                    X=data_3d[:, :, t_idx],Y=data_3d[:,target_col,t_idx], ctg_feas=ctg_cols, mode=params['ts_mode'], hist_val=None)
-            data_3d = data_3d.astype(np.float32) * data_mask[:,np.newaxis,:] # 删除未覆盖的部分
+                    X=data_3d[:, :, t_idx],Y=data_3d[:,target_col,t_idx], ctg_feas=ctg_cols, mode=params['ts_mode'], hist_val=None, mask=data_mask[:, t_idx])
+            # 将mask以外的部分都置为-1
+            data_3d = data_3d.astype(np.float32) * data_mask[:,np.newaxis,:] - np.ones(data_3d.shape, dtype=np.float32) * np.invert(data_mask[:,np.newaxis,:])
             # 插值消除na(线性插值)
             t_arr = np.linspace(0,1,num=data_3d.shape[2])
             na_mat = (data_3d <= -1 + 1e-3)
@@ -128,6 +129,7 @@ class DynamicAnalyzer:
             # 有些全无效的列是保留-1的, 所需还需做均值填充
             for t_idx in tqdm(range(data_3d.shape[2]), desc='Fill NA part2'):
                 data_3d[:,:,t_idx], _ = tools.fill_avg(data_3d[:,:,t_idx], num_feas=list(range(data_3d.shape[1])))
+            data_3d = data_3d.astype(np.float32) * data_mask[:,np.newaxis,:] - np.ones(data_3d.shape, dtype=np.float32) * np.invert(data_mask[:,np.newaxis,:])
             # 保存array
             with open(load_path, 'wb') as f:
                 pickle.dump([data_3d, data_mask, duration, sta_names, dyn_names], f)
@@ -157,9 +159,10 @@ class DynamicAnalyzer:
             trainer.train()
             Y_pred =  trainer.test()
             Y_pred = np.asarray(Y_pred)
-            # 生成对齐后的start_idx
-            start_idx = np.zeros((Y_pred.shape[0]), dtype=np.int32)
-            metric.add_prediction(prediction=Y_pred, gt=Y_gt, start_idx=start_idx, duration=duration)
+            # 生成对齐后的start_idx, 并不是原来的start_idx
+            start_idx = np.zeros((Y_pred.shape[1 if 'quantile' in params.keys() else 0]), dtype=np.int32)
+            metric.add_prediction(prediction=Y_pred, gt=Y_gt, \
+                start_idx=start_idx, duration=duration[test_index])
         metric.write_result(model_name, log_path=log_path)
         metric.plot(model_name)
         self.create_final_result()
@@ -393,8 +396,8 @@ if __name__ == "__main__":
         analyzer.baseline_methods(models=baseline_models, params=params.copy())
     
     # module_test()
-    analyzer.lstm_model(params['lstm_model'].copy(), load_path=tools.GLOBAL_CONF_LOADER['dynamic_analyzer']['paths']['lstm_dataset_save_path'])
+    # analyzer.lstm_model(params['lstm_model'].copy(), load_path=tools.GLOBAL_CONF_LOADER['dynamic_analyzer']['paths']['lstm_dataset_save_path'])
 
-    # analyzer.baseline_methods(models={'simple_holt'}, params=params)
+    analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
     # analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
 

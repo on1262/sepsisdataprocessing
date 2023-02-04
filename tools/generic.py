@@ -67,6 +67,7 @@ class FeatureManager():
         for item in self.dyn_fea_names[dyn_name]:
             if abs(item[0]-time) < delta:
                 best_fea = item[1]
+                delta = abs(item[0]-time)
         return best_fea
 
 
@@ -391,7 +392,11 @@ def feature_normalization(data:np.ndarray, num_feas:list, norm_dict=None):
         return data, norm_dict
 
 
-def target_statistic(X:np.ndarray, Y:np.ndarray, ctg_feas:list, mode='greedy', hist_val=None):
+def target_statistic(X:np.ndarray, Y:np.ndarray, ctg_feas:list, mode='greedy', hist_val=None, mask=None):
+    # mask以外的列不会参与TS
+    # TS要求Y的mask内的列都是有效的, X可以是有效也可以是无效(-1), 不影响TS结果
+    if mask is None:
+        mask = np.ones((X.shape[0]), dtype=bool)
     if len(ctg_feas) == 0:
         logger.warning('Target statistic: len(ctg_feas)=0')
         return X
@@ -404,6 +409,8 @@ def target_statistic(X:np.ndarray, Y:np.ndarray, ctg_feas:list, mode='greedy', h
         prior = Y.mean()
         hist_val = {}
         for r_idx in range(X.shape[0]):
+            if not mask[r_idx]:
+                continue
             for c_idx in ctg_feas:
                 if c_idx not in hist_val.keys():
                     hist_val[c_idx] = {}

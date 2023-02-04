@@ -78,7 +78,7 @@ def plot_hotspot(data:np.ndarray, fea_names:list):
 write_dir_path: 将每个变量保存为一张图, 放在给定文件夹中
 '''
 def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_name: str, 
-    restrict_area=False, write_dir_path=None):
+    restrict_area=False, write_dir_path=None, plot_dash=True):
     if write_dir_path is not None:
         os.makedirs(write_dir_path, exist_ok=True)
     Y = Y.reshape(Y.shape[0], 1)
@@ -100,8 +100,9 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_
         sns.regplot(x=X[x_valid[:, idx], idx], y=Y[x_valid[:, idx]], scatter_kws={'alpha':0.2})
         # plot line y=x
         d_min, d_max = ymin, ymax
-        plt.plot(np.asarray([d_min, d_max]),np.asarray([d_min, d_max]), 
-            linestyle='dashed', color='C7', label='Y=X')
+        if plot_dash:
+            plt.plot(np.asarray([d_min, d_max]),np.asarray([d_min, d_max]), 
+                linestyle='dashed', color='C7', label='Y=X')
         plt.title(f'{name} vs {target_name}', fontsize = 12)
         if restrict_area and Y.shape[0] > 20:
             # 去除20个极值, 使得显示效果更好
