@@ -186,17 +186,13 @@ class Trainer():
                 for idx, data in enumerate(self.test_dataloader):
                     x, mask = data[0].to(self.device), data[1].to(self.device)
                     pred = self.model(x, mask)
-                    if pred.shape[0] == 1:
-                        register_vals['pred'].append(pred.detach().clone().cpu())
-                    else:
-                        register_vals['pred'].append(pred.detach().clone().cpu())
+                    register_vals['pred'].append(pred.detach().clone().cpu())
                     # register_vals['gt'].append(x[:, self.target_idx, :].detach().clone().cpu())
                     loss = self.criterion(pred, x[:, self.target_idx, :], mask)
                     register_vals['test_loss'] += loss.detach().cpu().item()
                     tq.set_postfix(loss=register_vals['test_loss'] / (idx+1))
                     tq.update(1)
-        if self.quantile is not None:
-            pred = torch.concat(register_vals['pred'], dim=1)[:, :, :-1]
+        pred = torch.concat(register_vals['pred'], dim=1)[:, :, :-1]
         pred = torch.concat([-torch.ones(size=(pred.size(0), pred.size(1), 1)), pred], dim=-1) # 第一列没有预测
         if self.quantile is None:
             pred = pred[0,...]

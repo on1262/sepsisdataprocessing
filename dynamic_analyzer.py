@@ -416,9 +416,9 @@ if __name__ == "__main__":
         'lstm_model':{
             'ts_mode':'greedy',
             'hidden_size':128,
-            'batch_size':256,
+            'batch_size':512,
             'device':'cuda:0',
-            'lr':1e-3,
+            'lr':5e-4,
             'epochs':50,
             'quantile':[0.25, 0.5, 0.75], # 可以退化为[0.5], 即0.5*MAE
             'punish':1.0, # 惩罚分位数违反规律的系数

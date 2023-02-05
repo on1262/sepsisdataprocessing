@@ -27,8 +27,14 @@ class HueColorNormlize(ColorNorm):
         self.x = np.asarray(points)
         self.y = np.asarray(list(range(len(points)))) / (len(points)-1)
 
+    def get_ticks(self):
+        return self.x
+
     def __call__(self, value, clip: bool = None):
-        return np.interp(value, self.x, self.y, left=self.vmin, right=self.vmax)
+        return np.interp(value, self.x, self.y, left=0, right=1)
+
+    def inverse(self, value):
+        return np.interp(value, self.y, self.x, left=self.vmin, right=self.vmax)
 
 def simple_plot(data, title='Title', out_path=None):
     plt.figure(figsize = (6,12))
@@ -147,7 +153,6 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_
 生成预测值和真实值的散点图, 并用颜色表明分位数的范围, 从而表现出模型认为该预测是否可靠
 默认不生成回归线, 但是会生成一条Y=X线
 不支持生成多个变量, X只能是(quantile, data_len)的形状
-write_dir_path: 将每个变量保存为一张图, 放在给定文件夹中
 '''
 def plot_correlation_with_quantile(
     X_pred:np.ndarray, x_name:str, Y_gt:np.ndarray, target_name: str, quantile:list, restrict_area=False, write_dir_path=None, comment:str=''
@@ -176,11 +181,18 @@ def plot_correlation_with_quantile(
     df = pd.DataFrame(data=data_arr.T, columns=columns, index=None)
     for idx in range(2, len(columns)):
         logger.debug(f'Plot correlation with quantile: {x_name}, alpha=[{columns[idx]}]]')
-        plt.figure(figsize = (12,12))
+        plt.figure(figsize = (14,12)) # W,H
         norm = HueColorNormlize(df[columns[idx]].to_numpy())
+        c_map = sns.color_palette("coolwarm", as_cmap=True)
         sns.scatterplot(data=df, x="pred", y="gt", hue_norm=norm,
-            hue=columns[idx], palette=sns.color_palette("coolwarm", as_cmap=True),
+            hue=columns[idx], palette=c_map,
             alpha=0.5, linewidth=0, size=1)
+        sm = plt.cm.ScalarMappable(cmap=c_map, norm=norm)
+        sm.set_array([]) # magic
+        # sm.set_clim(vmin=norm.vmin, vmax=norm.vmax)
+        # Remove the legend and add a colorbar
+        plt.gca().get_legend().remove()
+        plt.gca().figure.colorbar(sm, ticks=norm.get_ticks())
         # plot line y=x
         plt.plot(np.asarray([d_min, d_max]),np.asarray([d_min, d_max]), 
             linestyle='dashed', color='C7', label='Y=X')
