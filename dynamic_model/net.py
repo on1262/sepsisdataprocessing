@@ -6,6 +6,7 @@ from tools import logger as logger
 from torch.utils.data.dataloader import DataLoader
 import os
 from tqdm import tqdm
+import torchinfo
 
 
 class LSTMPredictor(nn.Module):
@@ -129,6 +130,8 @@ class Trainer():
         data = np.asarray([self.register_vals['train_loss'], self.register_vals['train_loss']])
         tools.plot_loss(data=data, title='Loss for LSTM model', legend=['train', 'valid'], out_path=out_path)
     
+    def summary(self):
+        torchinfo.summary(self.model)
 
     def train(self):
         cache_path = os.path.join(self.cache_path)

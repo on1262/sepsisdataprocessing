@@ -3,6 +3,10 @@
         "sta_",
         "dyn_"
     ],
+    "unused_fea_in_static_prediction":
+    [
+        "sta_SOFA_氧合指数"
+    ],
     "target_fea": "dyn_PaO2/FiO2",
     "select_na": {
         "1st_row_thres": 0.3,

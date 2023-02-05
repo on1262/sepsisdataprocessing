@@ -46,6 +46,84 @@ class DynamicAnalyzer:
         # plot fourier tranform result
         self._plot_fourier_transform(self.target_fea, self.dataset.target_time_arr[:,1], save_dir=out_dir)
 
+    # 完成第一天的回归任务, 默认是catboost
+    def static_regression(self, params):
+        model_name = 'static_regression'
+        kf = KFold(n_splits=self.n_fold, shuffle=True)
+        self.register_values.clear()
+        tools.reinit_dir(os.path.join(self.conf['paths']['out_dir'], model_name), build=True)
+        log_path = os.path.join(self.conf['paths']['out_dir'], model_name, 'result.log')
+        tools.clear_file(log_path)
+        logger.info(f'Evaluating methods:{model_name}')
+        
+        metrics_list = params['slice_catboost_reg']['metrics_list']
+        metrics = {
+            key:tools.DynamicPredictionMetric(
+                target_name=self.target_fea, expanded_fea=[self.fea_manager.get_expanded_fea(self.target_fea)[0]], \
+                out_dir=self.conf['paths']['out_dir']) for key in metrics_list}
+        metric = metrics['test']
+        train_cols = self.fea_manager.get_names(sta=True)
+        for name in self.dataset.configs['unused_fea_in_static_prediction']:
+            if name in train_cols:
+                train_cols.remove(name)
+                logger.info(f'Remove feature in static prediction:{name}')
+        target_name = self.fea_manager.get_expanded_fea(self.target_fea)[0][1]
+        type_dict = {}
+        for key,val in self.dataset.get_type_dict().items():
+            if key == target_name or key in train_cols:
+                type_dict[key] = val
+        dataset = self.data_pd[train_cols + [target_name]].copy()
+        dataset = tools.convert_type({'_default': -1}, dataset, type_dict)
+        start, duration = self.dataset.get_time_target_idx()
+        tools.assert_no_na(dataset)
+        
+        if params['slice_catboost_reg'].get('quantile') is not None:
+            for key in metrics_list:
+                metrics[key].set_quantile(params['slice_catboost_reg']['quantile'], round((len(params['slice_catboost_reg']['quantile']) - 1) / 2))
+            logger.info(f'Enable quantile in model {model_name}')
+
+        for idx, (train_index, test_index) in enumerate(kf.split(X=dataset)):
+            model = Baseline.SliceCatboostRegression(type_dict=type_dict, params=params['slice_catboost_reg'])
+            X_train = dataset.loc[train_index, train_cols]
+            X_test = dataset.loc[test_index, train_cols]
+            Y_train = dataset.loc[train_index, target_name]
+            model.train(X_train, Y_train)
+            Y_pred = model.predict(X_test=X_test)[...,None] # (quantile, sample, 1)
+            Y_gt = dataset.loc[test_index, target_name][...,None]
+            shap_array, shap, sorted_names = model.model_explanation()
+            # 注册每个样本的每个特征对应的shap值
+            if idx == 0:
+                self.register_values['shap'] = {}
+                self.register_values['shap_arr'] = {}
+            for fea_idx, name in enumerate(train_cols):
+                if name not in self.shap_names.keys():
+                    continue
+                pairs = np.concatenate((shap_array[:, [fea_idx]], model.X_valid[:, [fea_idx]].astype(np.float32)), axis=1)
+                if self.register_values['shap_arr'].get(name) is None:
+                    self.register_values['shap_arr'][name] = pairs
+                else:
+                    self.register_values['shap_arr'][name] = np.concatenate((self.register_values['shap_arr'][name], pairs), axis=0)
+            # 将每次得到的shap值相加, 便于计算k_fold的平均重要性
+            for i in range(len(shap)):
+                if self.register_values['shap'].get(sorted_names[i]) is None:
+                    self.register_values['shap'][sorted_names[i]] = shap[i]
+                else:
+                    self.register_values['shap'][sorted_names[i]] += shap[i]
+            self._plot_fea_importance(model_name)
+            metric.add_prediction(
+                prediction=Y_pred, gt=Y_gt, start_idx=start[test_index], duration=duration[test_index])
+            if 'train' in metrics_list:
+                Y_pred = model.predict(X_test=X_train)[...,None] # (quantile, sample, 1)
+                Y_gt = Y_train[...,None]
+                metrics['train'].add_prediction(prediction=Y_pred, gt=Y_gt, start_idx=start[train_index], duration=duration[train_index])
+        metric.write_result(model_name, log_path=log_path)
+        metric.plot(model_name)
+        if 'train' in metrics_list:
+            corr_dir = os.path.join(self.conf['paths']['out_dir'], tools.remove_slash(model_name), f'correlation_train')
+            tools.reinit_dir(write_dir_path=corr_dir)
+            metrics['train'].plot_corr(corr_dir=corr_dir, comment='train')
+        self.create_final_result()
+
     def lstm_model(self, params, load_path:str=None):
         kf = KFold(n_splits=self.n_fold, shuffle=True)
         self.register_values.clear()
@@ -157,6 +235,8 @@ class DynamicAnalyzer:
             dataset = NNet.Dataset(
                 params=params, data=data_3d, mask=data_mask, train_index=train_index, valid_index=valid_index, test_index=test_index)
             trainer = NNet.Trainer(params, dataset)
+            if idx == 0:
+                trainer.summary()
             trainer.train()
             for mode in metrics_list:
                 index = None
@@ -416,12 +496,12 @@ if __name__ == "__main__":
         'lstm_model':{
             'ts_mode':'greedy',
             'hidden_size':128,
-            'batch_size':512,
+            'batch_size':2048,
             'device':'cuda:0',
-            'lr':5e-4,
-            'epochs':50,
+            'lr':1e-3,
+            'epochs':150,
             'quantile':[0.25, 0.5, 0.75], # 可以退化为[0.5], 即0.5*MAE
-            'punish':1.0, # 惩罚分位数违反规律的系数
+            'punish':5.0, # 惩罚分位数违反规律的系数
             'metrics_list': ['train', 'valid', 'test'] # 控制生成的分布图来自哪些数据
         }
     }
@@ -432,7 +512,7 @@ if __name__ == "__main__":
     
     # module_test()
     analyzer.lstm_model(params['lstm_model'].copy(), load_path=tools.GLOBAL_CONF_LOADER['dynamic_analyzer']['paths']['lstm_dataset_save_path'])
-
+    # analyzer.static_regression(params=params)
     # analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
     # analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
 

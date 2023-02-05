@@ -47,17 +47,50 @@ def simple_plot(data, title='Title', out_path=None):
         plt.savefig(out_path)
     plt.close()
 
-def plot_loss(data, epoch=None, title='Title', legend=None, out_path=None):
-    plt.figure(figsize = (6,12))
-    if epoch:
-        plt.plot(y=data, x=epoch)
+'''
+    提供单个model的train和valid的loss下降图
+    data: dict
+        'train': [n, epochs] or [epochs]
+        'valid': [n, epochs] or [epochs]
+        'epochs': [epochs]
+    std_bar: bool 是否作标准差(对于n>1)误差区间
+    title: str
+    out_path: str
+'''
+def plot_loss(data:dict, std_bar=False, title='Title', out_path:str=None):
+    assert('train' in data.keys())
+    for key in data.keys():
+        assert(isinstance(data[key], np.ndarray))
+    if len(data['train'].shape) == 1:
+        data['train'] = data['train'][None, :]
+    n = data['train'].shape[0]
+    std_flag = (n > 1) and std_bar
+    if 'valid' in data.keys() and len(data['valid'].shape) == 1:
+        data['valid'] = data['valid'][None, :]
+        assert(data['valid'].shape[0] == n)
+    if 'epochs' in data.keys():
+        epochs = data['epoch'][:]
     else:
-        plt.plot(data)
+        epochs = np.linspace(start=0, stop=data['train'].shape[1]-1, num=data['train'].shape[1])
+    
+    # create figure
+    plt.figure(figsize = (round(min(12+data['train'].shape[1]/50, 15)),6))
+    train_mean = np.mean(data['train'], axis=0)
+    plt.plot(epochs, train_mean, color='C0', label='train loss')
+    if std_flag:
+        train_std = np.std(data['train'], axis=0)
+        draw_band(plt.gca(), x=epochs, y=train_mean, err=train_std, facecolor=f"C0", edgecolor="none", alpha=.2)
+    if 'valid' in data.keys():
+        valid_mean = np.mean(data['valid'], axis=0)
+        plt.plot(epochs, valid_mean, color="C1", label='valid loss')
+        if std_flag:
+            valid_std = np.std(data['valid'], axis=0)
+            draw_band(plt.gca(), x=epochs, y=valid_mean, err=valid_std, facecolor=f"C1", edgecolor="none", alpha=.2)
     plt.title(title)
-    if legend:
-        plt.legend(legend)
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
+    plt.legend()
+    # plt.legend(['train_loss', 'valid_loss'] if 'valid' in data.keys() else ['train_loss'])
     if out_path is None:
         plt.show()
     else:
