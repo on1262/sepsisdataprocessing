@@ -47,55 +47,86 @@ def simple_plot(data, title='Title', out_path=None):
         plt.savefig(out_path)
     plt.close()
 
-'''
-    提供单个model的train和valid的loss下降图
-    data: dict
-        'train': [n, epochs] or [epochs]
-        'valid': [n, epochs] or [epochs]
-        'epochs': [epochs]
-    std_bar: bool 是否作标准差(对于n>1)误差区间
-    title: str
-    out_path: str
-'''
-def plot_loss(data:dict, std_bar=False, title='Title', out_path:str=None):
-    assert('train' in data.keys())
-    for key in data.keys():
-        assert(isinstance(data[key], np.ndarray))
-    if len(data['train'].shape) == 1:
-        data['train'] = data['train'][None, :]
-    n = data['train'].shape[0]
-    std_flag = (n > 1) and std_bar
-    if 'valid' in data.keys() and len(data['valid'].shape) == 1:
-        data['valid'] = data['valid'][None, :]
-        assert(data['valid'].shape[0] == n)
-    if 'epochs' in data.keys():
-        epochs = data['epoch'][:]
-    else:
-        epochs = np.linspace(start=0, stop=data['train'].shape[1]-1, num=data['train'].shape[1])
+class LossLogger:
+    def __init__(self) -> None:
+        self.data = None
+
+    # 增加一条独立的model训练记录
+    def add_loss(self, data:dict):
+        for key in data.keys():
+            assert(isinstance(data[key], np.ndarray))
+            if len(data[key].shape) == 1:
+                data[key] = data[key][None, ...]
+            assert(len(data[key].shape) <= 2)
+        if self.data is None:
+            self.data = data
+        else:
+            for key in data.keys():
+                if key in self.data.keys():
+                    self.data[key] = np.concatenate([self.data[key], data[key]], axis=0)
+
+    def clear(self):
+        self.data = None
     
-    # create figure
-    plt.figure(figsize = (round(min(12+data['train'].shape[1]/50, 15)),6))
-    train_mean = np.mean(data['train'], axis=0)
-    plt.plot(epochs, train_mean, color='C0', label='train loss')
-    if std_flag:
-        train_std = np.std(data['train'], axis=0)
-        draw_band(plt.gca(), x=epochs, y=train_mean, err=train_std, facecolor=f"C0", edgecolor="none", alpha=.2)
-    if 'valid' in data.keys():
-        valid_mean = np.mean(data['valid'], axis=0)
-        plt.plot(epochs, valid_mean, color="C1", label='valid loss')
-        if std_flag:
-            valid_std = np.std(data['valid'], axis=0)
-            draw_band(plt.gca(), x=epochs, y=valid_mean, err=valid_std, facecolor=f"C1", edgecolor="none", alpha=.2)
-    plt.title(title)
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
-    # plt.legend(['train_loss', 'valid_loss'] if 'valid' in data.keys() else ['train_loss'])
-    if out_path is None:
-        plt.show()
-    else:
-        plt.savefig(out_path)
-    plt.close()
+    
+    '''
+        提供单个model的train和valid的loss下降图
+        data: dict
+            'train': [n, epochs] or [epochs]
+            'valid': [n, epochs] or [epochs]
+            'epochs': [epochs]
+        std_bar: bool 是否作标准差(对于n>1)误差区间
+        title: str
+        out_path: str
+    '''
+    def plot(self, data:dict=None, std_bar=False, log_loss=False, title='Title', out_path:str=None):
+        if data is None:
+            data = self.data
+        assert('train' in data.keys() or 'valid' in data.keys())
+        for key in data.keys():
+            assert(isinstance(data[key], np.ndarray))
+        if 'train' in data.keys() and len(data['train'].shape) == 1:
+            data['train'] = data['train'][None, :]
+        
+        if 'valid' in data.keys() and len(data['valid'].shape) == 1:
+            data['valid'] = data['valid'][None, :]
+        n = data['train'].shape[0] if 'train' in data.keys() else data['valid'].shape[0]
+        std_flag = (n > 1) and std_bar
+        epoch_len = data['train'].shape[1] if 'train' in data.keys() else data['valid'].shape[1]
+        if 'epochs' in data.keys():
+            epochs = data['epoch'][:]
+        else:
+            epochs = np.linspace(start=0, stop=epoch_len-1, num=epoch_len)
+
+        # create figure
+        plt.figure(figsize = (round(min(12+epoch_len/50, 15)),6))
+        if 'train' in data.keys():
+            train_data = data['train'] if not log_loss else np.log10(data['train'])
+            train_mean = np.mean(train_data, axis=0)
+            plt.plot(epochs, train_mean, color='C0', label='train loss')
+            if std_flag:
+                train_std = np.std(train_data, axis=0)
+                draw_band(plt.gca(), x=epochs, y=train_mean, err=train_std, facecolor=f"C0", edgecolor="none", alpha=.2)
+        if 'valid' in data.keys():
+            valid_data = data['valid'] if not log_loss else np.log10(data['valid'])
+            valid_mean = np.mean(valid_data, axis=0)
+            plt.plot(epochs, valid_mean, color="C1", label='valid loss')
+            if std_flag:
+                valid_std = np.std(valid_data, axis=0)
+                draw_band(plt.gca(), x=epochs, y=valid_mean, err=valid_std, facecolor=f"C1", edgecolor="none",  alpha=.2)
+        plt.title(title)
+        plt.xlabel('Epoch')
+        if log_loss:
+            plt.ylabel('Log Loss')
+        else:
+            plt.ylabel('Loss')
+        plt.legend()
+        # plt.legend(['train_loss', 'valid_loss'] if 'valid' in data.keys() else ['train_loss'])
+        if out_path is None:
+            plt.show()
+        else:
+            plt.savefig(out_path)
+        plt.close()
 
 
 # 从源数据直接打印直方图
@@ -188,7 +219,7 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_
 不支持生成多个变量, X只能是(quantile, data_len)的形状
 '''
 def plot_correlation_with_quantile(
-    X_pred:np.ndarray, x_name:str, Y_gt:np.ndarray, target_name: str, quantile:list, restrict_area=False, write_dir_path=None, comment:str=''
+    X_pred:np.ndarray, x_name:str, Y_gt:np.ndarray, target_name: str, quantile:list, equal_lim=False, plot_dash=True, write_dir_path=None, comment:str=''
 ):
     if write_dir_path is not None:
         os.makedirs(write_dir_path, exist_ok=True)
@@ -200,7 +231,7 @@ def plot_correlation_with_quantile(
     
     median_idx = round((X_pred.shape[0] - 1) / 2)
     ymin, ymax = Y_gt.min(), Y_gt.max()
-    xmin, xmax = X_pred[median_idx].min(), X_pred[median_idx].min()
+    xmin, xmax = X_pred[median_idx,:].min(), X_pred[median_idx,:].max()
     d_min = min(ymin, xmin)
     d_max = max(xmax, ymax)
     # generate dataframe
@@ -227,8 +258,9 @@ def plot_correlation_with_quantile(
         plt.gca().get_legend().remove()
         plt.gca().figure.colorbar(sm, ticks=norm.get_ticks())
         # plot line y=x
-        plt.plot(np.asarray([d_min, d_max]),np.asarray([d_min, d_max]), 
-            linestyle='dashed', color='C7', label='Y=X')
+        if plot_dash:
+            plt.plot(np.asarray([d_min, d_max]),np.asarray([d_min, d_max]), 
+                linestyle='dashed', color='C7', label='Y=X')
         plt.title(f'{x_name} vs {target_name} quantile={columns[idx]} cmt=[{comment}]', fontsize = 12)
         # if restrict_area and Y.shape[0] > 20:
         #     # 去除20个极值, 使得显示效果更好
@@ -239,15 +271,19 @@ def plot_correlation_with_quantile(
         #     plt.ylim(bottom=Y_sorted[10]-Y_span*0.05, top=Y_sorted[-10]+Y_span*0.05)
         #     plt.xlim(left=X_sorted[10]-X_span*0.05, right=X_sorted[-10]+X_span*0.05)
         # else:
-        plt.ylim(bottom=d_min, top=d_max)
-        plt.xlim(left=d_min, right=d_max)
+        if equal_lim: # 强制x和y的范围一致
+            plt.ylim(bottom=d_min, top=d_max)
+            plt.xlim(left=d_min, right=d_max)
+        else:
+            plt.ylim(bottom=ymin, top=ymax)
+            plt.xlim(left=xmin, right=xmax)
         plt.xlabel(x_name)
         plt.ylabel(target_name)
         if write_dir_path is None:
             plt.show()
         else:
             plt.savefig(
-                os.path.join(write_dir_path, remove_slash(rf'{x_name}@{columns[idx]}{comment}.png'))
+                os.path.join(write_dir_path, remove_slash(rf'{x_name}vs{target_name}@{columns[idx]}{comment}.png'))
             )
         plt.close()
 

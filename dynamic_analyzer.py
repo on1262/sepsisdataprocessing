@@ -227,6 +227,8 @@ class DynamicAnalyzer:
         params['target'] = self.dataset.target_fea
         params['fea_names'] = sta_names + dyn_names
         params['cache_path'] = self.conf['paths']['lstm_model_cache_dir']
+        # loss logger
+        loss_logger = tools.LossLogger()
         # 训练集划分
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.data_pd)):
             valid_num = round(len(data_index)*0.15)
@@ -238,6 +240,7 @@ class DynamicAnalyzer:
             if idx == 0:
                 trainer.summary()
             trainer.train()
+            loss_logger.add_loss(trainer.get_loss())
             for mode in metrics_list:
                 index = None
                 if mode == 'test':
@@ -257,6 +260,10 @@ class DynamicAnalyzer:
                 # 生成对齐后的start_idx, 并不是原来的start_idx
                 start_idx = np.zeros((Y_pred.shape[1 if 'quantile' in params.keys() else 0]), dtype=np.int32)
                 metrics[mode].add_prediction(prediction=Y_pred, gt=Y_gt, start_idx=start_idx, duration=duration[index])
+        loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM Model', 
+            out_path=os.path.join(self.conf['paths']['out_dir'], tools.remove_slash(model_name), 'loss.png'))
+        if metrics['test'].quantile_flag:
+            self._plot_quantile_association(model_name, metrics['test'].get_record())
         metrics['test'].write_result(model_name, log_path=log_path)
         metrics['test'].plot(model_name)
         for key in metrics_list:
@@ -361,14 +368,27 @@ class DynamicAnalyzer:
                         else:
                             self.register_values['shap'][sorted_names[i]] += shap[i]
                     self._plot_fea_importance(model_name)
-                # TODO 增加valid和train的分布太麻烦了, 因为slice dataset本身的划分没有那个粒度, 以后再来看吧
+                    # 记录train的值:
+                    if 'train' in metrics_list:
+                        Y_pred_train = -np.ones(
+                            (len(params['slice_catboost_reg']['quantile']), slice_dict['gt_table'].shape[0],slice_dict['gt_table'].shape[1]))
+                        result = model.predict(X_test=X_train)
+                        Y_pred_train = model.map_result(Y_pred=Y_pred_train, result=result, map_table=slice_dict['map_table'], index=train_index)
+                        metrics['train'].add_prediction(
+                            prediction=Y_pred_train, gt=slice_dict['gt_table'].to_numpy(), start_idx=slice_dict['start_idx'], duration=slice_dict['dur_len'])
                 metric.add_prediction(
                     prediction=Y_pred, gt=slice_dict['gt_table'].to_numpy(), start_idx=slice_dict['start_idx'], duration=slice_dict['dur_len'])
             else:
                 logger.error('Invalid method name')
                 assert(0)
+            if metric.quantile_flag:
+                self._plot_quantile_association(model_name, metric.get_record())
             metric.write_result(model_name, log_path=log_path)
             metric.plot(model_name)
+            if 'train' in metrics_list:
+                corr_dir = os.path.join(self.conf['paths']['out_dir'], tools.remove_slash(model_name), f'correlation_train')
+                tools.reinit_dir(write_dir_path=corr_dir)
+                metrics['train'].plot_corr(corr_dir=corr_dir, comment='train')
         self.create_final_result()
 
     # 收集各个文件夹里面的result.log, 合并为final result.log
@@ -461,6 +481,39 @@ class DynamicAnalyzer:
             plt.savefig(os.path.join(save_dir, 'frequency_energy.png'))
         plt.close()
 
+    # 作图寻找分位点预测和某些变量的关系
+    def _plot_quantile_association(self, model_name:str, record:dict):
+        pred = record['pred']
+        gt = record['gt']
+        mask = record['mask']
+        quantile_list = [0.25, 0.5, 0.75]
+        assert(pred.shape[0] == 3)
+        end_idx = 0
+        # data
+        predictions = np.empty((pred.shape[0], gt.shape[0]*(gt.shape[1]-1))) # 预测值
+        delta = np.empty((gt.shape[0]*(gt.shape[1]-1))) # gt-origin
+        origin = np.empty((gt.shape[0]*(gt.shape[1]-1))) # 得到的target
+
+        for idx in range(1, gt.shape[1], 1):
+            valid = mask[:, idx]
+            n_valid = np.sum(valid)
+            predictions[:, end_idx:end_idx+n_valid] = pred[:, valid, idx]
+            origin[end_idx:end_idx+n_valid] = gt[valid, idx-1]
+            delta[end_idx:end_idx+n_valid] = gt[valid, idx] - gt[valid, idx-1]
+            end_idx += n_valid
+
+        predictions = predictions[:, :end_idx]
+        delta = delta[:end_idx]
+        origin = origin[:end_idx]
+        logger.info('Plot quantile association')
+        corr_dir = os.path.join(self.conf['paths']['out_dir'], model_name, 'explore')
+        tools.reinit_dir(corr_dir, build=True)
+        tools.plot_correlation_with_quantile(
+            X_pred=predictions, x_name='Prediction', Y_gt=origin, target_name='origin',quantile=quantile_list,write_dir_path=corr_dir, equal_lim=False, plot_dash=False)
+        tools.plot_correlation_with_quantile(
+            X_pred=predictions, x_name='Prediction', Y_gt=delta, target_name='delta',quantile=quantile_list,write_dir_path=corr_dir, equal_lim=False, plot_dash=False)
+
+        
 
 if __name__ == "__main__":
     dataset = DynamicSepsisDataset(from_pkl=True)
@@ -511,8 +564,8 @@ if __name__ == "__main__":
         analyzer.baseline_methods(models=baseline_models, params=params.copy())
     
     # module_test()
-    analyzer.lstm_model(params['lstm_model'].copy(), load_path=tools.GLOBAL_CONF_LOADER['dynamic_analyzer']['paths']['lstm_dataset_save_path'])
+    #analyzer.lstm_model(params['lstm_model'].copy(), load_path=tools.GLOBAL_CONF_LOADER['dynamic_analyzer']['paths']['lstm_dataset_save_path'])
     # analyzer.static_regression(params=params)
-    # analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
+    analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
     # analyzer.baseline_methods(models={'slice_catboost_reg'}, params=params)
 

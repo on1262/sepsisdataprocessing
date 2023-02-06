@@ -363,6 +363,8 @@ class DynamicPredictionMetric:
         self.quantile_list = q_list
         self.quantile_idx = q_idx
 
+    def get_record(self):
+        return {key:val.copy() for key, val in self.records.items()}
 
     # 要求对每个可行点都预测, prediction中-1代表无效数据
     def add_prediction(self, prediction:np.ndarray, gt:np.ndarray, start_idx:np.ndarray, duration:np.ndarray):
@@ -470,12 +472,12 @@ class DynamicPredictionMetric:
                     pred = self.records['pred'][:, :, idx][:, valid_mat]
                     gt = self.records['gt'][:, idx][valid_mat]
                     plot_correlation_with_quantile(X_pred=pred, 
-                        x_name=[f'GT_T={time}' + '_' + remove_slash(old_name)], Y_gt=gt, target_name='Prediction', quantile=self.quantile_list, 
-                        restrict_area=True, write_dir_path=corr_dir, comment=comment)
+                        x_name=[f'GT_T={time}' + '_' + remove_slash(old_name)], Y_gt=gt, target_name='Prediction', quantile=self.quantile_list, equal_lim=True,
+                        plot_dash=True, write_dir_path=corr_dir, comment=comment)
                 else:
                     logger.warning(f'Plot residual: no valid row in name={old_name}')
             valid_mat = (self.records['pred'][self.quantile_idx, ...] > 0) * self.records['mask']
             pred = self.records['pred'][:, valid_mat]
             gt = self.records['gt'][valid_mat]
-            plot_correlation_with_quantile(X_pred=pred, x_name=['ALL_Prediction'], Y_gt=gt, target_name='ALL_gt',quantile=self.quantile_list, restrict_area=True, write_dir_path=corr_dir, comment=comment)
+            plot_correlation_with_quantile(X_pred=pred, x_name=['ALL_Prediction'], Y_gt=gt, equal_lim=True, target_name='ALL_gt',quantile=self.quantile_list, plot_dash=True, write_dir_path=corr_dir, comment=comment)
 

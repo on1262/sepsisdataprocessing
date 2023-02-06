@@ -126,9 +126,12 @@ class Trainer():
 
         self.register_vals = {'train_loss':[], 'valid_loss':[]}
     
-    def plot_loss(self, out_path:str):
-        data = np.asarray([self.register_vals['train_loss'], self.register_vals['train_loss']])
-        tools.plot_loss(data=data, title='Loss for LSTM model', legend=['train', 'valid'], out_path=out_path)
+    def get_loss(self):
+        data = {
+            'train': np.asarray(self.register_vals['train_loss']), 
+            'valid': np.asarray(self.register_vals['valid_loss'])
+        }
+        return data
     
     def summary(self):
         torchinfo.summary(self.model)
@@ -142,7 +145,7 @@ class Trainer():
             best_epoch = 0
             best_valid_loss = np.inf
             for epoch in range(self.params['epochs']):
-                register_vals = {'train_loss':0, 'valid_loss':0}
+                loss_vals = {'train_loss':0, 'valid_loss':0}
                 # train phase
                 self.dataset.set_mode('train')
                 self.model.train()
@@ -153,8 +156,8 @@ class Trainer():
                     self.opt.zero_grad()
                     loss.backward()
                     self.opt.step()
-                    register_vals['train_loss'] += loss.detach().cpu().item() * x.shape[0]
-                register_vals['train_loss'] /= len(self.dataset) # 避免最后一个batch导致计算误差
+                    loss_vals['train_loss'] += loss.detach().cpu().item() * x.shape[0]
+                loss_vals['train_loss'] /= len(self.dataset) # 避免最后一个batch导致计算误差
                 # validation phase
                 self.dataset.set_mode('valid')
                 self.model.eval()
@@ -163,16 +166,16 @@ class Trainer():
                         x, mask = data[0].to(self.device), data[1].to(self.device)
                         pred = self.model(x, mask)
                         loss = self.criterion(pred, x[:, self.target_idx, :], mask)
-                        register_vals['valid_loss'] += loss.detach().cpu().item() * x.shape[0]
-                register_vals['valid_loss'] /= len(self.dataset)
-                tq.set_postfix(valid_loss=register_vals['valid_loss'],
-                    train_loss=register_vals['train_loss'])
+                        loss_vals['valid_loss'] += loss.detach().cpu().item() * x.shape[0]
+                loss_vals['valid_loss'] /= len(self.dataset)
+                tq.set_postfix(valid_loss=loss_vals['valid_loss'],
+                    train_loss=loss_vals['train_loss'])
                 tq.update(1)
-                if register_vals['valid_loss'] < best_valid_loss:
-                    best_valid_loss = register_vals['valid_loss']
+                if loss_vals['valid_loss'] < best_valid_loss:
+                    best_valid_loss = loss_vals['valid_loss']
                     best_epoch = epoch
-                self.register_vals['train_loss'].append(register_vals['train_loss'])
-                self.register_vals['valid_loss'].append(register_vals['valid_loss'])
+                self.register_vals['train_loss'].append(loss_vals['train_loss'])
+                self.register_vals['valid_loss'].append(loss_vals['valid_loss'])
                 torch.save(self.model.state_dict(), os.path.join(cache_path, f'{epoch}.pt'))
         best_path = os.path.join(cache_path, f'{best_epoch}.pt')
         self.model.load_state_dict(torch.load(best_path, map_location=self.device))
