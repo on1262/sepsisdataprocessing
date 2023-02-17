@@ -550,4 +550,3 @@ class TimeConverter:
 
 
 set_chinese_font()
-    

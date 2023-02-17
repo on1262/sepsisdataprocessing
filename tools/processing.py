@@ -484,26 +484,32 @@ class DynamicPredictionMetric:
 
 
 # 分割icu_events
-def split_csv(path, max_len=100000, out_folder:str=None):
-    dir_path, name = os.path.split(path)
+def split_csv(path, max_len=1000000, out_folder:str=None):
+    _, name = os.path.split(path)
+    reinit_dir(out_folder, build=True)
     out_prefix = name.split('.')[0]
     file_count = 1
     nfp = None
-    # TODO tqdm
     with open(path, 'r',encoding='utf-8') as fp:
         title = fp.readline()
-        tmp = fp.readline() + '\n'
+        tmp = fp.readline()
         count = 0
-        while(tmp):
+        while(True):
             if count == max_len:
                 nfp.close()
                 count = 0
                 nfp = None
+                file_count += 1
+            if not tmp:
+                break
             if count == 0:
-                nfp = open(os.path.join(out_folder, out_prefix + str(file_count) + '.csv'), 'w', encoding='utf-8')
+                cache_name = os.path.join(out_folder, out_prefix + str(file_count) + '.csv')
+                nfp = open(cache_name, 'w', encoding='utf-8')
+                logger.info(f'Writing {cache_name}')
                 nfp.write(title)
             nfp.write(tmp)
-            tmp = fp.readline() + '\n'
+            count += 1
+            tmp = fp.readline()
         if nfp is not None:
             nfp.close()
     

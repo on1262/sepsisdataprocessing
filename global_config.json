@@ -62,7 +62,8 @@
             "mimic_dir":"mimic-iv",
             "cache_dir": "mimic-iv/cache",
             "conf_cache_path": "mimic-iv/configs/config_cache.json",
-            "conf_manual_path": "mimic-iv/configs/config_manual.json"
+            "conf_manual_path": "mimic-iv/configs/config_manual.json",
+            "out_dir":"mimic_out"
         }
     }
     

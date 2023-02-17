@@ -56,8 +56,11 @@ class Admission:
                 arr = np.asarray(self.dynamic_data[key])
                 arr[:, 1] -= self.admittime
                 self.dynamic_data[key] = arr
-
-
+    def duration(self):
+        return max(0, self.dischtime - self.admittime)
+    
+    def empty(self):
+        return True if len(self.dynamic_data) == 0 else False
 
         
 class Subject:
@@ -78,7 +81,6 @@ class Subject:
 
     def append_value(self, charttime:float, itemid, value):
         # search admission by charttime
-        assert(len(self.admissions) > 0)
         for adm in self.admissions:
             if adm.admittime < charttime and adm.dischtime > charttime:
                 adm.append_value(itemid, charttime, value)
@@ -88,7 +90,18 @@ class Subject:
         for adm in self.admissions:
             adm.update_data()
 
-
+    def del_empty_admission(self):
+        new_adm = []
+        for idx in range(len(self.admissions)):
+            if not self.admissions[idx].empty():
+                new_adm.append(self.admissions[idx])
+        self.admissions = new_adm
+    
+    def empty(self):
+        for adm in self.admissions:
+            if not adm.empty():
+                return False
+        return True
 
 
 class MIMICIV:
@@ -112,10 +125,14 @@ class MIMICIV:
         # variable for phase 2
         self.subjects = {} # subject_id:Subject
 
-    def preprocess(self):
-        self.preprocess_phase1()
-        self.preprocess_phase2()
-        self.preprocess_phase3()
+        self.preprocess()
+        self.del_invalid_subjects()
+        logger.info('MIMICIV inited')
+
+    def preprocess(self, from_pkl=True, split_csv=False):
+        self.preprocess_phase1(from_pkl)
+        self.preprocess_phase2(from_pkl)
+        self.preprocess_phase3(split_csv, from_pkl)
 
     def preprocess_phase1(self, from_pkl=True):
         pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'phase1.pkl')
@@ -164,7 +181,9 @@ class MIMICIV:
             pickle.dump([sepsis_icds, subject_ids, icu_item, hosp_item], fp)
         self.procedure_flag = 'phase1'
     
-    def preprocess_phase2(self):
+    def preprocess_phase2(self, from_pkl=True):
+        if from_pkl:
+            return
         logger.info(f'MIMIC-IV: processing subject, flag={self.procedure_flag}')
         # 构建subject
         patients = pd.read_csv(os.path.join(self.mimic_dir, 'hosp', 'patients.csv'), encoding='utf-8')
@@ -189,7 +208,13 @@ class MIMICIV:
         self.procedure_flag = 'phase2'
 
 
-    def preprocess_phase3(self):
+    def preprocess_phase3(self, split_csv=False, from_pkl=True):
+        pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'subjects.pkl')
+        if from_pkl:
+            with open(pkl_path, 'rb') as fp:
+                self.subjects = pickle.load(fp)
+            self.procedure_flag = 'phase3'
+            return
         logger.info(f'MIMIC-IV: processing dynamic data, flag={self.procedure_flag}')
         # 配置准入itemid
         target_icu_ids = self.configs['extract']['target_icu_id']
@@ -197,38 +222,76 @@ class MIMICIV:
             assert(id in self.icu_item)
             logger.info(f'Extract itemid={id}')
         # 采集icu内的动态数据
-        logger.info('Loading icu events')
-        # TODO 这里不能直接load整个dataset
-        # 考虑把原始的icu_event拆成若干份, 然后分开加载
         out_cache_dir = os.path.join(self.g_conf['paths']['cache_dir'], 'icu_events')
-        tools.split_csv(os.path.join(self.mimic_dir, 'icu', 'chartevents.csv'), out_folder=out_cache_dir)
-
-        logger.info('Loading icu events:Done')
+        if split_csv:
+            tools.split_csv(os.path.join(self.mimic_dir, 'icu', 'chartevents.csv'), out_folder=out_cache_dir)
         icu_events = None
+        logger.info('Loading icu events')
+        p_bar = tqdm(total=len(os.listdir(out_cache_dir)))
+        # 这里需要30min, 随着feature增加会更多
         for file_name in sorted(os.listdir(out_cache_dir)):
-            icu_events = pd.read_csv(os.path.join(out_cache_dir, file_name), encoding='utf-8')
-            for _,row in tqdm(icu_events.iterrows(), desc='Processing ICU table', total=len(icu_events)):
-                s_id, itemid = row['subject_id'], row['itemid']
+            icu_events = pd.read_csv(os.path.join(out_cache_dir, file_name), encoding='utf-8')[['subject_id', 'itemid', 'charttime', 'valuenum']].to_numpy()
+            for idx in range(len(icu_events)):
+                s_id, itemid = icu_events[idx, 0], icu_events[idx, 1]
                 if s_id in self.subjects and itemid in target_icu_ids:
-                    # TODO hadm_id内部可能会不连续, 这里可能要用stay_id
-                    self.subjects[s_id].append_value(charttime=self.converter(row['charttime']), itemid=itemid, value=row['value'])
-            del icu_events # release memory
-        for s_id in self.subjects:
+                    self.subjects[s_id].append_value(charttime=self.converter(icu_events[idx, 2]), itemid=itemid, value=icu_events[idx, 3])
+            p_bar.update(1)
+        for s_id in tqdm(self.subjects, desc='update data'):
             self.subjects[s_id].update_data()
         # 保存subjects
         logger.info('Dump subjects')
-        with open(os.path.join(self.g_conf['paths']['cache_dir'], 'subjects.pkl'), 'wb') as fp:
+        with open(pkl_path, 'wb') as fp:
             pickle.dump(self.subjects, fp)
+        logger.info('Dump subjects: Done')
+        self.procedure_flag = 'phase3'
+
+    def del_invalid_subjects(self):
+        pop_list = []
+        for s_id in self.subjects:
+            if self.subjects[s_id].empty():
+                pop_list.append(s_id)
+            else:
+                self.subjects[s_id].del_empty_admission()
+        for s_id in pop_list:
+            self.subjects.pop(s_id)
+        logger.info(f'del_invalid_subjects: Deleted {len(pop_list)}/{len(pop_list)+len(self.subjects)} subjects')
+
+    def make_report(self):
+        '''进行数据集的信息统计和测试'''
+        out_path = os.path.join(self.g_conf['paths']['out_dir'], 'dataset_report.txt')
+        write_lines = []
+        # basic statistics
+        write_lines.append('='*10 + 'basic' + '='*10)
+        write_lines.append(f'subjects:{len(self.subjects)}')
+        adm_nums = np.mean([len(s.admissions) for s in self.subjects.values()])
+        write_lines.append(f'average admission number per subject:{adm_nums}')
+        avg_adm_time = []
+        for s in self.subjects.values():
+            for adm in s.admissions:
+                avg_adm_time.append(adm.duration())
+
+        write_lines.append(f'average admission time(hour): {np.mean(avg_adm_time)}')
+        
+        with open(out_path, 'w', encoding='utf-8') as fp:
+            for line in write_lines:
+                fp.write(line + '\n')
+        logger.info(f'Generated report at {out_path}')
+            
+
+            
+
+
 
 
 class MIMICDataset:
     '''
-    MIMIC-IV上层抽象, 从中间文件读取数据, 进行预处理, 得到最终数据集
+    MIMIC-IV上层抽象, 从中间文件读取数据, 进行处理, 得到最终数据集
     '''
     def __init__(self):
-        pass
-
+        self.mimiciv = MIMICIV()
+        self.subjects = self.mimiciv.subjects
 
 if __name__ == '__main__':
-    mimiciv = MIMICIV()
-    mimiciv.preprocess()
+    dataset = MIMICDataset()
+    print('test Done')
+    
