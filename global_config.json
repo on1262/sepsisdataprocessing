@@ -1,5 +1,5 @@
 {
-    "work_dir": "F:\\Project\\DiplomaProj",
+    "work_dir": "/home/chenyt/sepsisinducedards",
     "dataset_static": {
         "paths":{
             "csv_origin_path": "data_static/sepsis_fixed.csv",
@@ -56,6 +56,14 @@
         },
         "dynamic_target_name":"target",
         "shap_names": {"dyn_PaO2/FiO2": [0, 600], "sta_PaO2": [0, 500], "sta_SOFA_氧合指数": [0, 800], "dyn_PaO2": [0, 500]}
+    },
+    "mimic-iv":{
+        "paths": {
+            "mimic_dir":"mimic-iv",
+            "cache_dir": "mimic-iv/cache",
+            "conf_cache_path": "mimic-iv/configs/config_cache.json",
+            "conf_manual_path": "mimic-iv/configs/config_manual.json"
+        }
     }
     
 }

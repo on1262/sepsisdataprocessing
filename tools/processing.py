@@ -5,6 +5,7 @@ import os
 from scipy.interpolate import interp1d
 import pandas as pd
 import json
+from tqdm import tqdm
 from sklearn.metrics import auc as sk_auc
 from .colorful_logging import logger
 from .generic import reinit_dir, remove_slash, clear_file
@@ -480,4 +481,33 @@ class DynamicPredictionMetric:
             pred = self.records['pred'][:, valid_mat]
             gt = self.records['gt'][valid_mat]
             plot_correlation_with_quantile(X_pred=pred, x_name=['ALL_Prediction'], Y_gt=gt, equal_lim=True, target_name='ALL_gt',quantile=self.quantile_list, plot_dash=True, write_dir_path=corr_dir, comment=comment)
+
+
+# 分割icu_events
+def split_csv(path, max_len=100000, out_folder:str=None):
+    dir_path, name = os.path.split(path)
+    out_prefix = name.split('.')[0]
+    file_count = 1
+    nfp = None
+    # TODO tqdm
+    with open(path, 'r',encoding='utf-8') as fp:
+        title = fp.readline()
+        tmp = fp.readline() + '\n'
+        count = 0
+        while(tmp):
+            if count == max_len:
+                nfp.close()
+                count = 0
+                nfp = None
+            if count == 0:
+                nfp = open(os.path.join(out_folder, out_prefix + str(file_count) + '.csv'), 'w', encoding='utf-8')
+                nfp.write(title)
+            nfp.write(tmp)
+            tmp = fp.readline() + '\n'
+        if nfp is not None:
+            nfp.close()
+    
+
+
+
 

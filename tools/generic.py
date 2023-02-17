@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import scipy
+import datetime
 from sklearn import random as sk_random
 from sklearn.metrics import auc as sk_auc
 import pandas as pd
@@ -527,6 +528,26 @@ def assert_no_na(dataset:pd.DataFrame):
             if np.any(na_mat[col].to_numpy()):
                 logger.error(f'assert_na: NA in feature:{col}')
                 assert(0)
+
+'''
+将一段时间字符串转化为时间戳
+'''
+class TimeConverter:
+    def __init__(self, format:str=None, out_unit=['day','hour','minute']) -> None:
+        self.format = format
+        coeff = 1
+        if out_unit == 'day':
+            coeff *= 60*60*24
+        elif out_unit == 'hour':
+            coeff *= 60*60
+        elif out_unit == 'minute':
+            coeff *= 60
+        self.coeff = coeff
+    
+    def __call__(self, in_str:str) -> float:
+        dt = datetime.datetime.strptime(in_str, self.format)
+        return dt.timestamp() / self.coeff
+
 
 set_chinese_font()
     
