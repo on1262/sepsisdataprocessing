@@ -44,7 +44,7 @@ class Admission:
         self.admittime = admittime
         self.dischtime = dischtime
     
-    def append_value(self, itemid, time:float, value):
+    def append_dynamic(self, itemid, time:float, value):
         if self.dynamic_data.get(itemid) is None:
             self.dynamic_data[itemid] = [(value, time)]
         else:
@@ -53,14 +53,21 @@ class Admission:
     def update_data(self):
         for key in self.dynamic_data:
             if isinstance(self.dynamic_data[key], list):
-                arr = np.asarray(self.dynamic_data[key])
+                arr = np.asarray(sorted(self.dynamic_data[key], key=lambda x:x[1]))
                 arr[:, 1] -= self.admittime
                 self.dynamic_data[key] = arr
+    
     def duration(self):
         return max(0, self.dischtime - self.admittime)
     
     def empty(self):
         return True if len(self.dynamic_data) == 0 else False
+
+    def __getitem__(self, idx):
+        return self.dynamic_data[idx]
+
+    def keys(self):
+        return self.dynamic_data.keys()
 
         
 class Subject:
@@ -79,11 +86,20 @@ class Subject:
         if len(self.admissions) >= 1:
             self.admissions = sorted(self.admissions, key=lambda adm:adm.admittime)
 
-    def append_value(self, charttime:float, itemid, value):
+    def append_static(self, charttime:float, name, value):
+        if charttime is None:
+            self.static_data[name] = value
+        else:
+            if name not in self.static_data:
+                self.static_data[name] = [(value, charttime)]
+            else:
+                self.static_data[name].append((value, charttime))
+
+    def append_dynamic(self, charttime:float, itemid, value):
         # search admission by charttime
         for adm in self.admissions:
-            if adm.admittime < charttime and adm.dischtime > charttime:
-                adm.append_value(itemid, charttime, value)
+            if adm.admittime < charttime and charttime < adm.dischtime:
+                adm.append_dynamic(itemid, charttime, value)
 
     def update_data(self):
         '''将数据整理成连续形式'''
@@ -117,6 +133,7 @@ class MIMICIV:
         self.configs = Config(cache_path=self.g_conf['paths']['conf_cache_path'], manual_path=self.g_conf['paths']['conf_manual_path'])
         self.procedure_flag = 'init' # 控制标志, 进行不同阶段的cache和dump
         self.converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
+        self.target_icu_ids = self.configs['extract']['target_icu_id']
         # variable for phase 1
         self.subject_ids = None
         self.sepsis_icds = None
@@ -126,14 +143,15 @@ class MIMICIV:
         self.subjects = {} # subject_id:Subject
 
         self.preprocess()
-        self.del_invalid_subjects()
+        # post process
+        self.remove_invalid_data(rules=self.configs['extract']['remove_rule'])
         logger.info('MIMICIV inited')
 
     def preprocess(self, from_pkl=True, split_csv=False):
         self.preprocess_phase1(from_pkl)
         self.preprocess_phase2(from_pkl)
         self.preprocess_phase3(split_csv, from_pkl)
-
+ 
     def preprocess_phase1(self, from_pkl=True):
         pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'phase1.pkl')
         if from_pkl and os.path.exists(pkl_path):
@@ -171,7 +189,7 @@ class MIMICIV:
         d_icu_item = pd.read_csv(os.path.join(self.mimic_dir, 'icu', 'd_items.csv'), encoding='utf-8')
         icu_item = {}
         for _,row in tqdm(d_icu_item.iterrows(), desc='icu items'):
-            icu_item[row['itemid']] = (row['label'], row['lownormalvalue'], row['highnormalvalue'])
+            icu_item[row['itemid']] = (row['label'], row['category'], row['param_type'], row['lownormalvalue'], row['highnormalvalue'])
         # 存储cache
         self.subject_ids = subject_ids
         self.sepsis_icds = sepsis_icds
@@ -182,7 +200,12 @@ class MIMICIV:
         self.procedure_flag = 'phase1'
     
     def preprocess_phase2(self, from_pkl=True):
+        pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'phase2.pkl')
         if from_pkl:
+            with open(pkl_path, 'rb') as fp:
+                self.subjects, self.subject_ids = pickle.load(fp)
+            logger.info(f'load pkl for phase 2 from {pkl_path}')
+            self.procedure_flag = 'phase2' 
             return
         logger.info(f'MIMIC-IV: processing subject, flag={self.procedure_flag}')
         # 构建subject
@@ -191,7 +214,8 @@ class MIMICIV:
             s_id = row['subject_id']
             if s_id in self.subject_ids:
                 self.subjects[s_id] = Subject(row['subject_id'], anchor_year=row['anchor_year'])
-                self.subjects[s_id].static_data['age'] = row['anchor_age']
+                self.subjects[s_id].append_static(None, 'age', row['anchor_age'])
+                self.subjects[s_id].append_static(None, 'gender', row['gender'])
         self.subject_ids = set(self.subjects.keys())
         # 抽取admission
         table_admission = pd.read_csv(os.path.join(self.mimic_dir, 'hosp', 'admissions.csv'), encoding='utf-8')
@@ -204,7 +228,17 @@ class MIMICIV:
                     self.subjects[s_id].append_admission(adm)
                 except Exception as e:
                     logger.warning('Invalid admission:' + str(row['hadm_id']))
-        # TODO 采集静态数据
+        omr = pd.read_csv(os.path.join(self.mimic_dir, 'hosp', 'omr.csv'), encoding='utf-8') # [subject_id,chartdate,seq_num,result_name,result_value]
+        converter = tools.TimeConverter(format="%Y-%m-%d", out_unit='hour')
+        omr = omr.to_numpy()
+        for idx in range(omr.shape[0]):
+            s_id = omr[idx, 0]
+            if s_id in self.subjects and int(omr[idx, 2]) == 1:
+                self.subjects[s_id].append_static(converter(omr[idx, 1]), omr[idx, 3], omr[idx, 4])
+        # dump
+        with open(pkl_path, 'wb') as fp:
+            pickle.dump((self.subjects, self.subject_ids), fp)
+        logger.info(f'Phase 2 dumped at {pkl_path}')
         self.procedure_flag = 'phase2'
 
 
@@ -213,14 +247,18 @@ class MIMICIV:
         if from_pkl:
             with open(pkl_path, 'rb') as fp:
                 self.subjects = pickle.load(fp)
+            logger.info(f'load pkl for phase 3 from {pkl_path}')
             self.procedure_flag = 'phase3'
             return
         logger.info(f'MIMIC-IV: processing dynamic data, flag={self.procedure_flag}')
         # 配置准入itemid
-        target_icu_ids = self.configs['extract']['target_icu_id']
-        for id in target_icu_ids:
+        for id in self.target_icu_ids:
             assert(id in self.icu_item)
             logger.info(f'Extract itemid={id}')
+        enabled_item_id = set()
+        for id in self.icu_item:
+            if self.icu_item[id][2] in ['Numeric', 'Numeric with tag'] and self.icu_item[id][1] not in ['Alarms']:
+                enabled_item_id.add(id)
         # 采集icu内的动态数据
         out_cache_dir = os.path.join(self.g_conf['paths']['cache_dir'], 'icu_events')
         if split_csv:
@@ -228,16 +266,17 @@ class MIMICIV:
         icu_events = None
         logger.info('Loading icu events')
         p_bar = tqdm(total=len(os.listdir(out_cache_dir)))
-        # 这里需要30min, 随着feature增加会更多
         for file_name in sorted(os.listdir(out_cache_dir)):
             icu_events = pd.read_csv(os.path.join(out_cache_dir, file_name), encoding='utf-8')[['subject_id', 'itemid', 'charttime', 'valuenum']].to_numpy()
             for idx in range(len(icu_events)):
                 s_id, itemid = icu_events[idx, 0], icu_events[idx, 1]
-                if s_id in self.subjects and itemid in target_icu_ids:
-                    self.subjects[s_id].append_value(charttime=self.converter(icu_events[idx, 2]), itemid=itemid, value=icu_events[idx, 3])
+                if s_id in self.subjects and itemid in enabled_item_id:
+                    self.subjects[s_id].append_dynamic(charttime=self.converter(icu_events[idx, 2]), itemid=itemid, value=icu_events[idx, 3])
             p_bar.update(1)
         for s_id in tqdm(self.subjects, desc='update data'):
             self.subjects[s_id].update_data()
+        # 删去空的subject和空的admission
+        self.remove_invalid_data(rules=None)
         # 保存subjects
         logger.info('Dump subjects')
         with open(pkl_path, 'wb') as fp:
@@ -245,7 +284,28 @@ class MIMICIV:
         logger.info('Dump subjects: Done')
         self.procedure_flag = 'phase3'
 
-    def del_invalid_subjects(self):
+    def remove_invalid_data(self, rules=None):
+        '''当rules=None时, 只清除空的subject和admission. 当rules不为None时, 会检查target_id是否都满足采集要求'''
+        if rules is not None:
+            for s_id in self.subjects:
+                if not self.subjects[s_id].empty():
+                    new_adm_idx = []
+                    for idx, adm in enumerate(self.subjects[s_id].admissions):
+                        flag = 1
+                        for target_id in rules['target_id']:
+                            if target_id in adm.keys():
+                                dur = adm[target_id][-1,1] - adm[target_id][0,1]
+                                points = adm[target_id].shape[0]
+                                if dur >= rules['min_duration'] and dur < rules['max_duration'] and \
+                                    points >= rules['min_points'] and dur/points <= rules['max_avg_interval']:
+                                    flag *= 1
+                                else:
+                                    flag = 0
+                            else:
+                                flag = 0
+                        if flag != 0:
+                            new_adm_idx.append(idx)
+                    self.subjects[s_id].admissions = [self.subjects[s_id].admissions[idx] for idx in new_adm_idx]
         pop_list = []
         for s_id in self.subjects:
             if self.subjects[s_id].empty():
@@ -257,30 +317,89 @@ class MIMICIV:
         logger.info(f'del_invalid_subjects: Deleted {len(pop_list)}/{len(pop_list)+len(self.subjects)} subjects')
 
     def make_report(self):
-        '''进行数据集的信息统计和测试'''
+        '''进行数据集的信息统计'''
         out_path = os.path.join(self.g_conf['paths']['out_dir'], 'dataset_report.txt')
+        dist_dir = os.path.join(self.g_conf['paths']['out_dir'], 'report_dist')
+        tools.reinit_dir(dist_dir, build=True)
+        logger.info('MIMIC-IV: generating dataset report')
         write_lines = []
         # basic statistics
         write_lines.append('='*10 + 'basic' + '='*10)
         write_lines.append(f'subjects:{len(self.subjects)}')
         adm_nums = np.mean([len(s.admissions) for s in self.subjects.values()])
-        write_lines.append(f'average admission number per subject:{adm_nums}')
+        write_lines.append(f'average admission number per subject:{adm_nums:.2f}')
         avg_adm_time = []
         for s in self.subjects.values():
             for adm in s.admissions:
                 avg_adm_time.append(adm.duration())
+        write_lines.append(f'average admission time(hour): {np.mean(avg_adm_time):.2f}')
+        for id in self.target_icu_ids:
+            fea_name = self.icu_item[id][0]
+            write_lines.append('='*10 + f'{fea_name}({id})' + '='*10)
+            arr_points = []
+            arr_duration = []
+            arr_frequency = []
+            arr_min_interval = []
+            arr_max_interval = []
+            arr_avg_value = []
+            for s in self.subjects.values():
+                for adm in s.admissions:
+                    if id in adm.keys():
+                        arr_points.append(adm[id].shape[0])
+                        arr_duration.append(adm[id][-1,1] - adm[id][0,1])
+                        arr_frequency.append(arr_points[-1] / arr_duration[-1])
+                        arr_min_interval.append(np.diff(adm[id][:,1]).min())
+                        arr_max_interval.append(np.diff(adm[id][:,1]).max())
+                        arr_avg_value.append(adm[id][:,0].mean())
+                        assert(arr_duration[-1] > 0)
+            arr_points, arr_duration, arr_frequency, arr_min_interval,arr_max_interval,arr_avg_value = np.asarray(arr_points), np.asarray(arr_duration), np.asarray(arr_frequency), np.asarray(arr_min_interval), np.asarray(arr_max_interval), np.asarray(arr_avg_value)
+            write_lines.append(f'average points per admission: {arr_points.mean():.3f}')
+            write_lines.append(f'average duration(hour) per admission: {arr_duration.mean():.3f}')
+            write_lines.append(f'average frequency(point/hour) per admission: {arr_frequency.mean():.3f}')
+            write_lines.append(f'average min interval per admission: {arr_min_interval.mean():.3f}')
+            write_lines.append(f'average avg value per admission: {arr_avg_value.mean():.3f}')
+            # plot distribution
+            tools.plot_single_dist(
+                data=arr_points, data_name=f'Points of {fea_name}', 
+                save_path=os.path.join(dist_dir, 'point_' + str(id) + '.png'), discrete=False)
+            tools.plot_single_dist(
+                data=arr_duration, data_name=f'Duration of {fea_name}(Hour)', 
+                save_path=os.path.join(dist_dir, 'duration_' + str(id) + '.png'), discrete=False)
+            tools.plot_single_dist(
+                data=arr_frequency, data_name=f'Frequency of {fea_name}(Point/Hour)', 
+                save_path=os.path.join(dist_dir, 'freq_' + str(id) + '.png'), discrete=False)
+            tools.plot_single_dist(
+                data=arr_avg_value, data_name=f'Avg Value of {fea_name}', 
+                save_path=os.path.join(dist_dir, 'avgv_' + str(id) + '.png'), discrete=False)
+            tools.plot_single_dist(
+                data=arr_min_interval, data_name=f'Min interval of {fea_name}', 
+                save_path=os.path.join(dist_dir, 'mininterv_' + str(id) + '.png'), discrete=False)
+            tools.plot_single_dist(
+                data=arr_max_interval, data_name=f'Max interval of {fea_name}', 
+                save_path=os.path.join(dist_dir, 'maxinterv_' + str(id) + '.png'), discrete=False)
+        # itemid hit rate
+        hit_table = {}
+        adm_count = np.sum([len(s.admissions) for s in self.subjects.values()])
+        for sub in self.subjects.values():
+            for adm in sub.admissions:
+                for id in adm.keys():
+                    if hit_table.get(id) is None:
+                        hit_table[id] = 1
+                    else:
+                        hit_table[id] += 1
+        key_list = sorted(hit_table.keys(), key= lambda key:hit_table[key], reverse=True)
+        write_lines.append('='*10 + 'Feature hit table(>0.5)' + '='*10)
+        for key in key_list:
+            fea_name = self.icu_item[key][0]
+            value = hit_table[key] / adm_count
+            if value < 0.5:
+                continue
+            write_lines.append(f"{value:.2f}\t({key}){fea_name} ")
 
-        write_lines.append(f'average admission time(hour): {np.mean(avg_adm_time)}')
-        
         with open(out_path, 'w', encoding='utf-8') as fp:
             for line in write_lines:
                 fp.write(line + '\n')
-        logger.info(f'Generated report at {out_path}')
-            
-
-            
-
-
+        logger.info(f'Report generated at {out_path}')
 
 
 class MIMICDataset:
@@ -293,5 +412,5 @@ class MIMICDataset:
 
 if __name__ == '__main__':
     dataset = MIMICDataset()
-    print('test Done')
+    dataset.mimiciv.make_report()
     

@@ -8,4 +8,7 @@ __pycache__/apriori.cpython-37.pyc
 data_dynamic/configs_cache.json
 mimic-iv-2.2.zip
 mimic-iv/
+documents/
 *.pyc
+*.png
+*.txt
