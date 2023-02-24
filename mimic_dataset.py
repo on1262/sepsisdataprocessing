@@ -94,6 +94,21 @@ class Subject:
                 self.static_data[name] = [(value, charttime)]
             else:
                 self.static_data[name].append((value, charttime))
+    
+    def nearest_static(self, key, time):
+        if key not in self.static_data.keys():
+            return -1
+
+        if not isinstance(self.static_data[key], np.ndarray): # single value
+            return self.static_data[key]
+        else:
+            nearest_idx, delta = 0, np.inf
+            for idx in range(self.static_data[key].shape[0]):
+                new_delta = np.abs(time-self.static_data[key][idx, 1])
+                if new_delta < delta:
+                    delta = new_delta
+                    nearest_idx = idx
+            return self.static_data[key][nearest_idx, 0]
 
     def append_dynamic(self, charttime:float, itemid, value):
         # search admission by charttime
@@ -409,6 +424,193 @@ class MIMICDataset:
     def __init__(self):
         self.mimiciv = MIMICIV()
         self.subjects = self.mimiciv.subjects
+        self.g_conf = self.mimiciv.g_conf
+        self.configs = self.mimiciv.configs
+        self.preprocess()
+        self.preprocess_table()
+
+    def preprocess(self, from_pkl=True):
+        numeric_pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'numeric_subject.pkl')
+        norm_pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'norm_dict.pkl')
+        # preprocessing
+        self.static_feas = set()
+        self.target_label = self.configs['process']['target_label']
+        self.dyamic_ids = self.configs['process']['dynamic_id']
+
+        if from_pkl and os.path.exists(numeric_pkl_path):
+            with open(numeric_pkl_path, 'rb') as fp:
+                self.subjects = pickle.load(fp)
+            logger.info(f'Load numeric subject data from {numeric_pkl_path}')
+        else:
+            # 这里不要随便改变调用顺序
+            self.preprocess_to_num() # 这里会改变static_data的key list
+            with open(numeric_pkl_path, 'wb') as fp:
+                pickle.dump(self.subjects, fp)
+            logger.info(f'Numeric subjects dumped at {numeric_pkl_path}')
+        for s in self.subjects.values():
+            for key in s.static_data.keys():
+                self.static_feas.add(key)
+        
+        if from_pkl and os.path.exists(norm_pkl_path):
+            with open(norm_pkl_path, 'rb') as fp:
+                self.norm_dict = pickle.load(fp)
+            logger.info(f'Load norm dict from {norm_pkl_path}')
+        else:
+            self.norm_dict = self.preprocess_norm()
+            with open(norm_pkl_path, 'wb') as fp:
+                pickle.dump(self.norm_dict, fp)
+            logger.info(f'Norm dict dumped at {norm_pkl_path}')
+        
+    def preprocess_to_num(self):
+        '''将所有特征转化为数值型, 手段是多样的'''
+        # 目前只有static data需要处理
+        for s in self.subjects.values():
+            for key in list(s.static_data.keys()):
+                if key == 'gender':
+                    s.static_data[key] = 0 if s.static_data[key] == 'F' else 1
+                elif 'Blood Pressure' in key:
+                    s.static_data['systolic pressure'] = []
+                    s.static_data['diastolic pressure'] = []
+                    for idx in range(len(s.static_data[key])):
+                        p_result = s.static_data[key][idx][0].split('/')
+                        time = s.static_data[key][idx][1]
+                        vs, vd = float(p_result[0]), float(p_result[1])
+                        s.static_data['systolic pressure'].append((vs, time))
+                        s.static_data['diastolic pressure'].append((vd, time))
+                    s.static_data.pop(key)
+                    s.static_data['systolic pressure'] = np.asarray(s.static_data['systolic pressure'])
+                    s.static_data['diastolic pressure'] = np.asarray(s.static_data['diastolic pressure'])
+                elif key != 'age':
+                    valid_idx = []
+                    for idx in range(len(s.static_data[key])):
+                        v,t = s.static_data[key][idx]
+                        try:
+                            v = float(v)
+                            s.static_data[key][idx] = (v,t)
+                            valid_idx.append(idx)
+                        except Exception as e:
+                            logger.warning(f'Invalid value {v} for {key}')
+                    s.static_data[key] = np.asarray(s.static_data[key])[valid_idx, :]
+
+    def preprocess_norm(self) -> dict:
+        '''制作norm_dict'''
+        norm_dict = {}
+        for s in self.subjects.values():
+            # static data
+            for key in s.static_data.keys():
+                if key not in norm_dict:
+                    norm_dict[key] = [s.static_data[key]]
+                else:
+                    norm_dict[key].append(s.static_data[key])
+            # dynamic data
+            for adm in s.admissions:
+                for key in adm.keys():
+                    if key not in norm_dict:
+                        norm_dict[key] = [adm[key]]
+                    else:
+                        norm_dict[key].append(adm[key])
+        for key in norm_dict:
+            if isinstance(norm_dict[key][0], (float, int)):
+                norm_dict[key] = np.asarray(norm_dict[key])
+            elif isinstance(norm_dict[key][0], np.ndarray):
+                norm_dict[key] = np.concatenate(norm_dict[key], axis=0)[:, 0]
+            else:
+                assert(0)
+        for key in norm_dict:
+            mean, std = np.mean(norm_dict[key]), np.std(norm_dict[key])
+            norm_dict[key] = {'mean':mean, 'std':std}
+        return norm_dict
+
+    def preprocess_table(self, from_pkl=True, t_step=0.5):
+        '''对每个subject生成时间轴对齐的表, tick(hour)是生成的表的间隔'''
+        pkl_path_origin = os.path.join(self.g_conf['paths']['cache_dir'], 'table_origin.pkl')
+        pkl_path_norm = os.path.join(self.g_conf['paths']['cache_dir'], 'table_norm.pkl')
+        pkl_path_length = os.path.join(self.g_conf['paths']['cache_dir'], 'table_length.pkl')
+        # step1: 插值并生成表格
+        if from_pkl and os.path.exists(pkl_path_origin):
+            with open(pkl_path_origin, 'rb') as fp:
+                self.data, self.norm_dict, self.static_keys, self.dynamic_keys = pickle.load(fp)
+            logger.info(f'load original aligned table from {pkl_path_origin}')
+        else:
+            data = []
+            align_id = self.configs['process']['align_target_id'] # 用来确认对齐的基准时间
+            static_keys = list(self.static_feas)
+            dynamic_keys = self.dyamic_ids + [self.target_label]
+            target_val = []
+            for s_id in tqdm(self.subjects.keys(), desc='Generate aligned table'):
+                for adm in self.subjects[s_id].admissions:
+                    if align_id not in adm.keys():
+                        logger.warning('Invalid admission')
+                        continue
+                    # 生成基准时间表
+                    t_start, t_end = adm[align_id][0, 1], adm[align_id][-1, 1]
+                    ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
+                    # 生成表本身, 缺失值为-1
+                    table = -np.ones((len(static_keys) + len(dynamic_keys), ticks.shape[0]), dtype=np.float32)
+                    # 填充static data
+                    static_data = np.zeros((len(static_keys)))
+                    for idx, key in enumerate(static_keys):
+                        static_data[idx] = self.subjects[s_id].nearest_static(key, adm[align_id][0, 1] + adm.admittime)
+                    table[:len(static_keys), :] = static_data[:, None]
+                    # 插值dynamic data
+                    for idx, key in enumerate(dynamic_keys[:-1]):
+                        if key not in adm.keys():
+                            continue
+                        table[static_data.shape[0]+idx, :] = np.interp(x=ticks, xp=adm[key][:, 1], fp=adm[key][:, 0])
+                    # 生成PaO2/FiO2
+                    pao2_index = dynamic_keys.index(220224)
+                    fio2_index = dynamic_keys.index(223835)
+                    # 检查
+                    if not np.all(table[len(static_keys) + fio2_index, :] > 0):
+                        logger.warning('Skipped Zero FiO2 table')
+                        continue
+                    table[-1, :] = table[len(static_keys) + pao2_index, :] / table[len(static_keys) + fio2_index, :]
+                    target_val.append(table[-1, :])
+                    data.append(table)
+            target_val = np.concatenate(target_val, axis=0)
+            target_dict = {'mean':target_val.mean(), 'std':target_val.std()}
+            self.norm_dict[self.configs['process']['target_label']] = target_dict
+            self.data = data
+            self.static_keys = static_keys
+            self.dynamic_keys = dynamic_keys
+            with open(pkl_path_origin, 'wb') as fp:
+                pickle.dump([self.data, self.norm_dict, static_keys, dynamic_keys], fp)
+            logger.info(f'data table dumped at {pkl_path_origin}')
+        # step2: 归一化, 补充缺失值
+        if from_pkl and os.path.exists(pkl_path_norm):
+            with open(pkl_path_norm, 'rb') as fp:
+                self.data = pickle.load(fp)
+            logger.info(f'load normalized aligned table from {pkl_path_norm}')
+        else:
+            # 缺失值归一化后为0
+            for s_id in tqdm(range(len(self.data)), desc='norm'):
+                for idx, key in enumerate(self.static_keys):
+                    if np.abs(self.data[s_id][idx, 0] + 1) < 1e-4:
+                        self.data[s_id][idx, :] = 0
+                    elif np.abs(self.norm_dict[key]['std']) > 1e-4:
+                        self.data[s_id][idx, :] = (self.data[s_id][idx, :] - self.norm_dict[key]['mean']) / self.norm_dict[key]['std']
+                    else:
+                        logger.warning(f'Skip norm due to zero std: {key}')
+                for idx, key in enumerate(self.dynamic_keys):
+                    arr_idx = idx + len(self.static_keys)
+                    if np.abs(self.data[s_id][arr_idx, 0] + 1) < 1e-4:
+                        self.data[s_id][arr_idx, :] = 0
+                    elif np.abs(self.norm_dict[key]['std']) > 1e-4:
+                        self.data[s_id][arr_idx, :] = (self.data[s_id][arr_idx, :] - self.norm_dict[key]['mean']) / self.norm_dict[key]['std']
+                    else:
+                        logger.warning(f'Skip norm due to zero std: {key}')
+            with open(pkl_path_norm, 'wb') as fp:
+                pickle.dump(self.data, fp)
+            logger.info(f'data table dumped at {pkl_path_norm}')
+        # step3: 时间轴长度对齐, 生成seq_len, 进行某些特征的最后处理
+        if from_pkl and os.path.exists(pkl_path_length):
+            with open(pkl_path_length, 'rb') as fp:
+                self.data = pickle.load(fp)
+            logger.info(f'load length aligned table from {pkl_path_length}')
+        else:
+            pass
+
+        
 
 if __name__ == '__main__':
     dataset = MIMICDataset()
