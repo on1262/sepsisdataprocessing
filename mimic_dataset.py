@@ -605,10 +605,35 @@ class MIMICDataset:
         # step3: 时间轴长度对齐, 生成seq_len, 进行某些特征的最后处理
         if from_pkl and os.path.exists(pkl_path_length):
             with open(pkl_path_length, 'rb') as fp:
-                self.data = pickle.load(fp)
+                seq_len, self.static_keys, self.data = pickle.load(fp)
             logger.info(f'load length aligned table from {pkl_path_length}')
         else:
-            pass
+            seq_len = [d.shape[1] for d in self.data]
+            max_len = max(seq_len)
+            n_fea = len(self.static_keys) + len(self.dynamic_keys)
+            
+            for t_idx in tqdm(range(len(self.data)), desc='length alignment'):
+                if seq_len[t_idx] == max_len:
+                    continue
+                new_table = -np.ones((n_fea, max_len - seq_len[t_idx]))
+                self.data[t_idx] = np.concatenate([self.data[t_idx], new_table], axis=1)
+            self.data = np.stack(self.data, axis=0) # (n_sample, n_fea, seq_len)
+            # 合并weight/height的重复特征
+            self.data[:, 1, :] = np.max(self.data[:, [1,5], :], axis=1)
+            self.data[:, 6, :] = np.max(self.data[:, [6,9], :], axis=1)
+            self.data[:, 2, :] = np.max(self.data[:, [2,4], :], axis=1)
+            rest_feas = list(range(self.data.shape[1]))
+            rest_feas.pop(9)
+            rest_feas.pop(5)
+            rest_feas.pop(4)
+            self.static_keys.pop(9)
+            self.static_keys.pop(5)
+            self.static_keys.pop(4)
+            self.data = self.data[:,  rest_feas, :]
+            with open(pkl_path_length, 'wb') as fp:
+                pickle.dump((seq_len, self.static_keys, self.data), fp)
+            logger.info(f'length aligned table dumped at {pkl_path_length}')
+
 
         
 
