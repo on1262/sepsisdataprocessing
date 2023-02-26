@@ -6,6 +6,7 @@ import json
 import tools
 import numpy as np
 import pandas as pd
+import torch
 from tools import GLOBAL_CONF_LOADER
 from tools import logger
 from tqdm import tqdm
@@ -606,9 +607,11 @@ class MIMICDataset:
         if from_pkl and os.path.exists(pkl_path_length):
             with open(pkl_path_length, 'rb') as fp:
                 seq_len, self.static_keys, self.data = pickle.load(fp)
+                self.seq_len = seq_len
             logger.info(f'load length aligned table from {pkl_path_length}')
         else:
             seq_len = [d.shape[1] for d in self.data]
+            self.seq_len = seq_len
             max_len = max(seq_len)
             n_fea = len(self.static_keys) + len(self.dynamic_keys)
             
@@ -634,8 +637,18 @@ class MIMICDataset:
                 pickle.dump((seq_len, self.static_keys, self.data), fp)
             logger.info(f'length aligned table dumped at {pkl_path_length}')
 
+    def __getitem__(self, idx):
+        return {'data': self.data[idx, :, :], 'length': self.seq_len[idx]}
 
-        
+    def __len__(self):
+        return self.data.shape[0]
+
+def Collect_Fn(data_list:list):
+    result = {}
+    result['data'] = torch.as_tensor(np.stack([d['data'] for d in data_list], axis=0))
+    result['length'] = torch.as_tensor([d['length'] for d in data_list], dtype=torch.long)
+    return result
+
 
 if __name__ == '__main__':
     dataset = MIMICDataset()
