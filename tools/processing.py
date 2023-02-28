@@ -350,9 +350,8 @@ class DichotomyMetric:
 
 
 class DynamicPredictionMetric:
-    def __init__(self, target_name:str, expanded_fea:list, out_dir:str) -> None:
+    def __init__(self, target_name:str, out_dir:str) -> None:
         self.target_name = target_name
-        self.fea_list = expanded_fea # [(time, expanded_name)]
         self.records = None
         self.out_dir = out_dir
         self.quantile_flag = False
@@ -367,8 +366,16 @@ class DynamicPredictionMetric:
     def get_record(self):
         return {key:val.copy() for key, val in self.records.items()}
 
-    # 要求对每个可行点都预测, prediction中-1代表无效数据
     def add_prediction(self, prediction:np.ndarray, gt:np.ndarray, start_idx:np.ndarray, duration:np.ndarray):
+        '''
+            添加预测结果和真实值
+            prediction: (sample, ticks) or (quantile, sample, ticks) in quantile mode
+            gt: shape=prediction, gt的每个位置和prediction对应位置就是一组预测-真实值的pair, 没有偏移
+            start_idx: (sample,) 每个样本起始开始的序号, None代表全部为0
+            duration: (sample,) 每个样本持续的点数, 一个有效值->duration=1
+        '''
+        assert(prediction.shape == gt.shape)
+
         if self.records is None:
             self.records = {
                 'pred': prediction.copy(),
@@ -428,19 +435,18 @@ class DynamicPredictionMetric:
         if self.records is None:
             logger.error('DynamicPredictionMetric: no record')
             return
-        for idx, (time, old_name) in enumerate(self.fea_list):
-            if self.quantile_flag:
-                r_pred = self.records['pred'][self.quantile_idx, ...]
-            else:
-                r_pred = self.records['pred']
-            valid_mat = (r_pred[:, idx] > 0) * self.records['mask'][:, idx]
-            if np.any(valid_mat):
-                pred = r_pred[:,idx][valid_mat]
-                gt = self.records['gt'][:,idx][valid_mat]
-                res = pred - gt
-                plot_single_dist(data=res, data_name='Residual distribution: ' + old_name, save_path=os.path.join(res_dir, f'{time}_name={remove_slash(old_name)}.png'), discrete=False)
-            else:
-                logger.warning(f'Plot residual: no valid row in name={old_name}')
+        if self.quantile_flag:
+            r_pred = self.records['pred'][self.quantile_idx, ...]
+        else:
+            r_pred = self.records['pred']
+        valid_mat = (r_pred[:] > 0) * self.records['mask'][:]
+        if np.any(valid_mat):
+            pred = r_pred[:][valid_mat]
+            gt = self.records['gt'][:][valid_mat]
+            res = pred - gt
+            plot_single_dist(data=res, data_name='Residual distribution: ' + old_name, save_path=os.path.join(res_dir, f'{time}_name={remove_slash(old_name)}.png'), discrete=False)
+        else:
+            logger.warning(f'Plot residual: no valid row in name={old_name}')
 
     # 绘制预测值和真实值的关联度
     def plot_corr(self, corr_dir:str, comment:str=''):
@@ -451,15 +457,6 @@ class DynamicPredictionMetric:
             logger.error('DynamicPredictionMetric: no record')
             return
         if not self.quantile_flag:
-            for idx, (time, old_name) in enumerate(self.fea_list):
-                valid_mat = (self.records['pred'][:, idx] > 0) * self.records['mask'][:, idx]
-                if np.any(valid_mat):
-                    pred = self.records['pred'][:,idx][valid_mat]
-                    gt = self.records['gt'][:,idx][valid_mat]
-                    plot_reg_correlation(X=gt[:,None], fea_names=[f'GT_T={time}' + '_' + remove_slash(old_name)], Y=pred, target_name='Prediction', \
-                        restrict_area=True, write_dir_path=corr_dir, comment=comment)
-                else:
-                    logger.warning(f'Plot residual: no valid row in name={old_name}')
             # plot all correlation
             valid_mat = (self.records['pred'] > 0) * self.records['mask']
             pred = self.records['pred'][valid_mat]
@@ -467,16 +464,6 @@ class DynamicPredictionMetric:
             plot_reg_correlation(
                 X=gt[:,None], fea_names=['ALL_gt'], Y=pred, target_name='ALL_Prediction', restrict_area=True, write_dir_path=corr_dir, comment=comment)
         else:
-            for idx, (time, old_name) in enumerate(self.fea_list):
-                valid_mat = (self.records['pred'][self.quantile_idx, :, idx] > 0) * self.records['mask'][:, idx]
-                if np.any(valid_mat):
-                    pred = self.records['pred'][:, :, idx][:, valid_mat]
-                    gt = self.records['gt'][:, idx][valid_mat]
-                    plot_correlation_with_quantile(X_pred=pred, 
-                        x_name=[f'GT_T={time}' + '_' + remove_slash(old_name)], Y_gt=gt, target_name='Prediction', quantile=self.quantile_list, equal_lim=True,
-                        plot_dash=True, write_dir_path=corr_dir, comment=comment)
-                else:
-                    logger.warning(f'Plot residual: no valid row in name={old_name}')
             valid_mat = (self.records['pred'][self.quantile_idx, ...] > 0) * self.records['mask']
             pred = self.records['pred'][:, valid_mat]
             gt = self.records['gt'][valid_mat]

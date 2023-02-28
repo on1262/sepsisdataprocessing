@@ -18,6 +18,9 @@ import tools
 '''
 class SimpleTimeSeriesPredictor:
     def predict(self, data:np.ndarray, start_idx:np.ndarray, duration:np.ndarray, mode:str=['nearest', 'average', 'holt'], params=None)->np.ndarray:
+        '''
+        data: (sample, ticks) 只有目标特征
+        '''
         result = -np.ones((data.shape[0],data.shape[1]), dtype=float)
         if mode == 'holt':
             holt_params = params['holt']

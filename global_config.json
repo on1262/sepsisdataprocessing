@@ -65,6 +65,11 @@
             "conf_manual_path": "mimic-iv/configs/config_manual.json",
             "out_dir":"mimic_out"
         }
+    },
+    "mimic_analyzer":{
+        "paths": {
+            "out_dir":"mimic_out"
+        }
     }
     
 }

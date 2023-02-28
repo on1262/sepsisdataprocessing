@@ -59,8 +59,7 @@ class DynamicAnalyzer:
         metrics_list = params['slice_catboost_reg']['metrics_list']
         metrics = {
             key:tools.DynamicPredictionMetric(
-                target_name=self.target_fea, expanded_fea=[self.fea_manager.get_expanded_fea(self.target_fea)[0]], \
-                out_dir=self.conf['paths']['out_dir']) for key in metrics_list}
+                target_name=self.target_fea, out_dir=self.conf['paths']['out_dir']) for key in metrics_list}
         metric = metrics['test']
         train_cols = self.fea_manager.get_names(sta=True)
         for name in self.dataset.configs['unused_fea_in_static_prediction']:
@@ -217,8 +216,7 @@ class DynamicAnalyzer:
                 data_3d, data_mask, duration, sta_names, dyn_names = pickle.load(f)
                 in_channels = len(sta_names) + len(dyn_names)
                 logger.info(f'Dataset loaded from {load_path}')
-        metrics = {key:tools.DynamicPredictionMetric(target_name=self.target_fea,
-            expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir']) for key in metrics_list}
+        metrics = {key:tools.DynamicPredictionMetric(target_name=self.target_fea, out_dir=self.conf['paths']['out_dir']) for key in metrics_list}
         if 'quantile' in params.keys():
             for mode in metrics_list:
                 metrics[mode].set_quantile(params['quantile'], round((len(params['quantile']) - 1) / 2))
@@ -284,8 +282,7 @@ class DynamicAnalyzer:
             metric = None
             
             if 'simple' in model_name: # simple_nearest simple_average simple_holt
-                metric = tools.DynamicPredictionMetric(target_name=self.target_fea,
-                    expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir'])
+                metric = tools.DynamicPredictionMetric(target_name=self.target_fea, out_dir=self.conf['paths']['out_dir'])
                 predictor = Baseline.SimpleTimeSeriesPredictor()
                 slice_dict = self.dataset.target_time_dict
                 dataset = slice_dict['data'].copy()
@@ -298,8 +295,7 @@ class DynamicAnalyzer:
                     metric.add_prediction(prediction=result, gt=X_test, start_idx=start_idx_test, duration=duration_test)
 
             elif model_name == 'slice_linear_reg':
-                metric = tools.DynamicPredictionMetric(target_name=self.target_fea,
-                    expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), out_dir=self.conf['paths']['out_dir'])
+                metric = tools.DynamicPredictionMetric(target_name=self.target_fea, out_dir=self.conf['paths']['out_dir'])
                 slice_dict = self.dataset.slice_dict
                 dataset = slice_dict['data'].copy()
                 dataset = tools.convert_type({'_default': -1}, dataset, slice_dict['type_dict'])
@@ -323,7 +319,6 @@ class DynamicAnalyzer:
                 metrics = {
                     key:tools.DynamicPredictionMetric(
                         target_name=self.target_fea, \
-                        expanded_fea=self.fea_manager.get_expanded_fea(self.target_fea), \
                         out_dir=self.conf['paths']['out_dir']) for key in metrics_list}
                 metric = metrics['test']
                 slice_dict = self.dataset.slice_dict

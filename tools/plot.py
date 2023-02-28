@@ -130,15 +130,13 @@ class LossLogger:
 
 
 # 从源数据直接打印直方图
-def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True):
-    (mu, sigma) = scipy.stats.norm.fit(data)
-
+def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True, restrict_area=False):
+    mu, sigma = scipy.stats.norm.fit(data)
     ax = sns.histplot(data=data, stat='proportion', discrete=discrete)
-    # x0, x1 = ax.get_xlim()  # extract the endpoints for the x-axis
-    # x_pdf = np.linspace(x0, x1, 100)
-    # y_pdf = scipy.stats.norm.pdf(x_pdf, loc = mu, scale=sigma) # add norm information
-    # ax.plot(x_pdf, y_pdf, 'gray', lw=2, label='pdf')
-    plt.title('Distribution for ' + data_name, fontsize = 13)
+    if restrict_area:
+        ax.set_xlim(left=max(mu-3*sigma, np.min(data)), right=min(mu+3*sigma, np.max(data)))
+
+    plt.title('Distribution of ' + data_name, fontsize = 13)
     plt.legend(['data', 'Normal dist. ($\mu=$ {:.2f} and $\sigma=$ {:.2f} )'.format(mu, sigma)], loc='best')
     if save_path is None:
         plt.show()

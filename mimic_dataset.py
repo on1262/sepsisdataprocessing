@@ -377,22 +377,22 @@ class MIMICIV:
             # plot distribution
             tools.plot_single_dist(
                 data=arr_points, data_name=f'Points of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'point_' + str(id) + '.png'), discrete=False)
+                save_path=os.path.join(dist_dir, 'point_' + str(id) + '.png'), discrete=False, restrict_area=True)
             tools.plot_single_dist(
                 data=arr_duration, data_name=f'Duration of {fea_name}(Hour)', 
-                save_path=os.path.join(dist_dir, 'duration_' + str(id) + '.png'), discrete=False)
+                save_path=os.path.join(dist_dir, 'duration_' + str(id) + '.png'), discrete=False, restrict_area=True)
             tools.plot_single_dist(
                 data=arr_frequency, data_name=f'Frequency of {fea_name}(Point/Hour)', 
-                save_path=os.path.join(dist_dir, 'freq_' + str(id) + '.png'), discrete=False)
+                save_path=os.path.join(dist_dir, 'freq_' + str(id) + '.png'), discrete=False, restrict_area=True)
             tools.plot_single_dist(
                 data=arr_avg_value, data_name=f'Avg Value of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'avgv_' + str(id) + '.png'), discrete=False)
+                save_path=os.path.join(dist_dir, 'avgv_' + str(id) + '.png'), discrete=False, restrict_area=True)
             tools.plot_single_dist(
                 data=arr_min_interval, data_name=f'Min interval of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'mininterv_' + str(id) + '.png'), discrete=False)
+                save_path=os.path.join(dist_dir, 'mininterv_' + str(id) + '.png'), discrete=False, restrict_area=True)
             tools.plot_single_dist(
                 data=arr_max_interval, data_name=f'Max interval of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'maxinterv_' + str(id) + '.png'), discrete=False)
+                save_path=os.path.join(dist_dir, 'maxinterv_' + str(id) + '.png'), discrete=False, restrict_area=True)
         # itemid hit rate
         hit_table = {}
         adm_count = np.sum([len(s.admissions) for s in self.subjects.values()])
@@ -427,8 +427,32 @@ class MIMICDataset:
         self.subjects = self.mimiciv.subjects
         self.g_conf = self.mimiciv.g_conf
         self.configs = self.mimiciv.configs
+        # preload data
+        self.data = None # ndarray(samples, n_fea, ticks)
+        self.norm_dict = None # key=str(name/id) value={'mean':mean, 'std':std}
+        self.static_keys = None # list(str)
+        self.dynamic_keys = None # list(str)
+        self.seqs_len = None # list(available_len)
+
         self.preprocess()
         self.preprocess_table()
+        self.target_name = self.configs['process']['target_label']
+        self.target_idx = self.data.shape[1] - 1
+        self.idx_dict = dict(
+            {str(key):val for val, key in enumerate(self.static_keys)}, \
+                **{str(key):val+len(self.static_keys) for val, key in enumerate(self.dynamic_keys)})
+        
+        # 这里设置str是为了使得特征名可以作为dict的keyword索引
+        self.norm_dict = {str(key):val for key, val in self.norm_dict.items()}
+        self.static_keys = [str(key) for key in self.static_keys]
+        self.dynamic_keys = [str(key) for key in self.dynamic_keys]
+        self.total_keys = self.static_keys + self.dynamic_keys
+
+    def restore_norm(self, name_or_idx, data:np.ndarray) -> np.ndarray:
+        if isinstance(name_or_idx, int):
+            name_or_idx = self.total_keys[name_or_idx]
+        norm = self.norm_dict[name_or_idx]
+        return data* norm['std'] + norm['mean']
 
     def preprocess(self, from_pkl=True):
         numeric_pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'numeric_subject.pkl')
