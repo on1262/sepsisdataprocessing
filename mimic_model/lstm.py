@@ -1,6 +1,123 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import tools
+import torchinfo
+from torch.utils.data.dataloader import DataLoader
+from tqdm import tqdm
+import os
+from tools import logger as logger
+
+
+def Collect_Fn(data_list:list):
+    result = {}
+    result['data'] = torch.as_tensor(np.stack([d['data'] for d in data_list], axis=0))
+    result['length'] = torch.as_tensor([d['length'] for d in data_list], dtype=torch.long)
+    return result
+
+
+class LSTMTrainer():
+    def __init__(self, params:dict, dataset) -> None:
+        self.params = params
+        self.device = torch.device(self.params['device'])
+        self.cache_path = params['cache_path']
+        tools.reinit_dir(self.cache_path, build=True)
+        # self.quantile = None
+        # self.quantile = self.params['quantile']
+        # self.quantile_idx = round(len(self.quantile[:-1]) / 2)
+        self.model = LSTMModel(n_fea=params['in_channels'], n_hidden=params['hidden_size'])
+        self.criterion = AutoRegLoss(target_idx=params['target_idx'], target_coeff=params['target_coeff'])
+        self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
+        self.dataset = dataset
+        self.target_idx = params['target_idx']
+        self.train_dataloader = DataLoader(dataset=self.dataset, batch_size=params['batch_size'], shuffle=True, collate_fn=Collect_Fn)
+        self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=True, collate_fn=Collect_Fn)
+        self.test_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
+        self.register_vals = {'train_loss':[], 'valid_loss':[]}
+    
+    def get_loss(self):
+        data = {
+            'train': np.asarray(self.register_vals['train_loss']), 
+            'valid': np.asarray(self.register_vals['valid_loss'])
+        }
+        return data
+    
+    def _make_mask(self, m_shape:tuple, available_lens) -> np.ndarray:
+        mask = np.zeros(m_shape, dtype=bool)
+        for idx in range(m_shape[0]):
+            mask[idx, :available_lens[idx]] = True
+        return mask
+
+
+    def summary(self):
+        torchinfo.summary(self.model)
+
+    def _train_forward(self, batch):
+        x, available_lens = batch['data'].to(self.device), batch['length']
+        pred = self.model(x, available_lens, available_lens)
+        loss = self.criterion(pred=pred[:, :-1], gt=x[:, self.target_idx, 1:], mask=self._make_mask(x.size(), available_lens)[:, 1:])
+        return pred, loss
+
+    def train(self):
+        cache_path = os.path.join(self.cache_path)
+        tools.reinit_dir(cache_path)
+        self.model = self.model.to(self.device)
+        with tqdm(total=self.params['epochs']) as tq:
+            tq.set_description(f'Training, Epoch')
+            best_epoch = 0
+            best_valid_loss = np.inf
+            for epoch in range(self.params['epochs']):
+                loss_vals = {'train_loss':0, 'valid_loss':0}
+                # train phase
+                self.dataset.mode('train')
+                self.model.train()
+                for batch in self.train_dataloader:
+                    _, loss = self._train_forward(self, batch)
+                    self.opt.zero_grad()
+                    loss.backward()
+                    self.opt.step()
+                    loss_vals['train_loss'] += loss.detach().cpu().item() * x.shape[0]
+                loss_vals['train_loss'] /= len(self.dataset) # 避免最后一个batch导致计算误差
+                # validation phase
+                self.dataset.mode('valid')
+                self.model.eval()
+                with torch.no_grad():
+                    for batch in self.valid_dataloader:
+                        _, loss = self._train_forward(self, batch)
+                        loss_vals['valid_loss'] += loss.detach().cpu().item() * x.shape[0]
+                loss_vals['valid_loss'] /= len(self.dataset)
+                # tqdm
+                tq.set_postfix(valid_loss=loss_vals['valid_loss'],
+                    train_loss=loss_vals['train_loss'])
+                tq.update(1)
+                if loss_vals['valid_loss'] < best_valid_loss:
+                    best_valid_loss = loss_vals['valid_loss']
+                    best_epoch = epoch
+                self.register_vals['train_loss'].append(loss_vals['train_loss'])
+                self.register_vals['valid_loss'].append(loss_vals['valid_loss'])
+                torch.save(self.model.state_dict(), os.path.join(cache_path, f'{epoch}.pt'))
+        best_path = os.path.join(cache_path, f'{best_epoch}.pt')
+        self.model.load_state_dict(torch.load(best_path, map_location=self.device))
+        logger.info(f'Load best model from {best_path} valid loss={best_valid_loss}')
+    
+    def predict(self, mode):
+        assert(mode in ['test', 'train', 'valid'])
+        self.dataset.mode(mode)
+        self.model = self.model.to(self.device).eval()
+        register_vals = {'test_loss':0, 'pred':[]}
+        with tqdm(total=len(self.test_dataloader)) as tq:
+            tq.set_description(f'Testing, data={mode}')
+            with torch.no_grad():
+                for idx, batch in enumerate(self.test_dataloader):
+                    pred, loss = self._train_forward(self, batch)
+                    register_vals['pred'].append(pred.detach().clone().cpu())
+                    register_vals['test_loss'] += loss.detach().cpu().item()
+                    tq.set_postfix(loss=register_vals['test_loss'] / (idx+1))
+                    tq.update(1)
+        pred = torch.concat(register_vals['pred'], dim=1)[:, :, :-1]
+        pred = torch.concat([-torch.ones(size=(pred.size(0), pred.size(1), 1)), pred], dim=-1) # 第一列没有预测
+        return pred
+
 
 class LSTMModel(nn.Module):
     '''用于MIMIC-IV的时序预测, 采用自回归的方式, 会同时预测所有feature的结果'''
@@ -52,7 +169,7 @@ class LSTMModel(nn.Module):
 
 class AutoRegLoss(nn.Module):
     '''
-        用于自回归的loss, 需要对model输出错开一个时间点对齐
+        用于自回归的loss, pred和gt位置对齐
         target_idx: target(PaO2/FiO2)所在的feature序号
         target_coeff: 对target进行loss加强的系数
     '''

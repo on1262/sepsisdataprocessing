@@ -68,7 +68,8 @@
     },
     "mimic_analyzer":{
         "paths": {
-            "out_dir":"mimic_out"
+            "out_dir":"mimic_out",
+            "lstm_cache": "mimic_out/cache/lstm_model"
         }
     }
     

@@ -7,6 +7,7 @@ import tools
 import numpy as np
 import pandas as pd
 import torch
+from torch.utils.data import Dataset
 from tools import GLOBAL_CONF_LOADER
 from tools import logger
 from tqdm import tqdm
@@ -418,11 +419,12 @@ class MIMICIV:
         logger.info(f'Report generated at {out_path}')
 
 
-class MIMICDataset:
+class MIMICDataset(Dataset):
     '''
     MIMIC-IV上层抽象, 从中间文件读取数据, 进行处理, 得到最终数据集
     '''
     def __init__(self):
+        super().__init__()
         self.mimiciv = MIMICIV()
         self.subjects = self.mimiciv.subjects
         self.g_conf = self.mimiciv.g_conf
@@ -438,6 +440,7 @@ class MIMICDataset:
         self.preprocess_table()
         self.target_name = self.configs['process']['target_label']
         self.target_idx = self.data.shape[1] - 1
+        # idx_dict: fea_name->idx
         self.idx_dict = dict(
             {str(key):val for val, key in enumerate(self.static_keys)}, \
                 **{str(key):val+len(self.static_keys) for val, key in enumerate(self.dynamic_keys)})
@@ -447,12 +450,45 @@ class MIMICDataset:
         self.static_keys = [str(key) for key in self.static_keys]
         self.dynamic_keys = [str(key) for key in self.dynamic_keys]
         self.total_keys = self.static_keys + self.dynamic_keys
+        self.icu_item = {str(key):val for key, val in self.icu_item.items()}
+        self.hosp_item = {str(key):val for key, val in self.hosp_item.items()}
+        # mode switch
+        self.index = None # 当前模式(train/test)的index list, None表示使用全部数据
+
+    def get_fea_label(self, key_or_idx):
+        '''输入key/idx得到关于特征的简短描述, 从icu_item中提取'''
+        if isinstance(key_or_idx, int):
+            name = self.total_keys[key_or_idx]
+        else:
+            name = key_or_idx
+        if self.icu_item.get(name) is not None:
+            return self.icu_item[name][0]
+        else:
+            logger.warning(f'No fea label for: {name} return name')
+            return name
+
+    def register_split(self, train_index, valid_index, test_index):
+        self.train_index = train_index
+        self.valid_index = valid_index
+        self.test_index = test_index
+
+    def mode(self, mode=['train', 'valid', 'test', 'all']):
+        '''切换dataset的模式, train/valid/test需要在register_split方法调用后才能使用'''
+        if mode == 'train':
+            self.index = self.train_index
+        elif mode =='valid':
+            self.index = self.valid_index
+        elif mode =='test':
+            self.index = self.test_index
+        else:
+            self.index = None
+
 
     def restore_norm(self, name_or_idx, data:np.ndarray) -> np.ndarray:
         if isinstance(name_or_idx, int):
             name_or_idx = self.total_keys[name_or_idx]
         norm = self.norm_dict[name_or_idx]
-        return data* norm['std'] + norm['mean']
+        return data * norm['std'] + norm['mean']
 
     def preprocess(self, from_pkl=True):
         numeric_pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'numeric_subject.pkl')
@@ -627,24 +663,24 @@ class MIMICDataset:
             with open(pkl_path_norm, 'wb') as fp:
                 pickle.dump(self.data, fp)
             logger.info(f'data table dumped at {pkl_path_norm}')
-        # step3: 时间轴长度对齐, 生成seq_len, 进行某些特征的最后处理
+        # step3: 时间轴长度对齐, 生成seqs_len, 进行某些特征的最后处理
         if from_pkl and os.path.exists(pkl_path_length):
             with open(pkl_path_length, 'rb') as fp:
-                seq_len, self.static_keys, self.data = pickle.load(fp)
-                self.seq_len = seq_len
+                seqs_len, self.static_keys, self.data = pickle.load(fp)
+                self.seqs_len = seqs_len
             logger.info(f'load length aligned table from {pkl_path_length}')
         else:
-            seq_len = [d.shape[1] for d in self.data]
-            self.seq_len = seq_len
-            max_len = max(seq_len)
+            seqs_len = [d.shape[1] for d in self.data]
+            self.seqs_len = seqs_len
+            max_len = max(seqs_len)
             n_fea = len(self.static_keys) + len(self.dynamic_keys)
             
             for t_idx in tqdm(range(len(self.data)), desc='length alignment'):
-                if seq_len[t_idx] == max_len:
+                if seqs_len[t_idx] == max_len:
                     continue
-                new_table = -np.ones((n_fea, max_len - seq_len[t_idx]))
+                new_table = -np.ones((n_fea, max_len - seqs_len[t_idx]))
                 self.data[t_idx] = np.concatenate([self.data[t_idx], new_table], axis=1)
-            self.data = np.stack(self.data, axis=0) # (n_sample, n_fea, seq_len)
+            self.data = np.stack(self.data, axis=0) # (n_sample, n_fea, seqs_len)
             # 合并weight/height的重复特征
             self.data[:, 1, :] = np.max(self.data[:, [1,5], :], axis=1)
             self.data[:, 6, :] = np.max(self.data[:, [6,9], :], axis=1)
@@ -658,21 +694,21 @@ class MIMICDataset:
             self.static_keys.pop(4)
             self.data = self.data[:,  rest_feas, :]
             with open(pkl_path_length, 'wb') as fp:
-                pickle.dump((seq_len, self.static_keys, self.data), fp)
+                pickle.dump((seqs_len, self.static_keys, self.data), fp)
             logger.info(f'length aligned table dumped at {pkl_path_length}')
 
     def __getitem__(self, idx):
-        return {'data': self.data[idx, :, :], 'length': self.seq_len[idx]}
+        if self.index is None:
+            return {'data': self.data[idx, :, :], 'length': self.seqs_len[idx]}
+        else:
+            return {'data': self.data[self.index[idx], :, :], 'length': self.seqs_len[self.index[idx]]}
+        
 
     def __len__(self):
-        return self.data.shape[0]
-
-def Collect_Fn(data_list:list):
-    result = {}
-    result['data'] = torch.as_tensor(np.stack([d['data'] for d in data_list], axis=0))
-    result['length'] = torch.as_tensor([d['length'] for d in data_list], dtype=torch.long)
-    return result
-
+        if self.index is None:
+            return self.data.shape[0]
+        else:
+            return len(self.index)
 
 if __name__ == '__main__':
     dataset = MIMICDataset()
