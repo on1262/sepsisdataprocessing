@@ -8,6 +8,7 @@ from sklearn.model_selection import KFold
 import matplotlib.pyplot as plt
 import tools
 import os
+from tqdm import tqdm
 from tools import logger as logger
 
 
@@ -32,18 +33,54 @@ class MIMICAnalyzer():
         out_dir = self.gbl_conf['paths']['out_dir']
         
         # random plot sample time series
-        self._plot_time_series_samples(self.target_name, n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "target_plot"))
-        self._plot_time_series_samples("220224", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "pao2_plot"))
-        self._plot_time_series_samples("223835", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "fio2_plot"))
+        # self._plot_time_series_samples(self.target_name, n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "target_plot"))
+        # self._plot_time_series_samples("220224", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "pao2_plot"))
+        # self._plot_time_series_samples("223835", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "fio2_plot"))
+        self._plot_samples(num=50, id_list=[220224, 223835], id_names=['PaO2', 'FiO2'], out_dir=os.path.join(out_dir, 'samples'))
         # plot fourier tranform result
         # 不等长的话结果的合并很麻烦
         # self._plot_fourier_transform(self.target_name, self.dataset.target_time_arr[:,1], save_dir=out_dir)
 
     def _detect_adm_data(self, id:int):
+        '''直接打印某个id的输出'''
         for s_id, s in self.dataset.subjects.items():
             for adm in s.admissions:
                 logger.info(adm[int(id)][:,0])
+                input()
     
+    def _plot_samples(self, num, id_list:list, id_names:list, out_dir):
+        '''
+        随机抽取num个样本生成id_list中特征的时间序列, 在非对齐的时间刻度下表示
+        
+        '''
+        tools.reinit_dir(out_dir, build=True)
+        count = 0
+        nrow = len(id_list)
+        assert(nrow <= 5) # 太多会导致subplot拥挤
+        bar = tqdm(desc='plot samples', total=num)
+        for s_id, s in self.dataset.subjects.items():
+            for adm in s.admissions:
+                if count >= num:
+                    return
+                plt.figure(figsize = (6, nrow*3))
+                # register xlim
+                xmin, xmax = np.inf,-np.inf
+                for idx, id in enumerate(id_list):
+                    if id in adm.keys():
+                        xmin = min(xmin, np.min(adm[id][:,1]))
+                        xmax = max(xmax, np.max(adm[id][:,1]))
+                for idx, id in enumerate(id_list):
+                    if id in adm.keys():
+                        plt.subplot(nrow, 1, idx+1)
+                        plt.plot(adm[id][:,1], adm[id][:,0], '-o', label=id_names[idx])
+                        plt.gca().set_xlim([xmin, xmax])
+                        plt.legend()
+                plt.suptitle(f'subject={s_id}')
+                plt.savefig(os.path.join(out_dir, f'{count}.png'))
+                plt.close()
+                bar.update(1)
+                count += 1
+
     def _plot_time_series_samples(self, fea_name:str, n_sample:int=100, n_per_plots:int=10, write_dir=None):
         '''
         fea_name: total_keys中的项, 例如"220224"
@@ -172,7 +209,7 @@ class MIMICAnalyzer():
 if __name__ == '__main__':
     dataset = MIMICDataset()
     analyzer = MIMICAnalyzer(dataset)
-    analyzer._detect_adm_data(220224)
-    # analyzer.feature_explore()
+    # analyzer._detect_adm_data(220224)
+    analyzer.feature_explore()
     # analyzer.lstm_model()
     # analyzer.nearest_method()

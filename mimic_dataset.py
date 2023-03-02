@@ -201,12 +201,12 @@ class MIMICIV:
         d_hosp_item = pd.read_csv(os.path.join(self.mimic_dir, 'hosp', 'd_labitems.csv'), encoding='utf-8')
         hosp_item = {}
         for _,row in tqdm(d_hosp_item.iterrows(), desc='hosp items'):
-            hosp_item[row['itemid']] = (row['label'], row['fluid'], row['category'])
+            hosp_item[str(row['itemid'])] = (row['label'], row['fluid'], row['category'])
         # 建立icu lab_item编号映射
         d_icu_item = pd.read_csv(os.path.join(self.mimic_dir, 'icu', 'd_items.csv'), encoding='utf-8')
         icu_item = {}
         for _,row in tqdm(d_icu_item.iterrows(), desc='icu items'):
-            icu_item[row['itemid']] = (row['label'], row['category'], row['param_type'], row['lownormalvalue'], row['highnormalvalue'])
+            icu_item[str(row['itemid'])] = (row['label'], row['category'], row['param_type'], row['lownormalvalue'], row['highnormalvalue'])
         # 存储cache
         self.subject_ids = subject_ids
         self.sepsis_icds = sepsis_icds
@@ -286,7 +286,7 @@ class MIMICIV:
         for file_name in sorted(os.listdir(out_cache_dir)):
             icu_events = pd.read_csv(os.path.join(out_cache_dir, file_name), encoding='utf-8')[['subject_id', 'itemid', 'charttime', 'valuenum']].to_numpy()
             for idx in range(len(icu_events)):
-                s_id, itemid = icu_events[idx, 0], icu_events[idx, 1]
+                s_id, itemid = icu_events[idx, 0], str(icu_events[idx, 1])
                 if s_id in self.subjects and itemid in enabled_item_id:
                     self.subjects[s_id].append_dynamic(charttime=self.converter(icu_events[idx, 2]), itemid=itemid, value=icu_events[idx, 3])
             p_bar.update(1)
@@ -309,6 +309,7 @@ class MIMICIV:
                     new_adm_idx = []
                     for idx, adm in enumerate(self.subjects[s_id].admissions):
                         flag = 1
+                        # 检查duration, points, interval
                         for target_id in rules['target_id']:
                             if target_id in adm.keys():
                                 dur = adm[target_id][-1,1] - adm[target_id][0,1]
@@ -319,6 +320,10 @@ class MIMICIV:
                                 else:
                                     flag = 0
                             else:
+                                flag = 0
+                        # 检查PaO2/FiO2覆盖
+                        if flag != 0:
+                            if adm["220224"][0, 1] < adm["223835"][0, 1] or adm["220224"][-1, 1] > adm["223835"][-1, 1]:
                                 flag = 0
                         if flag != 0:
                             new_adm_idx.append(idx)
@@ -510,6 +515,7 @@ class MIMICDataset(Dataset):
             with open(numeric_pkl_path, 'wb') as fp:
                 pickle.dump(self.subjects, fp)
             logger.info(f'Numeric subjects dumped at {numeric_pkl_path}')
+        
         for s in self.subjects.values():
             for key in s.static_data.keys():
                 self.static_feas.add(key)
@@ -555,10 +561,10 @@ class MIMICDataset(Dataset):
                     s.static_data[key] = np.asarray(s.static_data[key])[valid_idx, :]
             for adm in s.admissions:
                 for id in adm.keys():
-                    if id == 223835: # fio2, 空气氧含量
+                    if id == "223835": # fio2, 空气氧含量
                         data = adm[id][:,0]
                         adm[id][:,0] = (data * (data > 20) + 21*np.ones(data.shape) * (data <= 20)) * 0.01
-                    elif id == 220224:
+                    elif id == "220224":
                         data = adm[id][:,0]
                         adm[id][:,0] = (data * (data < 600) + 600*np.ones(data.shape) * (data >= 600))
 
@@ -628,8 +634,8 @@ class MIMICDataset(Dataset):
                             continue
                         table[static_data.shape[0]+idx, :] = np.interp(x=ticks, xp=adm[key][:, 1], fp=adm[key][:, 0])
                     # 生成PaO2/FiO2
-                    pao2_index = dynamic_keys.index(220224)
-                    fio2_index = dynamic_keys.index(223835)
+                    pao2_index = dynamic_keys.index("220224")
+                    fio2_index = dynamic_keys.index("223835")
                     # 检查
                     if not np.all(table[len(static_keys) + fio2_index, :] > 0):
                         logger.warning('Skipped Zero FiO2 table')
