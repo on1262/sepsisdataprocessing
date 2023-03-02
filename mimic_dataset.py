@@ -143,14 +143,14 @@ class MIMICIV:
     这一步的数据是不对齐的, 仅考虑抽取和类型转化问题
     '''
     def __init__(self):
-        self.g_conf = GLOBAL_CONF_LOADER['mimic-iv']
+        self.gbl_conf = GLOBAL_CONF_LOADER['mimic-iv']
         # paths
-        self.mimic_dir = self.g_conf['paths']['mimic_dir']
+        self.mimic_dir = self.gbl_conf['paths']['mimic_dir']
         # configs
-        self.configs = Config(cache_path=self.g_conf['paths']['conf_cache_path'], manual_path=self.g_conf['paths']['conf_manual_path'])
+        self.loc_conf = Config(cache_path=self.gbl_conf['paths']['conf_cache_path'], manual_path=self.gbl_conf['paths']['conf_manual_path'])
         self.procedure_flag = 'init' # 控制标志, 进行不同阶段的cache和dump
         self.converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
-        self.target_icu_ids = self.configs['extract']['target_icu_id']
+        self.target_icu_ids = self.loc_conf['extract']['target_icu_id']
         # variable for phase 1
         self.subject_ids = None
         self.sepsis_icds = None
@@ -161,7 +161,7 @@ class MIMICIV:
 
         self.preprocess()
         # post process
-        self.remove_invalid_data(rules=self.configs['extract']['remove_rule'])
+        self.remove_invalid_data(rules=self.loc_conf['extract']['remove_rule'])
         logger.info('MIMICIV inited')
 
     def preprocess(self, from_pkl=True, split_csv=False):
@@ -170,7 +170,7 @@ class MIMICIV:
         self.preprocess_phase3(split_csv, from_pkl)
  
     def preprocess_phase1(self, from_pkl=True):
-        pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'phase1.pkl')
+        pkl_path = os.path.join(self.gbl_conf['paths']['cache_dir'], 'phase1.pkl')
         if from_pkl and os.path.exists(pkl_path):
             logger.info(f'load pkl for phase 1 from {pkl_path}')
             with open(pkl_path, 'rb') as fp:
@@ -217,7 +217,7 @@ class MIMICIV:
         self.procedure_flag = 'phase1'
     
     def preprocess_phase2(self, from_pkl=True):
-        pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'phase2.pkl')
+        pkl_path = os.path.join(self.gbl_conf['paths']['cache_dir'], 'phase2.pkl')
         if from_pkl:
             with open(pkl_path, 'rb') as fp:
                 self.subjects, self.subject_ids = pickle.load(fp)
@@ -260,7 +260,7 @@ class MIMICIV:
 
 
     def preprocess_phase3(self, split_csv=False, from_pkl=True):
-        pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'subjects.pkl')
+        pkl_path = os.path.join(self.gbl_conf['paths']['cache_dir'], 'subjects.pkl')
         if from_pkl:
             with open(pkl_path, 'rb') as fp:
                 self.subjects = pickle.load(fp)
@@ -277,7 +277,7 @@ class MIMICIV:
             if self.icu_item[id][2] in ['Numeric', 'Numeric with tag'] and self.icu_item[id][1] not in ['Alarms']:
                 enabled_item_id.add(id)
         # 采集icu内的动态数据
-        out_cache_dir = os.path.join(self.g_conf['paths']['cache_dir'], 'icu_events')
+        out_cache_dir = os.path.join(self.gbl_conf['paths']['cache_dir'], 'icu_events')
         if split_csv:
             tools.split_csv(os.path.join(self.mimic_dir, 'icu', 'chartevents.csv'), out_folder=out_cache_dir)
         icu_events = None
@@ -335,8 +335,8 @@ class MIMICIV:
 
     def make_report(self):
         '''进行数据集的信息统计'''
-        out_path = os.path.join(self.g_conf['paths']['out_dir'], 'dataset_report.txt')
-        dist_dir = os.path.join(self.g_conf['paths']['out_dir'], 'report_dist')
+        out_path = os.path.join(self.gbl_conf['paths']['out_dir'], 'dataset_report.txt')
+        dist_dir = os.path.join(self.gbl_conf['paths']['out_dir'], 'report_dist')
         tools.reinit_dir(dist_dir, build=True)
         logger.info('MIMIC-IV: generating dataset report')
         write_lines = []
@@ -427,8 +427,8 @@ class MIMICDataset(Dataset):
         super().__init__()
         self.mimiciv = MIMICIV()
         self.subjects = self.mimiciv.subjects
-        self.g_conf = self.mimiciv.g_conf
-        self.configs = self.mimiciv.configs
+        self.g_conf = self.mimiciv.gbl_conf
+        self.configs = self.mimiciv.loc_conf
         # preload data
         self.data = None # ndarray(samples, n_fea, ticks)
         self.norm_dict = None # key=str(name/id) value={'mean':mean, 'std':std}
@@ -450,8 +450,8 @@ class MIMICDataset(Dataset):
         self.static_keys = [str(key) for key in self.static_keys]
         self.dynamic_keys = [str(key) for key in self.dynamic_keys]
         self.total_keys = self.static_keys + self.dynamic_keys
-        self.icu_item = {str(key):val for key, val in self.icu_item.items()}
-        self.hosp_item = {str(key):val for key, val in self.hosp_item.items()}
+        self.icu_item = {str(key):val for key, val in self.mimiciv.icu_item.items()}
+        self.hosp_item = {str(key):val for key, val in self.mimiciv.hosp_item.items()}
         # mode switch
         self.index = None # 当前模式(train/test)的index list, None表示使用全部数据
 
@@ -480,8 +480,10 @@ class MIMICDataset(Dataset):
             self.index = self.valid_index
         elif mode =='test':
             self.index = self.test_index
-        else:
+        elif mode == 'all':
             self.index = None
+        else:
+            assert(0)
 
 
     def restore_norm(self, name_or_idx, data:np.ndarray) -> np.ndarray:
@@ -523,8 +525,7 @@ class MIMICDataset(Dataset):
             logger.info(f'Norm dict dumped at {norm_pkl_path}')
         
     def preprocess_to_num(self):
-        '''将所有特征转化为数值型, 手段是多样的'''
-        # 目前只有static data需要处理
+        '''将所有特征转化为数值型, 并且对于异常值进行处理'''
         for s in self.subjects.values():
             for key in list(s.static_data.keys()):
                 if key == 'gender':
@@ -552,6 +553,14 @@ class MIMICDataset(Dataset):
                         except Exception as e:
                             logger.warning(f'Invalid value {v} for {key}')
                     s.static_data[key] = np.asarray(s.static_data[key])[valid_idx, :]
+            for adm in s.admissions:
+                for id in adm.keys():
+                    if id == 223835: # fio2, 空气氧含量
+                        data = adm[id][:,0]
+                        adm[id][:,0] = (data * (data > 20) + 21*np.ones(data.shape) * (data <= 20)) * 0.01
+                    elif id == 220224:
+                        data = adm[id][:,0]
+                        adm[id][:,0] = (data * (data < 600) + 600*np.ones(data.shape) * (data >= 600))
 
     def preprocess_norm(self) -> dict:
         '''制作norm_dict'''

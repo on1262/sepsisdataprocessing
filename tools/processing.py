@@ -432,6 +432,7 @@ class DynamicPredictionMetric:
     def plot_residual(self, res_dir:str):
         logger.info('DynamicPredictionMetric: Plotting residual')
         os.makedirs(res_dir,exist_ok=True)
+        name = self.target_name
         if self.records is None:
             logger.error('DynamicPredictionMetric: no record')
             return
@@ -439,14 +440,15 @@ class DynamicPredictionMetric:
             r_pred = self.records['pred'][self.quantile_idx, ...]
         else:
             r_pred = self.records['pred']
-        valid_mat = (r_pred[:] > 0) * self.records['mask'][:]
-        if np.any(valid_mat):
-            pred = r_pred[:][valid_mat]
-            gt = self.records['gt'][:][valid_mat]
-            res = pred - gt
-            plot_single_dist(data=res, data_name='Residual distribution: ' + old_name, save_path=os.path.join(res_dir, f'{time}_name={remove_slash(old_name)}.png'), discrete=False)
-        else:
-            logger.warning(f'Plot residual: no valid row in name={old_name}')
+        for idx in range(r_pred.shape[-1]):
+            valid_mat = (r_pred[..., idx] > 0) * self.records['mask'][..., idx]
+            if np.any(valid_mat):
+                pred = r_pred[..., idx][valid_mat]
+                gt = self.records['gt'][..., idx][valid_mat]
+                res = pred - gt
+                plot_single_dist(data=res, data_name='Residual distribution: ' + name, save_path=os.path.join(res_dir, f'{idx}_name={remove_slash(name)}.png'),  discrete=False)
+            else:
+                logger.warning(f'Plot residual: no valid row in name={name}')
 
     # 绘制预测值和真实值的关联度
     def plot_corr(self, corr_dir:str, comment:str=''):

@@ -12,3 +12,5 @@ documents/
 *.pyc
 *.png
 *.txt
+*.pt
+*.log

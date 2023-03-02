@@ -16,7 +16,7 @@
             "name": "StaticAnalyzer",
             "type": "python",
             "request": "launch",
-            "program": "${cwd}\\static_analyzer.py",
+            "program": "${cwd}/static_analyzer.py",
             "console": "integratedTerminal",
             "justMyCode": true
         },
@@ -24,7 +24,15 @@
             "name": "DynamicAnalyzer",
             "type": "python",
             "request": "launch",
-            "program": "${cwd}\\dynamic_analyzer.py",
+            "program": "${cwd}/dynamic_analyzer.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "MIMICAnalyzer",
+            "type": "python",
+            "request": "launch",
+            "program": "${cwd}/mimic_analyzer.py",
             "console": "integratedTerminal",
             "justMyCode": true
         },

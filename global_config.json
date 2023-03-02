@@ -69,7 +69,9 @@
     "mimic_analyzer":{
         "paths": {
             "out_dir":"mimic_out",
-            "lstm_cache": "mimic_out/cache/lstm_model"
+            "lstm_cache": "mimic_out/cache/lstm_model",
+            "conf_cache_path": "mimic-iv/configs/config_cache.json",
+            "conf_manual_path": "mimic-iv/configs/config_manual.json"
         }
     }
     
