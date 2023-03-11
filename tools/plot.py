@@ -128,9 +128,45 @@ class LossLogger:
             plt.savefig(out_path)
         plt.close()
 
+def plot_histogram_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
+    # Validate the input
+    if not isinstance(data, np.ndarray):
+        raise ValueError("Input data must be a numpy array.")
+    if not isinstance(labels, list) or not all(isinstance(l, str) for l in labels):
+        raise ValueError("Input labels must be a list of strings.")
+
+    # sort
+    # ind = np.argsort(data)
+    # data = data[ind]
+    # labels = [labels[i] for i in ind]
+
+    # Set up the histogram
+    fig, ax = plt.subplots(figsize=(12,12)) # Set figure size
+    plt.subplots_adjust(bottom=0.3)
+    ind = np.arange(len(data))
+    width = 0.8
+    if len(labels) < 20:
+        fontsize = 20
+    else:
+        fontsize = 10
+    ax.bar(ind, data, width, color='SkyBlue')
+
+    # Set up the X axis
+    ax.set_xticks(range(0, len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=fontsize)
+
+    ax.set_title(title)
+    
+    if out_path is None:
+        # Show the histogram
+        plt.show()
+    else:
+        plt.savefig(out_path)
+    plt.close()
 
 # 从源数据直接打印直方图
 def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True, restrict_area=False):
+    data = data[:]
     mu, sigma = scipy.stats.norm.fit(data)
     ax = sns.histplot(data=data, stat='proportion', discrete=discrete)
     if restrict_area:

@@ -1,8 +1,8 @@
 import torch
 import torchinfo
 import numpy as np
-from mimic_dataset import MIMICDataset, Subject, Admission,Config # 这个未使用的import是pickle的bug
-from mimic_model.lstm import LSTMModel, LSTMTrainer
+from mimic_dataset import MIMICDataset, Subject, Admission, Config # 这个未使用的import是pickle的bug
+from mimic_model.lstm_reg import LSTMModel, LSTMTrainer
 from mimic_model.baseline import BaselineNearest
 from sklearn.model_selection import KFold
 import matplotlib.pyplot as plt
@@ -33,20 +33,101 @@ class MIMICAnalyzer():
         out_dir = self.gbl_conf['paths']['out_dir']
         
         # random plot sample time series
-        # self._plot_time_series_samples(self.target_name, n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "target_plot"))
-        # self._plot_time_series_samples("220224", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "pao2_plot"))
-        # self._plot_time_series_samples("223835", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "fio2_plot"))
-        self._plot_samples(num=50, id_list=[220224, 223835], id_names=['PaO2', 'FiO2'], out_dir=os.path.join(out_dir, 'samples'))
+        self._plot_time_series_samples(self.target_name, n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "target_plot"))
+        self._plot_time_series_samples("220224", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "pao2_plot"))
+        self._plot_time_series_samples("223835", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "fio2_plot"))
+        self._plot_samples(num=50, id_list=["220224", "223835"], id_names=['PaO2', 'FiO2'], out_dir=os.path.join(out_dir, 'samples'))
         # plot fourier tranform result
         # 不等长的话结果的合并很麻烦
         # self._plot_fourier_transform(self.target_name, self.dataset.target_time_arr[:,1], save_dir=out_dir)
 
-    def _detect_adm_data(self, id:int):
+        # self._miss_mat()
+        # self._first_ards_time()
+        #self._feature_count()
+
+    def _detect_adm_data(self, id:str):
         '''直接打印某个id的输出'''
         for s_id, s in self.dataset.subjects.items():
             for adm in s.admissions:
-                logger.info(adm[int(id)][:,0])
+                logger.info(adm[id][:,0])
                 input()
+    
+    def _first_ards_time(self):
+        '''打印首次呼衰出现的时间分布'''
+        out_dir = self.gbl_conf['paths']['out_dir']
+        times = []
+        counts = [] # 产生呼衰的次数
+        ards_count = 0
+        adms = [adm for s in self.dataset.subjects.values() for adm in s.admissions]
+        pao2_id, fio2_id =  "220224", "223835"
+        for adm in adms:
+            count = 0
+            ticks = adm[pao2_id][:, 1]
+            fio2 = np.interp(x=ticks, xp=adm[fio2_id][:, 1], fp=adm[fio2_id][:, 0])
+            pao2 = adm[pao2_id][:, 0]
+            pf = pao2 / fio2
+            for idx in range(pf.shape[0]):
+                if pf[idx] < 300:
+                    times.append(adm[pao2_id][idx, 1])
+                    count += 1
+            if count != 0:
+                ards_count += 1
+                counts.append(count) 
+        tools.plot_single_dist(np.asarray(times), f"First ARDS time(hour)", os.path.join(out_dir, "first_ards_time.png"), restrict_area=True)
+        tools.plot_single_dist(np.asarray(counts), f"ARDS Count", os.path.join(out_dir, "ards_count.png"), restrict_area=True)
+        logger.info(f"ARDS patients count={ards_count}")
+
+    def _miss_mat(self):
+        '''行列缺失表'''
+        out_dir = self.gbl_conf['paths']['out_dir']
+        na_table = np.zeros((len(self.dataset.subjects), len(self.dataset.dynamic_keys)), dtype=bool)
+        for r_id, s_id in enumerate(self.dataset.subjects):
+            adm_key = set(self.dataset.subjects[s_id].admissions[0].keys())
+            for c_id, key in enumerate(self.dataset.dynamic_keys):
+                if key in adm_key:
+                    na_table[r_id, c_id] = True
+        # 行缺失
+        row_nas = na_table.mean(axis=1)
+        col_nas = na_table.mean(axis=0)
+        tools.plot_single_dist(row_nas, f"Row miss rate", os.path.join(out_dir, "row_miss_rate.png"), discrete=False, restrict_area=True)
+        tools.plot_single_dist(col_nas, f"Column miss rate", os.path.join(out_dir, "col_miss_rate.png"), discrete=False, restrict_area=True)
+
+    def _feature_count(self):
+        '''打印特征出现的次数'''
+        out_dir = self.gbl_conf['paths']['out_dir']
+        adms = [adm for s in self.dataset.subjects.values() for adm in s.admissions]
+        count_hist = {}
+        for adm in adms:
+            for key in adm.keys():
+                if key not in count_hist.keys():
+                    count_hist[key] = {'count':0, 'interval':0}
+                count_hist[key]['count'] += adm[key].shape[0]
+                count_hist[key]['interval'] += ((adm[key][-1, 1] - adm[key][0, 1]) / adm[key].shape[0])
+        for key in count_hist.keys():
+            count_hist[key]['count'] /= len(adms)
+            count_hist[key]['interval'] /= len(adms)
+        key_list = list(count_hist.keys())
+        key_list = sorted(key_list, key=lambda x:count_hist[x]['count'])
+        key_list = key_list[-40:] # 最多80, 否则vital_sig可能不准
+        for key in key_list:
+            interval = count_hist[key]['interval']
+            logger.info(f'\"{key}\", {self.dataset.get_fea_label(key)} interval={interval:.1f}')
+        used_list = []
+        vital_sig = {"220045", "220210", "220277", "220181", "220179", "220180", "223761", "223762", "224685", "224684", "224686", "228640", "224417"}
+        med_ind = {key for key in key_list} - vital_sig
+        for name in ['vital_sig', 'med_ind']:
+            subset = vital_sig if name == 'vital_sig' else med_ind
+            new_list = []
+            for key in key_list:
+                if key in subset:
+                    new_list.append(key)
+            counts = np.asarray([count_hist[key]['count'] for key in new_list])
+            intervals = np.asarray([count_hist[key]['interval'] for key in new_list])
+            labels = [self.dataset.get_fea_label(key) for key in new_list]
+            tools.plot_histogram_with_label(counts, labels, f'{name} Count', out_path=os.path.join(out_dir, f"{name}_feature_count.png"))
+            tools.plot_histogram_with_label(intervals, labels, f'{name} Interval', out_path=os.path.join(out_dir, f"{name}_feature_interval.png"))
+
+
     
     def _plot_samples(self, num, id_list:list, id_names:list, out_dir):
         '''
@@ -94,7 +175,7 @@ class MIMICAnalyzer():
         label = self.dataset.get_fea_label(fea_name)
         for p_idx in range(n_plot):
             stop_idx = min(start_idx + n_per_plots, n_sample)
-            mat = self.dataset.restore_norm(fea_idx, self.data[start_idx:stop_idx, fea_idx, :])
+            mat = self.data[start_idx:stop_idx, fea_idx, :]
             for idx in range(stop_idx-start_idx):
                 series = mat[idx, :]
                 plt.plot(series[series > 0], alpha=0.3)
@@ -126,6 +207,8 @@ class MIMICAnalyzer():
         params['target_std'] = self.dataset.norm_dict[self.target_name]['std']
         params['fea_names'] = self.dataset.total_keys
         params['cache_path'] = self.gbl_conf['paths']['lstm_cache']
+        params['norm_arr'] = self.dataset.get_norm_array()
+        assert(np.min(params['norm_arr'][:, 1]) > 1e-4) # std can not be zero
         # loss logger
         loss_logger = tools.LossLogger()
         # 训练集划分
@@ -145,8 +228,9 @@ class MIMICAnalyzer():
             start_idx = np.zeros((len(test_index),), dtype=np.int32)
             duration = pred_point*np.ones((len(test_index),), dtype=np.int32)
             for idx, key in enumerate(start_points):
-                yp = self.dataset.restore_norm(self.target_name, Y_pred[idx, :, :]) # 恢复norm
-                gt = self.dataset.restore_norm(self.target_name, Y_gt[:, key+1:key+pred_point+1])
+                yp, gt = Y_pred[idx, :, :], Y_gt[:, key+1:key+pred_point+1]
+                # yp = self.dataset.restore_norm(self.target_name, Y_pred[idx, :, :]) # 恢复norm
+                # gt = self.dataset.restore_norm(self.target_name, Y_gt[:, key+1:key+pred_point+1])
                 metrics[key].add_prediction(prediction=yp , gt=gt, start_idx=start_idx, duration=duration)
             self.dataset.mode('all') # 恢复原本状态
         loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM Model', 
@@ -181,8 +265,10 @@ class MIMICAnalyzer():
             start_idx = np.zeros((len(test_index),), dtype=np.int32)
             duration = pred_point*np.ones((len(test_index),), dtype=np.int32)
             for idx, key in enumerate(start_points):
-                yp = self.dataset.restore_norm(self.target_name, Y_pred[idx, :, :]) # 恢复norm
-                gt = self.dataset.restore_norm(self.target_name, Y_gt[:, key+1:key+pred_point+1])
+                yp = Y_pred[idx, :, :]
+                gt = Y_gt[:, key+1:key+pred_point+1]
+                # yp = self.dataset.restore_norm(self.target_name, Y_pred[idx, :, :]) # 恢复norm
+                # gt = self.dataset.restore_norm(self.target_name, Y_gt[:, key+1:key+pred_point+1])
                 metrics[key].add_prediction(prediction=yp , gt=gt, start_idx=start_idx, duration=duration)
             self.dataset.mode('all') # 恢复原本状态
         for idx, key in enumerate(start_points):
@@ -209,7 +295,7 @@ class MIMICAnalyzer():
 if __name__ == '__main__':
     dataset = MIMICDataset()
     analyzer = MIMICAnalyzer(dataset)
-    # analyzer._detect_adm_data(220224)
+    # analyzer._detect_adm_data("220224")
     analyzer.feature_explore()
     # analyzer.lstm_model()
     # analyzer.nearest_method()

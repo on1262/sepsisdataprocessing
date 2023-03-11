@@ -7,7 +7,7 @@ from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
 import os
 from tools import logger as logger
-from .lstm import Collect_Fn
+from .lstm_reg import Collect_Fn
 
 class BaselineNearest():
     def __init__(self, params, dataset) -> None:

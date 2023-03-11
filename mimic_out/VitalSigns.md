@@ -1,0 +1,90 @@
+##### Vital Signs:
+
+- Arterial O2 Saturation: the amount of oxygen bound to hemoglobin in red blood cells as a percentage of the maximum amount that it could bind at a given temperature.
+- Cuff Pressure: the pressure generated in the inflatable bladder of a pneumatic cuff wrapped around a limb to measure blood pressure.
+- EtCO2: end-tidal carbon dioxide, or the partial pressure of CO2 at the end of an exhaled breath.
+- Heart Rate: the number of times the heart beats in one minute.
+- O2 saturation pulseoxymetry: the measure of the percentage of hemoglobin binding sites in the bloodstream occupied by oxygen, as measured by an oximeter device.
+- Respiratory Rate: the number of breaths taken per minute.
+- Temperature Celsius: the degree of heat intensity on the Celsius scale.
+- Temperature Fahrenheit: the degree of heat intensity on the Fahrenheit scale.
+- Tidal Volume (spontaneous): the volume of air inhaled and exhaled during normal inspiration and expiration cycles of breathing.
+- Tidal Volume (set): the amount of air that is delivered to a patient's lungs during each breath when receiving mechanical ventilation.
+- Non Invasive Blood Pressure diastolic: the minimum pressure in the arteries during the relaxation of the heart.
+- Non Invasive Blood Pressure systolic: the maximum pressure in the arteries during the contraction of the heart.
+- Non Invasive Blood Pressure mean: the average pressure in the arteries during the cardiac cycle.
+
+##### Medical Indicators:
+
+- Anion gap: the difference between the measured cations (positively charged ions) and the anions (negatively charged ions).
+- Alkaline Phosphate: an enzyme that plays a role in bone metabolism and liver function.
+- ALT: alanine aminotransferase, an enzyme found in liver cells that is released into the bloodstream when liver cells are damaged.
+- ART BP Diastolic: the minimum arterial blood pressure reached during each cardiac cycle.
+- ART BP Systolic: the maximum arterial blood pressure reached during each cardiac cycle.
+- ART BP Mean: the average arterial blood pressure over the course of a single cardiac cycle.
+- ART Lumen Volume: the volume of the lumen (cavity) within an artery.
+- BUN: blood urea nitrogen, a measure of the amount of nitrogen in the blood that comes from urea.
+- Calcium non-ionized: the concentration of calcium ions not bound to proteins in the bloodstream.
+- Cardiac Output (CCO): the volume of blood ejected from the heart in one minute.
+- Chloride (serum): a negatively charged electrolyte that helps maintain a balance of fluids in the body.
+- Citrate (ACD-A): an anticoagulant used in blood collection tubes.
+- CO2 production: the amount of carbon dioxide that is produced by the body in a given unit of time.
+- Creatinine (serum): a waste product produced by muscles that is filtered out of the bloodstream by the kidneys.
+- Daily Weight: a measure of the body weight of a patient over the course of a day.
+- Dialysate Rate: the rate at which a solution is used to remove waste products from the bloodstream in dialysis.
+- Differential-Neuts: the percentage of neutrophils (a type of white blood cell) in the bloodstream.
+- Differential-Basos: the percentage of basophils (a type of white blood cell) in the bloodstream.
+- Differential-Eos: the percentage of eosinophils (a type of white blood cell) in the bloodstream.
+- Differential-Lymphs: the percentage of lymphocytes (a type of white blood cell) in the bloodstream.
+- Differential-Monos: the percentage of monocytes (a type of white blood cell) in the bloodstream.
+- Effluent Pressure: the pressure of the waste fluid removed from the body in dialysis.
+- Fibrinogen: a protein that helps blood clot.
+- Flow Rate (L/min): the volume of fluid that flows through a particular area per unit time.
+- GI #1 Tube Mark (CM): a measure of the distance between a gastrointestinal tube and the patient's nostril.
+- Glucose (serum): the concentration of glucose in the bloodstream.
+- Glucose finger stick (range 70-100): the concentration of glucose in the bloodstream, as measured by a fingerstick blood sample.
+- HCO3 (serum): bicarbonate, a negatively charged ion that helps regulate the body's pH.
+- Hematocrit (serum): the proportion of red blood cells in the bloodstream.
+- Hematocrit (whole blood - calc): the proportion of red blood cells in the blood, as calculated from the amount of hemoglobin in the blood.
+- Hemoglobin: the protein in red blood cells that carries oxygen.
+- Heparin Dose (per hour): the amount of heparin (an anticoagulant) given to a patient per hour.
+- Impaired Skin Length #1: a measure of the length of a wound or lesion on the skin.
+- Impaired Skin Length #2: a measure of the length of a wound or lesion on the skin.
+- Impaired Skin Width #1: a measure of the width of a wound or lesion on the skin.
+- Impaired Skin Width #2: a measure of the width of a wound or lesion on the skin.
+- INR: international normalized ratio, a measure of how long it takes for blood to clot.
+- Inspiratory Ratio: the ratio of the length of the inhalation phase of breathing to the length of the exhalation phase of breathing.
+- Inspiratory Time: the length of time spent inhaling during the respiratory cycle.
+- Ionized Calcium: the concentration of calcium ions in the bloodstream that are not bound to proteins.
+- LDH: lactate dehydrogenase, an enzyme that is involved in the conversion of lactate to pyruvate.
+- Lactic Acid: an organic acid that is produced by muscle tissue during anaerobic metabolism.
+- Magnesium: an electrolyte that is involved in many cellular processes.
+- Mean Airway Pressure: the average pressure in the airway throughout the respiratory cycle.
+- Minute Volume: the volume of air that is inhaled and exhaled by a patient in one minute.
+- PBP (Prefilter) Replacement Rate: the rate at which the prefilter blood pump (PBP) is replaced in a hemodialysis machine.
+- Peak Insp. Pressure: the maximum pressure generated during inspiration.
+- Pinsp (Hamilton): the inspiratory pressure set on a ventilator in pressure-controlled ventilation.
+- Plateau Pressure: the pressure within the lungs at the end of a breath when no air is being moved.
+- Platelet Count: the number of platelets in a given volume of blood.
+- Potassium (whole blood): the concentration of potassium ions in the bloodstream.
+- Potassium (serum): the concentration of potassium ions in the serum component of the blood.
+- Pressure Drop: the difference in pressure between two points in a system.
+- Prothrombin time: a measure of how long it takes for blood to clot.
+- Pulmonary Artery Pressure mean: the average pressure in the pulmonary artery over the course of a cardiac cycle.
+- Pulmonary Artery Pressure systolic: the maximum pressure in the pulmonary artery during the contraction of the right ventricle.
+- Pulmonary Artery Pressure diastolic: the minimum pressure in the pulmonary artery during the relaxation of the right ventricle.
+- RCexp (Measured Time Constant): a measure of the degree of resistance of the lungs and the ease with which air can be moved through them.
+- Resistance Exp: the degree of resistance to exhalation.
+- Resistance Insp: the degree of resistance to inhalation.
+- Return Pressure: the pressure of the fluid returning to the body during dialysis.
+- SvO2: the oxygen saturation of hemoglobin in venous blood.
+- Temporary Pacemaker Rate: the rate at which a temporary pacemaker is set to pace the heart.
+- Temporary Pacemaker Wires Venticular: wires that are attached to a temporary pacemaker and are used to stimulate the ventricles of the heart.
+- TCO2 (calc) Arterial: the calculated total carbon dioxide concentration in the arterial blood.
+- Total Bilirubin: a yellowish substance that is produced when red blood cells break down.
+- Total PEEP Level: the total positive end-expiratory pressure (PEEP) applied to a patient during mechanical ventilation.
+- Trans Membrane Pressure: the pressure difference across the membrane of a dialysis filter.
+- Troponin-T: a protein found in the heart muscle that is released into the bloodstream when the heart is damaged.
+- Vti High: the volume of air delivered during each breath when using a ventilator.
+- Ven Lumen Volume: the volume of the lumen (cavity) within a vein.
+- WBC: white blood cell count, the number of white blood cells in a given volume of blood.

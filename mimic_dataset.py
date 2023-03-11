@@ -218,7 +218,7 @@ class MIMICIV:
     
     def preprocess_phase2(self, from_pkl=True):
         pkl_path = os.path.join(self.gbl_conf['paths']['cache_dir'], 'phase2.pkl')
-        if from_pkl:
+        if from_pkl and os.path.exists(pkl_path):
             with open(pkl_path, 'rb') as fp:
                 self.subjects, self.subject_ids = pickle.load(fp)
             logger.info(f'load pkl for phase 2 from {pkl_path}')
@@ -261,7 +261,7 @@ class MIMICIV:
 
     def preprocess_phase3(self, split_csv=False, from_pkl=True):
         pkl_path = os.path.join(self.gbl_conf['paths']['cache_dir'], 'subjects.pkl')
-        if from_pkl:
+        if from_pkl and os.path.exists(pkl_path):
             with open(pkl_path, 'rb') as fp:
                 self.subjects = pickle.load(fp)
             logger.info(f'load pkl for phase 3 from {pkl_path}')
@@ -311,20 +311,24 @@ class MIMICIV:
                         flag = 1
                         # 检查duration, points, interval
                         for target_id in rules['target_id']:
-                            if target_id in adm.keys():
-                                dur = adm[target_id][-1,1] - adm[target_id][0,1]
-                                points = adm[target_id].shape[0]
-                                if dur >= rules['min_duration'] and dur < rules['max_duration'] and \
-                                    points >= rules['min_points'] and dur/points <= rules['max_avg_interval']:
+                            if target_id not in adm.keys():
+                                flag = 0
+                        if flag != 0:
+                            pao2_id =  rules['target_id'][0]
+                            fio2_id = rules['target_id'][1]
+                            start_time = max(adm[pao2_id][0,1], adm[fio2_id][0,1])
+                            end_time = min(adm[pao2_id][-1,1], adm[fio2_id][-1,1])
+                            dur = end_time - start_time
+                            if dur > max(rules['min_duration'],0) and dur < rules['max_duration']:
+                                points = min(np.sum((adm[pao2_id][:,1] >= start_time) * (adm[pao2_id][:,1] <= end_time)), \
+                                    np.sum((adm[fio2_id][:,1] >= start_time) * (adm[fio2_id][:,1] <= end_time)))
+                                if points >= rules['min_points'] and dur/points <= rules['max_avg_interval']:
                                     flag *= 1
                                 else:
                                     flag = 0
                             else:
                                 flag = 0
-                        # 检查PaO2/FiO2覆盖
-                        if flag != 0:
-                            if adm["220224"][0, 1] < adm["223835"][0, 1] or adm["220224"][-1, 1] > adm["223835"][-1, 1]:
-                                flag = 0
+                        
                         if flag != 0:
                             new_adm_idx.append(idx)
                     self.subjects[s_id].admissions = [self.subjects[s_id].admissions[idx] for idx in new_adm_idx]
@@ -338,6 +342,39 @@ class MIMICIV:
             self.subjects.pop(s_id)
         logger.info(f'del_invalid_subjects: Deleted {len(pop_list)}/{len(pop_list)+len(self.subjects)} subjects')
 
+    def generate_subdataset(self, p_origin, p_save, sids:set):
+        '''
+        抽取首列符合subject id的所有项, 用于debug
+        p_origin: 源文件path, 可以是目录(会读里面所有源文件)/path list/path, 要求文件首列是subject id
+        p_save: 新文件path
+        sids: 待选subject id (int)
+        '''
+        titled = False
+        logger.info('Generating sub dataset')
+        assert(os.path.exists(p_origin))
+        if os.path.isdir(p_origin):
+            file_list = [os.path.join(p_origin, name) for name in sorted(os.listdir(p_origin))]
+        elif os.path.isfile(p_origin):
+            file_list = [p_origin]
+        elif isinstance(p_origin, list):
+            file_list = p_origin
+        else:
+            assert(0)
+        with open(p_save, 'w', encoding='utf-8') as tp:
+            for p_file in tqdm(file_list, desc='icu-events'):
+                with open(p_file, mode='r', encoding='utf-8') as fp:
+                    s_list = fp.readlines() # contain \n
+                    for idx, sentence in enumerate(s_list):
+                        if idx == 0 and not titled:
+                            tp.write(sentence)
+                            titled = True
+                        if idx > 0 and len(sentence) > 10:
+                            id = int(sentence.split(',')[0])
+                            if id in sids:
+                                tp.write(sentence)
+
+
+        
     def make_report(self):
         '''进行数据集的信息统计'''
         out_path = os.path.join(self.gbl_conf['paths']['out_dir'], 'dataset_report.txt')
@@ -442,7 +479,8 @@ class MIMICDataset(Dataset):
         self.seqs_len = None # list(available_len)
 
         self.preprocess()
-        self.preprocess_table()
+        
+        logger.info(f'Dataset length={self.data.shape[0]} admissions')
         self.target_name = self.configs['process']['target_label']
         self.target_idx = self.data.shape[1] - 1
         # idx_dict: fea_name->idx
@@ -490,45 +528,58 @@ class MIMICDataset(Dataset):
         else:
             assert(0)
 
+    def get_norm_array(self):
+        '''返回一个array, [:,0]代表各个feature的均值, [:,1]代表方差'''
+        means = [[self.norm_dict[key]['mean'] , self.norm_dict[key]['std']] for key in self.total_keys]
+        return np.asarray(means)
 
-    def restore_norm(self, name_or_idx, data:np.ndarray) -> np.ndarray:
+    def restore_norm(self, name_or_idx, data:np.ndarray, keep_nan=True) -> np.ndarray:
+        '''
+        缩放到正常范围
+        keep_nan: 保留-1不被变换
+        '''
+        # TODO 这个地方有bug, -1和norm后的值域重合了
         if isinstance(name_or_idx, int):
             name_or_idx = self.total_keys[name_or_idx]
         norm = self.norm_dict[name_or_idx]
-        return data * norm['std'] + norm['mean']
+        if not keep_nan:
+            return data * norm['std'] + norm['mean']
+        else:
+            return (data * norm['std'] + norm['mean']) * (data > 0) + data * (data <= 0)
 
     def preprocess(self, from_pkl=True):
-        numeric_pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'numeric_subject.pkl')
-        norm_pkl_path = os.path.join(self.g_conf['paths']['cache_dir'], 'norm_dict.pkl')
+        p_numeric_subject = os.path.join(self.g_conf['paths']['cache_dir'], 'numeric_subject.pkl')
+        p_norm_dict = os.path.join(self.g_conf['paths']['cache_dir'], 'norm_dict.pkl')
         # preprocessing
         self.static_feas = set()
         self.target_label = self.configs['process']['target_label']
         self.dyamic_ids = self.configs['process']['dynamic_id']
 
-        if from_pkl and os.path.exists(numeric_pkl_path):
-            with open(numeric_pkl_path, 'rb') as fp:
+        if from_pkl and os.path.exists(p_numeric_subject):
+            with open(p_numeric_subject, 'rb') as fp:
                 self.subjects = pickle.load(fp)
-            logger.info(f'Load numeric subject data from {numeric_pkl_path}')
+            logger.info(f'Load numeric subject data from {p_numeric_subject}')
         else:
             # 这里不要随便改变调用顺序
             self.preprocess_to_num() # 这里会改变static_data的key list
-            with open(numeric_pkl_path, 'wb') as fp:
+            with open(p_numeric_subject, 'wb') as fp:
                 pickle.dump(self.subjects, fp)
-            logger.info(f'Numeric subjects dumped at {numeric_pkl_path}')
+            logger.info(f'Numeric subjects dumped at {p_numeric_subject}')
         
         for s in self.subjects.values():
             for key in s.static_data.keys():
                 self.static_feas.add(key)
         
-        if from_pkl and os.path.exists(norm_pkl_path):
-            with open(norm_pkl_path, 'rb') as fp:
+        if from_pkl and os.path.exists(p_norm_dict):
+            with open(p_norm_dict, 'rb') as fp:
                 self.norm_dict = pickle.load(fp)
-            logger.info(f'Load norm dict from {norm_pkl_path}')
+            logger.info(f'Load norm dict from {p_norm_dict}')
         else:
             self.norm_dict = self.preprocess_norm()
-            with open(norm_pkl_path, 'wb') as fp:
+            with open(p_norm_dict, 'wb') as fp:
                 pickle.dump(self.norm_dict, fp)
-            logger.info(f'Norm dict dumped at {norm_pkl_path}')
+            logger.info(f'Norm dict dumped at {p_norm_dict}')
+        self.preprocess_table(from_pkl=from_pkl)
         
     def preprocess_to_num(self):
         '''将所有特征转化为数值型, 并且对于异常值进行处理'''
@@ -567,7 +618,27 @@ class MIMICDataset(Dataset):
                     elif id == "220224":
                         data = adm[id][:,0]
                         adm[id][:,0] = (data * (data < 600) + 600*np.ones(data.shape) * (data >= 600))
+            # PaO2 异常峰检测进行硬平滑
+            logger.info('Anomaly peak detection')
+            for adm in s.admissions:
+                if "220224" in adm.keys():
+                    adm["220224"][:, 0] = self.reduce_peak(adm["220224"][:, 0])
 
+    def reduce_peak(self, x: np.ndarray):
+        window_size = 3  # Size of the sliding window
+        threshold = 1.4  # Anomaly threshold at (thredhold-1)% higher than nearby points
+        for i in range(len(x)):
+            left_window_size = min(window_size, i)
+            right_window_size = min(window_size, len(x) - i - 1)
+            window = x[i - left_window_size: i + right_window_size + 1]
+            
+            avg_value = (np.sum(window) - x[i]) / (len(window)-1)
+            if x[i] >= avg_value * threshold and x[i] > 110:
+                x[i] = avg_value
+        
+        return x
+
+    
     def preprocess_norm(self) -> dict:
         '''制作norm_dict'''
         norm_dict = {}
@@ -599,14 +670,14 @@ class MIMICDataset(Dataset):
 
     def preprocess_table(self, from_pkl=True, t_step=0.5):
         '''对每个subject生成时间轴对齐的表, tick(hour)是生成的表的间隔'''
-        pkl_path_origin = os.path.join(self.g_conf['paths']['cache_dir'], 'table_origin.pkl')
-        pkl_path_norm = os.path.join(self.g_conf['paths']['cache_dir'], 'table_norm.pkl')
-        pkl_path_length = os.path.join(self.g_conf['paths']['cache_dir'], 'table_length.pkl')
+        p_origin_table = os.path.join(self.g_conf['paths']['cache_dir'], 'table_origin.pkl')
+        p_final_table = os.path.join(self.g_conf['paths']['cache_dir'], 'table_norm.pkl')
+        p_length = os.path.join(self.g_conf['paths']['cache_dir'], 'table_length.pkl')
         # step1: 插值并生成表格
-        if from_pkl and os.path.exists(pkl_path_origin):
-            with open(pkl_path_origin, 'rb') as fp:
+        if from_pkl and os.path.exists(p_origin_table):
+            with open(p_origin_table, 'rb') as fp:
                 self.data, self.norm_dict, self.static_keys, self.dynamic_keys = pickle.load(fp)
-            logger.info(f'load original aligned table from {pkl_path_origin}')
+            logger.info(f'load original aligned table from {p_origin_table}')
         else:
             data = []
             align_id = self.configs['process']['align_target_id'] # 用来确认对齐的基准时间
@@ -619,7 +690,9 @@ class MIMICDataset(Dataset):
                         logger.warning('Invalid admission')
                         continue
                     # 生成基准时间表
-                    t_start, t_end = adm[align_id][0, 1], adm[align_id][-1, 1]
+                    pao2_id, fio2_id =  "220224", "223835"
+                    t_start = max(adm[pao2_id][0,1], adm[fio2_id][0,1])
+                    t_end = min(adm[pao2_id][-1,1], adm[fio2_id][-1,1])
                     ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
                     # 生成表本身, 缺失值为-1
                     table = -np.ones((len(static_keys) + len(dynamic_keys), ticks.shape[0]), dtype=np.float32)
@@ -649,41 +722,36 @@ class MIMICDataset(Dataset):
             self.data = data
             self.static_keys = static_keys
             self.dynamic_keys = dynamic_keys
-            with open(pkl_path_origin, 'wb') as fp:
+            with open(p_origin_table, 'wb') as fp:
                 pickle.dump([self.data, self.norm_dict, static_keys, dynamic_keys], fp)
-            logger.info(f'data table dumped at {pkl_path_origin}')
-        # step2: 归一化, 补充缺失值
-        if from_pkl and os.path.exists(pkl_path_norm):
-            with open(pkl_path_norm, 'rb') as fp:
+            logger.info(f'data table dumped at {p_origin_table}')
+            
+        # step2: 补充缺失值
+        if from_pkl and os.path.exists(p_final_table):
+            with open(p_final_table, 'rb') as fp:
                 self.data = pickle.load(fp)
-            logger.info(f'load normalized aligned table from {pkl_path_norm}')
+            logger.info(f'load normalized aligned table from {p_final_table}')
         else:
-            # 缺失值归一化后为0
-            for s_id in tqdm(range(len(self.data)), desc='norm'):
+            # 缺失值采用均值填充
+            for s_id in tqdm(range(len(self.data)), desc='normalize'):
                 for idx, key in enumerate(self.static_keys):
                     if np.abs(self.data[s_id][idx, 0] + 1) < 1e-4:
-                        self.data[s_id][idx, :] = 0
-                    elif np.abs(self.norm_dict[key]['std']) > 1e-4:
-                        self.data[s_id][idx, :] = (self.data[s_id][idx, :] - self.norm_dict[key]['mean']) / self.norm_dict[key]['std']
-                    else:
-                        logger.warning(f'Skip norm due to zero std: {key}')
+                        self.data[s_id][idx, :] = self.norm_dict[str(key)]['mean']
+                
                 for idx, key in enumerate(self.dynamic_keys):
                     arr_idx = idx + len(self.static_keys)
                     if np.abs(self.data[s_id][arr_idx, 0] + 1) < 1e-4:
-                        self.data[s_id][arr_idx, :] = 0
-                    elif np.abs(self.norm_dict[key]['std']) > 1e-4:
-                        self.data[s_id][arr_idx, :] = (self.data[s_id][arr_idx, :] - self.norm_dict[key]['mean']) / self.norm_dict[key]['std']
-                    else:
-                        logger.warning(f'Skip norm due to zero std: {key}')
-            with open(pkl_path_norm, 'wb') as fp:
+                        self.data[s_id][arr_idx, :] = self.norm_dict[str(key)]['mean']
+                
+            with open(p_final_table, 'wb') as fp:
                 pickle.dump(self.data, fp)
-            logger.info(f'data table dumped at {pkl_path_norm}')
+            logger.info(f'data table dumped at {p_final_table}')
         # step3: 时间轴长度对齐, 生成seqs_len, 进行某些特征的最后处理
-        if from_pkl and os.path.exists(pkl_path_length):
-            with open(pkl_path_length, 'rb') as fp:
+        if from_pkl and os.path.exists(p_length):
+            with open(p_length, 'rb') as fp:
                 seqs_len, self.static_keys, self.data = pickle.load(fp)
                 self.seqs_len = seqs_len
-            logger.info(f'load length aligned table from {pkl_path_length}')
+            logger.info(f'load length aligned table from {p_length}')
         else:
             seqs_len = [d.shape[1] for d in self.data]
             self.seqs_len = seqs_len
@@ -697,20 +765,24 @@ class MIMICDataset(Dataset):
                 self.data[t_idx] = np.concatenate([self.data[t_idx], new_table], axis=1)
             self.data = np.stack(self.data, axis=0) # (n_sample, n_fea, seqs_len)
             # 合并weight/height的重复特征
-            self.data[:, 1, :] = np.max(self.data[:, [1,5], :], axis=1)
-            self.data[:, 6, :] = np.max(self.data[:, [6,9], :], axis=1)
-            self.data[:, 2, :] = np.max(self.data[:, [2,4], :], axis=1)
+            
+            # self.data[:, 1, :] = np.max(self.data[:, [1,5], :], axis=1)
+            # self.data[:, 6, :] = np.max(self.data[:, [6,9], :], axis=1)
+            # self.data[:, 2, :] = np.max(self.data[:, [2,4], :], axis=1)
             rest_feas = list(range(self.data.shape[1]))
-            rest_feas.pop(9)
-            rest_feas.pop(5)
-            rest_feas.pop(4)
-            self.static_keys.pop(9)
-            self.static_keys.pop(5)
-            self.static_keys.pop(4)
+            pop_list = []
+            for key in ['Weight', 'Height', 'Blood Pressure', 'BMI']:
+                if key in self.static_keys:
+                    idx = max([0 if self.static_keys[idx] != key else idx for idx in range(len(self.static_keys))])
+                    pop_list.append(idx)
+            pop_list = sorted(pop_list, reverse=True) # 从大到小
+            for idx in pop_list:
+                self.static_keys.pop(idx)
+                rest_feas.pop(idx)
             self.data = self.data[:,  rest_feas, :]
-            with open(pkl_path_length, 'wb') as fp:
+            with open(p_length, 'wb') as fp:
                 pickle.dump((seqs_len, self.static_keys, self.data), fp)
-            logger.info(f'length aligned table dumped at {pkl_path_length}')
+            logger.info(f'length aligned table dumped at {p_length}')
 
     def __getitem__(self, idx):
         if self.index is None:
@@ -724,6 +796,11 @@ class MIMICDataset(Dataset):
             return self.data.shape[0]
         else:
             return len(self.index)
+
+def generate_subset():
+    p_origin = os.path.join(dataset.mimiciv.mimic_dir, 'icu', 'outputevents.csv')
+    p_save = os.path.join(GLOBAL_CONF_LOADER['mimic_analyzer']['paths']['out_dir'], 'subset_output.csv')
+    dataset.mimiciv.generate_subdataset(p_origin=p_origin, p_save=p_save, sids={10161042, 10014610, 10122371})
 
 if __name__ == '__main__':
     dataset = MIMICDataset()

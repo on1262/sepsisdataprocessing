@@ -21,11 +21,13 @@ class LSTMTrainer():
         self.params = params
         self.device = torch.device(self.params['device'])
         self.cache_path = params['cache_path']
+        self.norm_arr = torch.as_tensor(params['norm_arr'], dtype=torch.float32, device=self.device)
         tools.reinit_dir(self.cache_path, build=True)
         self.target_idx = params['target_idx']
         self.target_std = params['target_std'] # 用于还原真实的std
-        self.model = LSTMModel(n_fea=params['in_channels'], n_hidden=params['hidden_size'])
-        self.criterion = AutoRegLoss(target_idx=params['target_idx'], out_std=self.target_std, target_coeff=params['target_coeff'])
+        self.model = LSTMModel(n_fea=params['in_channels'], n_hidden=params['hidden_size'], norm_arr=self.norm_arr)
+        std_arr = torch.as_tensor(self.norm_arr[:, 1], dtype=torch.float32, require_grad=False).to(self.device)
+        self.criterion = AutoRegLoss(target_idx=params['target_idx'], out_std=self.target_std, std_arr=std_arr, target_coeff=params['target_coeff'])
         self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
         self.dataset = dataset
         
@@ -84,7 +86,6 @@ class LSTMTrainer():
             preds.append(pred[:, self.target_idx, :])
             losses.append(loss)
         return torch.stack(preds, dim=0), losses
-
 
     def train(self):
         cache_path = os.path.join(self.cache_path)
@@ -156,10 +157,11 @@ class LSTMTrainer():
 
 class LSTMModel(nn.Module):
     '''用于MIMIC-IV的时序预测, 采用自回归的方式, 会同时预测所有feature的结果'''
-    def __init__(self, n_fea, n_hidden=128):
+    def __init__(self, n_fea, n_hidden=128, norm_arr=None):
         super().__init__()
         self.n_hidden = n_hidden
         self.n_fea = n_fea
+        self.norm_arr = norm_arr
         self.cell = nn.LSTMCell(input_size=n_fea, hidden_size=n_hidden) # input: (batch, n_fea)
         self.den = nn.Linear(in_features=n_hidden, out_features=n_fea)
         self.init_ch = nn.parameter.Parameter(data=torch.zeros(size=(1, 2*n_hidden), dtype=torch.float32), requires_grad=True)
@@ -189,6 +191,7 @@ class LSTMModel(nn.Module):
         if predict_len is None:
             predict_len = available_len.copy()
         x = x.permute(2, 0, 1) # ->(seq_len, batch, n_fea)
+        x = (x - self.norm_arr[:, 0]) / self.norm_arr[:, 1]
         out = torch.zeros(size=x.size(), dtype=torch.float32, device=x.device)
         c,h = self.init_ch[:, :self.n_hidden].expand(x.shape[1], -1), self.init_ch[:, self.n_hidden:].expand(x.shape[1], -1)
         max_idx = min(predict_len.max(), x.size(0))
@@ -200,7 +203,8 @@ class LSTMModel(nn.Module):
                 if np.any(reg_mat) and idx+1 < x.size(0):
                     assert(auto_reg_flag)
                     x[idx+1, reg_mat, :] = out[idx, reg_mat, :].detach()
-        return out.permute(1, 2, 0) # ->(batch, n_fea, seq_len) 存在时间上的错位
+        out = out * self.norm_arr[:, 1] + self.norm_arr[:, 0]
+        out = out.permute(1, 2, 0) # ->(batch, n_fea, seq_len) 存在时间上的错位
 
 class AutoRegLoss(nn.Module):
     '''
@@ -208,14 +212,15 @@ class AutoRegLoss(nn.Module):
         target_idx: target(PaO2/FiO2)所在的feature序号
         target_coeff: 对target进行loss加强的系数
     '''
-    def __init__(self, target_idx, out_std, target_coeff=10) -> None:
+    def __init__(self, target_idx, out_std, std_arr, target_coeff=10) -> None:
         super().__init__()
         self.t_idx = target_idx
         self.t_coeff = target_coeff
         self.out_std=out_std
+        self.std_arr = std_arr
 
     def _cal_loss(self, pred, gt, mask):
-        return torch.sqrt(torch.sum(torch.square((pred-gt)*mask)) / torch.sum(mask))
+        return torch.sqrt(torch.sum(torch.square((pred-gt)*mask/self.std_arr)) / torch.sum(mask))
 
     def forward(self, pred:torch.Tensor, gt:torch.Tensor, mask:torch.Tensor):
         '''
