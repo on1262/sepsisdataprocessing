@@ -128,7 +128,8 @@ class LossLogger:
             plt.savefig(out_path)
         plt.close()
 
-def plot_histogram_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
+def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
+    '''打印柱状图, 按标签顺序'''
     # Validate the input
     if not isinstance(data, np.ndarray):
         raise ValueError("Input data must be a numpy array.")

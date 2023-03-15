@@ -16,7 +16,8 @@ def Collect_Fn(data_list:list):
     return result
 
 
-class LSTMTrainer():
+class LSTMAutoRegTrainer():
+    '''用于自回归LSTM模型的trainer'''
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
         self.device = torch.device(self.params['device'])
@@ -156,7 +157,10 @@ class LSTMTrainer():
 
 
 class LSTMModel(nn.Module):
-    '''用于MIMIC-IV的时序预测, 采用自回归的方式, 会同时预测所有feature的结果'''
+    '''
+    自回归的LSTM模型, 每一步预测所有feature
+    用于MIMIC-IV的时序预测, 采用自回归的方式, 会同时预测所有feature的结果
+    '''
     def __init__(self, n_fea, n_hidden=128, norm_arr=None):
         super().__init__()
         self.n_hidden = n_hidden

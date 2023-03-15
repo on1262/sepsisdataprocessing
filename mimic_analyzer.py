@@ -2,7 +2,8 @@ import torch
 import torchinfo
 import numpy as np
 from mimic_dataset import MIMICDataset, Subject, Admission, Config # 这个未使用的import是pickle的bug
-from mimic_model.lstm_reg import LSTMModel, LSTMTrainer
+import mimic_model.lstm_reg as lstmreg
+import mimic_model.lstm_cls as lstmcls
 from mimic_model.baseline import BaselineNearest
 from sklearn.model_selection import KFold
 import matplotlib.pyplot as plt
@@ -24,6 +25,7 @@ class MIMICAnalyzer():
         self.target_name = dataset.target_name # only one name
         self.target_idx = dataset.target_idx
         self.n_fold = 4
+        self.ards_threshold = self.gbl_conf['ards_threshold']
         # for feature importance
         self.register_values = {}
 
@@ -67,7 +69,7 @@ class MIMICAnalyzer():
             pao2 = adm[pao2_id][:, 0]
             pf = pao2 / fio2
             for idx in range(pf.shape[0]):
-                if pf[idx] < 300:
+                if pf[idx] < self.ards_threshold:
                     times.append(adm[pao2_id][idx, 1])
                     count += 1
             if count != 0:
@@ -78,7 +80,7 @@ class MIMICAnalyzer():
         logger.info(f"ARDS patients count={ards_count}")
 
     def _miss_mat(self):
-        '''行列缺失表'''
+        '''计算行列缺失分布并输出'''
         out_dir = self.gbl_conf['paths']['out_dir']
         na_table = np.zeros((len(self.dataset.subjects), len(self.dataset.dynamic_keys)), dtype=bool)
         for r_id, s_id in enumerate(self.dataset.subjects):
@@ -93,7 +95,7 @@ class MIMICAnalyzer():
         tools.plot_single_dist(col_nas, f"Column miss rate", os.path.join(out_dir, "col_miss_rate.png"), discrete=False, restrict_area=True)
 
     def _feature_count(self):
-        '''打印特征出现的次数'''
+        '''打印vital_sig中特征出现的次数和最短间隔排序'''
         out_dir = self.gbl_conf['paths']['out_dir']
         adms = [adm for s in self.dataset.subjects.values() for adm in s.admissions]
         count_hist = {}
@@ -112,7 +114,6 @@ class MIMICAnalyzer():
         for key in key_list:
             interval = count_hist[key]['interval']
             logger.info(f'\"{key}\", {self.dataset.get_fea_label(key)} interval={interval:.1f}')
-        used_list = []
         vital_sig = {"220045", "220210", "220277", "220181", "220179", "220180", "223761", "223762", "224685", "224684", "224686", "228640", "224417"}
         med_ind = {key for key in key_list} - vital_sig
         for name in ['vital_sig', 'med_ind']:
@@ -124,16 +125,11 @@ class MIMICAnalyzer():
             counts = np.asarray([count_hist[key]['count'] for key in new_list])
             intervals = np.asarray([count_hist[key]['interval'] for key in new_list])
             labels = [self.dataset.get_fea_label(key) for key in new_list]
-            tools.plot_histogram_with_label(counts, labels, f'{name} Count', out_path=os.path.join(out_dir, f"{name}_feature_count.png"))
-            tools.plot_histogram_with_label(intervals, labels, f'{name} Interval', out_path=os.path.join(out_dir, f"{name}_feature_interval.png"))
-
-
+            tools.plot_bar_with_label(counts, labels, f'{name} Count', out_path=os.path.join(out_dir, f"{name}_feature_count.png"))
+            tools.plot_bar_with_label(intervals, labels, f'{name} Interval', out_path=os.path.join(out_dir, f"{name}_feature_interval.png"))
     
     def _plot_samples(self, num, id_list:list, id_names:list, out_dir):
-        '''
-        随机抽取num个样本生成id_list中特征的时间序列, 在非对齐的时间刻度下表示
-        
-        '''
+        '''随机抽取num个样本生成id_list中特征的时间序列, 在非对齐的时间刻度下表示'''
         tools.reinit_dir(out_dir, build=True)
         count = 0
         nrow = len(id_list)
@@ -190,11 +186,12 @@ class MIMICAnalyzer():
                 plt.savefig(os.path.join(write_dir, f"plot_{p_idx}.png"))
             plt.close()
 
-    def lstm_model(self):
-        params = self.loc_conf['lstm_model']
+    def lstm_auto_reg(self):
+        '''自回归模型'''
+        params = self.loc_conf['lstm_autoreg']
         kf = KFold(n_splits=self.n_fold, shuffle=True)
         self.register_values.clear()
-        model_name = 'LSTM_model'
+        model_name = 'LSTM_autoreg'
         tools.reinit_dir(os.path.join(self.gbl_conf['paths']['out_dir'], model_name), build=True)
         start_points = params['start_points']
         log_paths = [os.path.join(self.gbl_conf['paths']['out_dir'], model_name, f'result_{sp}.log') for sp in start_points]
@@ -202,12 +199,12 @@ class MIMICAnalyzer():
         # datasets and params
         metrics = {key:tools.DynamicPredictionMetric(target_name=self.target_name, out_dir=self.gbl_conf['paths']['out_dir']) for key in start_points}
         params['in_channels'] = self.data.shape[1]
-        logger.info(f'lstm_model: in channels=' + str(params['in_channels']))
         params['target_idx'] = self.target_idx
         params['target_std'] = self.dataset.norm_dict[self.target_name]['std']
         params['fea_names'] = self.dataset.total_keys
-        params['cache_path'] = self.gbl_conf['paths']['lstm_cache']
+        params['cache_path'] = self.gbl_conf['paths']['lstm_autoreg_cache']
         params['norm_arr'] = self.dataset.get_norm_array()
+        logger.info(f'lstm_model: in channels=' + str(params['in_channels']))
         assert(np.min(params['norm_arr'][:, 1]) > 1e-4) # std can not be zero
         # loss logger
         loss_logger = tools.LossLogger()
@@ -216,7 +213,7 @@ class MIMICAnalyzer():
             valid_num = round(len(data_index)*0.15)
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
             self.dataset.register_split(train_index, valid_index, test_index)
-            trainer = LSTMTrainer(params, self.dataset)
+            trainer = lstmreg.LSTMAutoRegTrainer(params, self.dataset)
             if idx == 0:
                 trainer.summary()
             trainer.train()
@@ -233,16 +230,74 @@ class MIMICAnalyzer():
                 # gt = self.dataset.restore_norm(self.target_name, Y_gt[:, key+1:key+pred_point+1])
                 metrics[key].add_prediction(prediction=yp , gt=gt, start_idx=start_idx, duration=duration)
             self.dataset.mode('all') # 恢复原本状态
-        loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM Model', 
+        loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM autoreg Model', 
             out_path=os.path.join(self.gbl_conf['paths']['out_dir'], tools.remove_slash(model_name), 'loss.png'))
         for idx, key in enumerate(start_points):
             metrics[key].write_result(model_name+'_sp_'+str(key), log_path=log_paths[idx])
             metrics[key].plot(model_name+'_sp_'+str(key))
         # self.create_final_result()
 
+    def label_explore(self, labels, mask, out_dir):
+        '''
+        生成标签的统计信息
+        labels, mask: (sample, seq_lens)
+        out_dir: 输出文件夹
+        '''
+        cover_rate = np.sum(labels, axis=1) / np.sum(mask, axis=1)
+        tools.plot_single_dist(
+            data=cover_rate, data_name='ARDS cover rate (per sample)', save_path=os.path.join(out_dir, 'cover_rate.png'), discrete=False, restrict_area=True)
 
-    def nearest_method(self):
-        params = self.loc_conf['baseline_nearest']
+    def lstm_cls(self):
+        '''预测窗口内是否发生ARDS的分类器'''
+        params = self.loc_conf['lstm_cls']
+        params['cache_path'] = self.gbl_conf['paths']['lstm_cls_cache']
+        params['in_channels'] = self.data.shape[1]
+        kf = KFold(n_splits=self.n_fold, shuffle=True, random_state=100)
+        self.register_values.clear()
+        model_name = 'LSTM_cls'
+        out_dir = os.path.join(self.gbl_conf['paths']['out_dir'], model_name)
+        tools.reinit_dir(out_dir, build=True)
+        metric = tools.DichotomyMetric()
+        # loss logger
+        loss_logger = tools.LossLogger()
+        # 制作ARDS标签
+        self.dataset.mode('all') # 恢复原本状态
+        logger.info('Generating ARDS label')
+        generator = lstmcls.LabelGenerator(window=params['window'], threshold=self.ards_threshold)
+        mask = lstmcls.make_mask((self.data.shape[0], self.data.shape[2]), self.dataset.seqs_len) # -> (batch, seq_lens)
+        # 手动去掉最后一格
+        mask[:, -1] = False
+        labels = generator(self.data[:, self.target_idx, :], mask)
+        self.label_explore(labels, mask, out_dir)
+        positive_proportion = np.sum(labels[:]) / np.sum(mask)
+        logger.info(f'Positive label={positive_proportion:.2f}')
+        # 训练集划分
+        for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)):
+            valid_num = round(len(data_index)*0.15)
+            train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
+            self.dataset.register_split(train_index, valid_index, test_index)
+            trainer = lstmcls.Trainer(params, self.dataset)
+            if idx == 0: 
+                trainer.summary()
+            trainer.train()
+            loss_logger.add_loss(trainer.get_loss())
+            Y_mask = mask[test_index, :][:]
+            Y_gt = labels[test_index, :][:][Y_mask]
+            Y_pred = trainer.predict(mode='test')
+            Y_pred = np.asarray(Y_pred)[:][Y_mask]
+            Y_pred = (Y_pred - Y_pred.mean()) / Y_pred.std() # 使得K-fold每个model输出的分布相近, 避免average性能下降
+            metric.add_prediction(Y_pred, Y_gt) # 去掉mask外的数据
+            self.dataset.mode('all') # 恢复原本状态
+        loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
+            out_path=os.path.join(out_dir, 'loss.png'))
+        metric.plot_roc(title='LSTM cls model ROC', save_path=os.path.join(out_dir, 'lstm_cls_ROC.png'))
+        print(metric.generate_info())
+        # self.create_final_result()
+
+
+    def nearest_reg(self):
+        '''查看自相关性'''
+        params = self.loc_conf['baseline_nearest_reg']
         kf = KFold(n_splits=self.n_fold, shuffle=True)
         self.register_values.clear()
         model_name = 'baseline_nearest'
@@ -274,7 +329,48 @@ class MIMICAnalyzer():
         for idx, key in enumerate(start_points):
             metrics[key].write_result(model_name+'_sp_'+str(key), log_path=log_paths[idx])
             metrics[key].plot(model_name+'_sp_'+str(key))
-        
+    
+    def nearest_cls(self):
+        '''预测窗口内是否发生ARDS的分类器'''
+        params = self.loc_conf['baseline_nearest_cls']
+        window = params['window']
+
+        kf = KFold(n_splits=self.n_fold, shuffle=True, random_state=100)
+        self.register_values.clear()
+        model_name = 'nearest_cls'
+        out_dir = os.path.join(self.gbl_conf['paths']['out_dir'], model_name)
+        tools.reinit_dir(out_dir, build=True)
+        metric = tools.DichotomyMetric()
+        # 制作ARDS标签
+        self.dataset.mode('all') # 恢复原本状态
+        logger.info('Generating ARDS label')
+        generator = lstmcls.LabelGenerator(window=params['window'])
+        mask = lstmcls.make_mask((self.data.shape[0], self.data.shape[2]), self.dataset.seqs_len) # -> (batch, seq_lens)
+        # 手动去掉最后一格
+        mask[:, -1] = False
+        labels = generator(self.data[:, self.target_idx, :], mask)
+        positive_proportion = np.sum(labels[:]) / np.sum(mask)
+        logger.info(f'Positive label={positive_proportion:.2f}')
+        # 训练集划分
+        for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)):
+            valid_num = round(len(data_index)*0.15)
+            train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
+            self.dataset.register_split(train_index, valid_index, test_index)
+            Y_mask = mask[test_index, :][:]
+            Y_gt = labels[test_index, :][:][Y_mask]
+            # prediction
+            self.dataset.mode('test')
+            Y_pred = np.zeros((len(test_index), self.data.shape[-1]), dtype=np.float32)
+            for idx, data in tqdm(enumerate(self.dataset), desc='Testing', total=len(self.dataset)):
+                np_data = data['data']
+                seq_lens = data['length']
+                for t_idx in range(seq_lens):
+                    Y_pred[idx, t_idx] = np.mean(np_data[self.target_idx, :(t_idx+1)] < self.ards_threshold)
+            Y_pred = np.asarray(Y_pred)[:][Y_mask]
+            metric.add_prediction(Y_pred, Y_gt) # 去掉mask外的数据
+            self.dataset.mode('all') # 恢复原本状态
+        metric.plot_roc(title='Baseline cls model ROC', save_path=os.path.join(out_dir, 'baseline_nearest_cls_ROC.png'))
+        print(metric.generate_info())
 
     # 收集各个文件夹里面的result.log, 合并为final result.log
     def create_final_result(self):
@@ -296,6 +392,8 @@ if __name__ == '__main__':
     dataset = MIMICDataset()
     analyzer = MIMICAnalyzer(dataset)
     # analyzer._detect_adm_data("220224")
-    analyzer.feature_explore()
+    # analyzer.feature_explore()
+    analyzer.lstm_cls()
+    # analyzer.nearest_cls()
     # analyzer.lstm_model()
     # analyzer.nearest_method()

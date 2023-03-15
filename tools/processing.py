@@ -159,10 +159,8 @@ def fix_feature_error_in_old_sys(old_csv: str, new_csv:str, output:str, rebuild_
     logger.info(f'Output to {output}')
 
 
-'''
-更加完善的二分类评价指标
-'''
 class DichotomyMetric:
+    '''二分类评价指标'''
     def __init__(self) -> None:
         self.data = []
         self.n_thres = 30
@@ -181,6 +179,10 @@ class DichotomyMetric:
         self.__init__()
     
     def add_prediction(self, pred:np.ndarray, gt:np.ndarray):
+        '''
+            pred: (batch,)  gt: (batch,)
+            gt取值是0/1, pred取值是一个概率
+        '''
         self.data.append(np.stack((pred.copy(), gt.copy()), axis=1))
         self.is_calculated = False # 更新状态
 
@@ -191,6 +193,7 @@ class DichotomyMetric:
         tn = np.sum(Y_pred[Y_gt < 0.5] < thres)
         return {
             'tp': tp, 'fp':fp, 
+            'tn': tn, 'fn':fn,
             'tpr':tp/(tp+fn), 'fpr':fp/(fp+tn), 
             'acc':(tp+tn)/(tp+fp+tn+fn),'sens':tp/(tp+fn), 'spec':tn/(tn+fp), 'thres':thres
         }
@@ -202,7 +205,7 @@ class DichotomyMetric:
         self.combined_data = data
         sorted_pred = np.sort(data[:,0], axis=0) # ascend
         p_len = sorted_pred.shape[0]
-        thres = [0]
+        thres = [data.min()]
         for n in range(1, self.n_thres, 1): # 1,2,3,...,n_thres-1
             idx = round((p_len-1)*n/(self.n_thres-1))
             next_thres = sorted_pred[idx]
