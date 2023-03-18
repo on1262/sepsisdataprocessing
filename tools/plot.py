@@ -196,12 +196,22 @@ def plot_hotspot(data:np.ndarray, fea_names:list):
     plt.close()
 
 
-'''
-生成X的每一列关于Y的线性回归, 用来探究单变量对目标的影响
-write_dir_path: 将每个变量保存为一张图, 放在给定文件夹中
-'''
+
+
+
+
 def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_name: str, 
     restrict_area=False, write_dir_path=None, plot_dash=True, comment:str=''):
+    '''
+    生成X的每一列关于Y的线性回归, 用来探究单变量对目标的影响
+    write_dir_path: 将每个变量保存为一张图, 放在给定文件夹中
+    X: (sample, n_fea)
+    fea_names: list(str)
+    Y: (sample,)
+    target_name:str
+    plot_dash: 是否画出Y=X的虚线
+    
+    '''
     if write_dir_path is not None:
         os.makedirs(write_dir_path, exist_ok=True)
     Y = Y.reshape(Y.shape[0], 1)

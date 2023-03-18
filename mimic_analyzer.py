@@ -247,6 +247,24 @@ class MIMICAnalyzer():
         tools.plot_single_dist(
             data=cover_rate, data_name='ARDS cover rate (per sample)', save_path=os.path.join(out_dir, 'cover_rate.png'), discrete=False, restrict_area=True)
 
+    def explore_cls_result(self, Y_pred, Y_gt, mask, out_dir, cmt):
+        '''
+        输出误差和其他特征的统计关系, 观察误差大的样本是否存在特殊的分布
+        Y_pred, Y_gt: (batch, seq_lens), 值域只能是[0,1]
+        '''
+        delta = np.abs(Y_pred - Y_gt)
+        cover = (Y_gt > 0) * (Y_gt < self.ards_threshold) * mask
+        diffs = np.diff(cover.astype(int), axis=1)
+        # count the number of flips
+        num_flips = np.count_nonzero(diffs, axis=1)
+        num_flips = np.repeat(num_flips[:, None], Y_pred.shape[1], axis=1)
+        mask = mask[:]
+        num_flips = num_flips[:][mask]
+        delta = delta[:][mask][:, None]
+        tools.plot_reg_correlation(
+            X=delta, fea_names=['Prediction Abs Error'], Y=num_flips, target_name='Num flips', restrict_area=True, write_dir_path=out_dir, plot_dash=False, comment=cmt)
+
+
     def lstm_cls(self):
         '''预测窗口内是否发生ARDS的分类器'''
         params = self.loc_conf['lstm_cls']
@@ -277,16 +295,20 @@ class MIMICAnalyzer():
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
             self.dataset.register_split(train_index, valid_index, test_index)
             trainer = lstmcls.Trainer(params, self.dataset)
-            if idx == 0: 
+            if idx == 0:
                 trainer.summary()
             trainer.train()
             loss_logger.add_loss(trainer.get_loss())
-            Y_mask = mask[test_index, :][:]
-            Y_gt = labels[test_index, :][:][Y_mask]
+            Y_mask = mask[test_index, :]
+            Y_gt = labels[test_index, :]
             Y_pred = trainer.predict(mode='test')
-            Y_pred = np.asarray(Y_pred)[:][Y_mask]
-            Y_pred = (Y_pred - Y_pred.mean()) / Y_pred.std() # 使得K-fold每个model输出的分布相近, 避免average性能下降
-            metric.add_prediction(Y_pred, Y_gt) # 去掉mask外的数据
+            Y_pred = np.asarray(Y_pred)
+            Y_pred = (Y_pred - Y_pred.min()) / (Y_pred.max() - Y_pred.min()) # 使得K-fold每个model输出的分布相近, 避免average性能下降
+            if idx == 0: # 探查prediction和gt差异大的点
+                logger.info('Explore result')
+                self.explore_cls_result(Y_pred, Y_gt, Y_mask, out_dir, f'idx={idx}')
+            Y_mask = Y_mask[:]
+            metric.add_prediction(Y_pred[:][Y_mask], Y_gt[:][Y_mask]) # 去掉mask外的数据
             self.dataset.mode('all') # 恢复原本状态
         loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
@@ -333,8 +355,6 @@ class MIMICAnalyzer():
     def nearest_cls(self):
         '''预测窗口内是否发生ARDS的分类器'''
         params = self.loc_conf['baseline_nearest_cls']
-        window = params['window']
-
         kf = KFold(n_splits=self.n_fold, shuffle=True, random_state=100)
         self.register_values.clear()
         model_name = 'nearest_cls'
@@ -344,7 +364,7 @@ class MIMICAnalyzer():
         # 制作ARDS标签
         self.dataset.mode('all') # 恢复原本状态
         logger.info('Generating ARDS label')
-        generator = lstmcls.LabelGenerator(window=params['window'])
+        generator = lstmcls.LabelGenerator(window=params['window'], threshold=self.ards_threshold)
         mask = lstmcls.make_mask((self.data.shape[0], self.data.shape[2]), self.dataset.seqs_len) # -> (batch, seq_lens)
         # 手动去掉最后一格
         mask[:, -1] = False
@@ -393,7 +413,8 @@ if __name__ == '__main__':
     analyzer = MIMICAnalyzer(dataset)
     # analyzer._detect_adm_data("220224")
     # analyzer.feature_explore()
-    analyzer.lstm_cls()
-    # analyzer.nearest_cls()
+    analyzer.nearest_cls()
+    # analyzer.lstm_cls()
+    
     # analyzer.lstm_model()
     # analyzer.nearest_method()
