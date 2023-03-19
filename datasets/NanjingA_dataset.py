@@ -10,7 +10,7 @@ import pickle
 from tqdm import tqdm
 
 
-class DynamicSepsisDataset():
+class NanjingADataset():
     def __init__(self, from_pkl=False):
         self.conf_loader = tools.GLOBAL_CONF_LOADER["dataset_dynamic"]['paths']
         self.csv_path = self.conf_loader['csv_origin_path'] # origin data
@@ -354,4 +354,4 @@ class DynamicSepsisDataset():
 
 if __name__ == '__main__':
     tools.set_chinese_font()
-    dataset = DynamicSepsisDataset(from_pkl=False)
+    dataset = NanjingADataset(from_pkl=False)

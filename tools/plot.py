@@ -196,10 +196,6 @@ def plot_hotspot(data:np.ndarray, fea_names:list):
     plt.close()
 
 
-
-
-
-
 def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_name: str, 
     restrict_area=False, write_dir_path=None, plot_dash=True, comment:str=''):
     '''

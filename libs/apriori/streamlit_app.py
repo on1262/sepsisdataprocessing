@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from apriori import runApriori, dataFromFile, to_str_results
+from libs.apriori import runApriori, dataFromFile, to_str_results
 
 st.markdown("# Apriori Streamlit")
 

@@ -1,7 +1,7 @@
 import torch
 import torchinfo
 import numpy as np
-from mimic_dataset import MIMICDataset, Subject, Admission, Config # 这个未使用的import是pickle的bug
+from datasets.mimic_dataset import MIMICDataset, Subject, Admission, Config # 这个未使用的import是pickle的bug
 import mimic_model.lstm_reg as lstmreg
 import mimic_model.lstm_cls as lstmcls
 from mimic_model.baseline import BaselineNearest
@@ -16,7 +16,7 @@ from tools import logger as logger
 # 鉴于mimic数据集提取后的大小和数量都和之前的数据集在同一规模, 所以这里决定写一个接口(继承)
 # 直接复用dynamic_analyzer的代码
 
-class MIMICAnalyzer():
+class Analyzer():
     def __init__(self, dataset:MIMICDataset):
         self.dataset = dataset
         self.data = dataset.data
@@ -407,14 +407,3 @@ class MIMICAnalyzer():
                             final_f.write(f.read())
                             final_f.write('\n')
         logger.info(f'Final result saved at ' + os.path.join(out_dir, 'final_result.log'))
-
-if __name__ == '__main__':
-    dataset = MIMICDataset()
-    analyzer = MIMICAnalyzer(dataset)
-    # analyzer._detect_adm_data("220224")
-    # analyzer.feature_explore()
-    analyzer.nearest_cls()
-    # analyzer.lstm_cls()
-    
-    # analyzer.lstm_model()
-    # analyzer.nearest_method()

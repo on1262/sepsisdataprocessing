@@ -5,7 +5,7 @@ from mock import patch
 import os
 import unittest
 
-from apriori import (
+from libs.apriori import (
     getItemSetTransactionList,
     dataFromFile,
     joinSet,
