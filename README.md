@@ -35,3 +35,40 @@ micmic-iv: MIMIC-IV数据集
 NanjingA: 东南大学附属中大医院的数据集
 
 JiangsuA(采集中):来自江苏省内多家医院的数据集 
+
+## sepsis3.csv 生成
+
+**build postgresql**
+
+createdb mimiciv
+
+cd ~/mimic-code/mimic-iv/buildmimic/postgres
+
+psql -d mimiciv -f create.sql
+
+psql -d mimiciv -v ON_ERROR_STOP=1 -v mimic_data_dir=/home/chenyt/sepsisinducedards/mimic-iv -f load.sql
+
+**build concepts**
+
+cd ~/mimic-code/mimic-iv/concepts_postgres
+
+psql -d mimiciv
+
+\i postgres-functions.sql -- only needs to be run once
+
+\i postgres-make-concepts.sql
+
+**extract csv**
+
+\copy (SELECT * FROM mimiciv_derived.sepsis3) TO '~/sepsisinducedards/mimic-iv/cache/sepsis3.csv' WITH CSV HEADER; -- 提取出csv文件
+
+## feature engineering
+
+PF_ratio: PaO2/FiO2
+
+MAP(平均动脉压): (SBP(收缩压) + 2*DBP(舒张压))/3
+
+shock_index(休克指数): HR(心率) / SBP(收缩压)
+
+PPD(pulse pressure difference,脉压差): SBP - DBP
+

@@ -26,7 +26,7 @@ class LSTMAutoRegTrainer():
         tools.reinit_dir(self.cache_path, build=True)
         self.target_idx = params['target_idx']
         self.target_std = params['target_std'] # 用于还原真实的std
-        self.model = LSTMModel(n_fea=params['in_channels'], n_hidden=params['hidden_size'], norm_arr=self.norm_arr)
+        self.model = LSTMRegModel(n_fea=params['in_channels'], n_hidden=params['hidden_size'], norm_arr=self.norm_arr)
         std_arr = torch.as_tensor(self.norm_arr[:, 1], dtype=torch.float32, require_grad=False).to(self.device)
         self.criterion = AutoRegLoss(target_idx=params['target_idx'], out_std=self.target_std, std_arr=std_arr, target_coeff=params['target_coeff'])
         self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
@@ -156,7 +156,7 @@ class LSTMAutoRegTrainer():
         return result
 
 
-class LSTMModel(nn.Module):
+class LSTMRegModel(nn.Module):
     '''
     自回归的LSTM模型, 每一步预测所有feature
     用于MIMIC-IV的时序预测, 采用自回归的方式, 会同时预测所有feature的结果

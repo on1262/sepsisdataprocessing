@@ -9,7 +9,7 @@ from tqdm import tqdm
 import torchinfo
 
 
-class LSTMPredictor(nn.Module):
+class LSTMClsModel(nn.Module):
     '''带预测窗口的二元判别模型'''
     def __init__(self, dev:str, in_channels:int, hidden_size=128, dp=0) -> None:
         super().__init__()
@@ -58,13 +58,13 @@ def make_mask(m_shape, seq_lens) -> np.ndarray:
         assert(0)
     return mask
 
-class Trainer():
+class LSTMClsTrainer():
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
         self.device = torch.device(self.params['device'])
         self.cache_path = params['cache_path']
         tools.reinit_dir(self.cache_path, build=True)
-        self.model = LSTMPredictor(params['device'], params['in_channels'])
+        self.model = LSTMClsModel(params['device'], params['in_channels'])
         self.criterion = ClassificationLoss(self.params['window'])
         self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
         self.dataset = dataset

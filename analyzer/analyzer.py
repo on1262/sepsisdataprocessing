@@ -2,9 +2,7 @@ import torch
 import torchinfo
 import numpy as np
 from datasets.mimic_dataset import MIMICDataset, Subject, Admission, Config # 这个未使用的import是pickle的bug
-import mimic_model.lstm_reg as lstmreg
-import mimic_model.lstm_cls as lstmcls
-from mimic_model.baseline import BaselineNearest
+import models.mimic_model as mimic_model
 from sklearn.model_selection import KFold
 import matplotlib.pyplot as plt
 import tools
@@ -314,7 +312,6 @@ class Analyzer():
             out_path=os.path.join(out_dir, 'loss.png'))
         metric.plot_roc(title='LSTM cls model ROC', save_path=os.path.join(out_dir, 'lstm_cls_ROC.png'))
         print(metric.generate_info())
-        # self.create_final_result()
 
 
     def nearest_reg(self):

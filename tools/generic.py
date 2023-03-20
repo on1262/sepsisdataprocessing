@@ -529,11 +529,14 @@ def assert_no_na(dataset:pd.DataFrame):
                 logger.error(f'assert_na: NA in feature:{col}')
                 assert(0)
 
-'''
-将一段时间字符串转化为时间戳
-'''
 class TimeConverter:
+    '''
+    将一段时间字符串转化为时间戳
+    '''
     def __init__(self, format:str=None, out_unit=['day','hour','minute']) -> None:
+        '''
+        format: 年%Y 月%m 日%d 小时%H 分钟%M 秒%S"
+        '''
         self.format = format
         coeff = 1
         if out_unit == 'day':

@@ -63,17 +63,16 @@
             "cache_dir": "mimic-iv/cache",
             "conf_cache_path": "mimic-iv/configs/config_cache.json",
             "conf_manual_path": "mimic-iv/configs/config_manual.json",
+            "sepsis_patient_path": "mimic-iv/sepsis_result/sepsis3.csv",
             "out_dir":"mimic_out"
         }
     },
     "mimic_analyzer":{
         "paths": {
             "out_dir":"mimic_out",
-            "lstm_autoreg_cache": "mimic_out/cache/lstm_autoreg",
             "lstm_cls_cache": "mimic_out/cache/lstm_cls",
             "conf_cache_path": "mimic-iv/configs/config_cache.json",
-            "conf_manual_path": "mimic-iv/configs/config_manual.json",
-            "sepsis_patient_path": "mimic-iv/sepsis_result/sepsis3.csv"
+            "conf_manual_path": "mimic-iv/configs/config_manual.json"
         },
         "ards_threshold":200
     }
