@@ -262,7 +262,7 @@ class NanjingADataset():
         # 静态特征输出
         logger.debug("Plotting static features' correlation")
         tools.plot_reg_correlation(
-            data_static[numeric_static].to_numpy(), numeric_static, target_min, self.target_fea, restrict_area=True,
+            data_static[numeric_static].to_numpy(), numeric_static, target_min, self.target_fea, adapt=True,
             write_dir_path=os.path.join(self.out_path, 'correlation', 'static_feature'), plot_dash=False)
         # 动态特征进行时间轴的合并
         # 按列合并, 相同时间点的所有患者紧邻
@@ -283,7 +283,7 @@ class NanjingADataset():
                     dyn_expanded.loc[:, nearest_fea].to_numpy()
         logger.debug("Plotting dynamic features' correlation")
         tools.plot_reg_correlation(
-            dyn_matrix, dyn_names, target_expanded, self.target_fea, restrict_area=True,
+            dyn_matrix, dyn_names, target_expanded, self.target_fea, adapt=True,
             write_dir_path=os.path.join(self.out_path, 'correlation', 'dynamic_feature'), plot_dash=False)
         logger.info("Plot correlation: Done")
 

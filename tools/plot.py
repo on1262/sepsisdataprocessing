@@ -51,8 +51,8 @@ class LossLogger:
     def __init__(self) -> None:
         self.data = None
 
-    # 增加一条独立的model训练记录
     def add_loss(self, data:dict):
+        '''增加一条独立的model训练记录'''
         for key in data.keys():
             assert(isinstance(data[key], np.ndarray))
             if len(data[key].shape) == 1:
@@ -165,12 +165,19 @@ def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
         plt.savefig(out_path)
     plt.close()
 
-# 从源数据直接打印直方图
-def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True, restrict_area=False):
+
+def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True, adapt=False):
+    '''
+    从源数据直接打印直方图
+    data: shape任意, 每个元素代表一个样本
+    data_name: str 特征名
+    discrete: 取值是否离散, True=离散取值
+    adapt: 自动调整输出取值范围, 可能会忽略某些极端值
+    '''
     data = data[:]
     mu, sigma = scipy.stats.norm.fit(data)
     ax = sns.histplot(data=data, stat='proportion', discrete=discrete)
-    if restrict_area:
+    if adapt:
         ax.set_xlim(left=max(mu-3*sigma, np.min(data)), right=min(mu+3*sigma, np.max(data)))
 
     plt.title('Distribution of ' + data_name, fontsize = 13)
@@ -183,6 +190,7 @@ def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=Tr
 
 
 def plot_hotspot(data:np.ndarray, fea_names:list):
+    '''生成相关矩阵'''
     mat = np.corrcoef(x=data, rowvar=False)
     f, ax = plt.subplots(figsize=(60, 60))
     mask = np.triu(np.ones_like(mat, dtype=bool))
@@ -195,9 +203,36 @@ def plot_hotspot(data:np.ndarray, fea_names:list):
     plt.show()
     plt.close()
 
+def plot_confusion_matrix(cm:np.ndarray, labels:list, title='Confusion matrix', save_path='./out.png'):
+    '''
+    生成混淆矩阵
+    cm: 沿axis=0是predicted label轴, 沿axis=1是true label轴, cm[x][y]代表pred=x, gt=y
+    labels: list(str) 各个class的名字
+    save_path: 完整路径名
+    '''
+    sns.set_style("whitegrid")
+    plt.figure(figsize=(10, 10))
+    plt.gca().grid(False)
+    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.OrRd)
+    plt.title(title, size=18)
+    plt.colorbar()
+    tick_marks = np.arange(len(labels))
+    plt.xticks(tick_marks, labels, rotation=45, size=15)
+    plt.yticks(tick_marks, labels, size=15)
+    plt.ylabel('True label', size=18)
+    plt.xlabel('Predicted label', size=18)
+    width, height = cm.shape
+    for x in range(width):
+        for y in range(height):
+            num_color = 'black' if cm[x][y] < 1.5*cm.mean() else 'white'
+            plt.annotate(str(cm[x][y]), xy=(y, x), fontsize=24, color=num_color,
+                        horizontalalignment='center',
+                        verticalalignment='center')
+    plt.savefig(save_path)
+    plt.close()
 
-def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_name: str, 
-    restrict_area=False, write_dir_path=None, plot_dash=True, comment:str=''):
+def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, 
+    target_name: str, adapt=False, write_dir_path=None, plot_dash=True, comment:str=''):
     '''
     生成X的每一列关于Y的线性回归, 用来探究单变量对目标的影响
     write_dir_path: 将每个变量保存为一张图, 放在给定文件夹中
@@ -233,7 +268,7 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_
             plt.plot(np.asarray([d_min, d_max]),np.asarray([d_min, d_max]), 
                 linestyle='dashed', color='C7', label='Y=X')
         plt.title(f'{name} vs {target_name} cmt=[{comment}]', fontsize = 12)
-        if restrict_area and Y.shape[0] > 20:
+        if adapt and Y.shape[0] > 20:
             # 去除20个极值, 使得显示效果更好
             Y_sorted = np.sort(Y[x_valid[:, idx], 0], axis=0)
             X_sorted = np.sort(X[x_valid[:, idx], idx], axis=0)
@@ -254,14 +289,14 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray, target_
             )
         plt.close()
 
-'''
-生成预测值和真实值的散点图, 并用颜色表明分位数的范围, 从而表现出模型认为该预测是否可靠
-默认不生成回归线, 但是会生成一条Y=X线
-不支持生成多个变量, X只能是(quantile, data_len)的形状
-'''
 def plot_correlation_with_quantile(
     X_pred:np.ndarray, x_name:str, Y_gt:np.ndarray, target_name: str, quantile:list, equal_lim=False, plot_dash=True, write_dir_path=None, comment:str=''
 ):
+    '''
+    生成预测值和真实值的散点图, 并用颜色表明分位数的范围, 从而表现出模型认为该预测是否可靠
+    默认不生成回归线, 但是会生成一条Y=X线
+    不支持生成多个变量, X只能是(quantile, data_len)的形状
+    '''
     if write_dir_path is not None:
         os.makedirs(write_dir_path, exist_ok=True)
     Y_gt = Y_gt.reshape(Y_gt.shape[0], 1)
@@ -328,10 +363,11 @@ def plot_correlation_with_quantile(
             )
         plt.close()
 
-'''
-生成某个特征所有样本的shap value和特征值的对应关系
-'''
+
 def plot_shap_scatter(fea_name:str, shap:np.ndarray, values:np.ndarray, x_lim=(0, -1), write_dir_path=None):
+    '''
+    生成某个特征所有样本的shap value和特征值的对应关系
+    '''
     plt.figure(figsize = (6,6))
     sns.scatterplot(x=values, y=shap)
     plt.title(f'SHAP Value scatter plot for {fea_name}', fontsize = 12)
@@ -347,11 +383,12 @@ def plot_shap_scatter(fea_name:str, shap:np.ndarray, values:np.ndarray, x_lim=(0
         )
     plt.close()
 
-'''
-生成X的每一列关于Y的条件分布, 用来探究单变量对目标的影响, 要求Y能转换为Bool型
-write_dir_path: 将每个变量保存为一张图, 放在给定文件夹中
-'''
+
 def plot_dis_correlation(X:np.ndarray, fea_names, Y:np.ndarray, target_name, write_dir_path=None):
+    '''
+    生成X的每一列关于Y的条件分布, 用来探究单变量对目标的影响, 要求Y能转换为Bool型
+    write_dir_path: 将每个变量保存为一张图, 放在给定文件夹中
+    '''
     Y = np.nan_to_num(Y, copy=False, nan=0) 
     reinit_dir(write_dir_path)
     Y = Y.astype(bool)
@@ -452,8 +489,8 @@ def plot_fea_importance(shap_vals, sorted_names, save_path=None):
         plt.show()
     plt.close()
 
-# 绘制标准差条块
 def draw_band(ax, x, y, err, **kwargs):
+    '''绘制标准差条块'''
     if not isinstance(x, np.ndarray):
         x = np.asarray(x)
     if not isinstance(y, np.ndarray):

@@ -1,33 +1,38 @@
 import torch
 import torchinfo
 import numpy as np
-from datasets.mimic_dataset import MIMICDataset, Subject, Admission, Config # 这个未使用的import是pickle的bug
 import models.mimic_model as mimic_model
-from sklearn.model_selection import KFold
 
 import tools
 import os
 from tqdm import tqdm
 from tools import logger as logger
+from .container import DataContainer
+from .explore import FeatureExplorer
+from .method_4cls import LSTM4ClsAnalyzer
+from .method_reg import lstm_reg, nearest_reg
+from datasets import AbstractDataset
 
 
-# 鉴于mimic数据集提取后的大小和数量都和之前的数据集在同一规模, 所以这里决定写一个接口(继承)
-# 直接复用dynamic_analyzer的代码
 class Analyzer:
-    def __init__(self) -> None:
-        pass
+    def __init__(self, dataset:AbstractDataset) -> None:
+        self.container = DataContainer(dataset)
+        self.explorer = FeatureExplorer(self.container)
+        
+    def lstm_4cls(self):
+        params = self.container
+        sub_analyzer = LSTM4ClsAnalyzer()
 
     def feature_explore(self):
-        '''输出mimic-iv数据集的统计特征'''
+        '''输出mimic-iv数据集的统计特征, 独立于模型和研究方法'''
         logger.info('Analyzer: Feature explore')
-        out_dir = self.gbl_conf['paths']['out_dir']
-        
+        out_dir = self.container.gbl_conf['paths']['out_dir']
         # random plot sample time series
-        self._plot_time_series_samples(self.target_name, n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "target_plot"))
-        self._plot_time_series_samples("220224", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "pao2_plot"))
-        self._plot_time_series_samples("223835", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "fio2_plot"))
-        self._plot_samples(num=50, id_list=["220224", "223835"], id_names=['PaO2', 'FiO2'], out_dir=os.path.join(out_dir, 'samples'))
-
-        # self._miss_mat()
-        # self._first_ards_time()
-        #self._feature_count()
+        self.explorer.plot_time_series_samples(self.target_name, n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "target_plot"))
+        self.explorer.plot_time_series_samples("220224", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "pao2_plot"))
+        self.explorer.plot_time_series_samples("223835", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "fio2_plot"))
+        self.explorer.plot_samples(num=50, id_list=["220224", "223835"], id_names=['PaO2', 'FiO2'], out_dir=os.path.join(out_dir, 'samples'))
+        # plot other information
+        self.explorer.miss_mat()
+        self.explorer.first_ards_time()
+        self.explorer.feature_count()

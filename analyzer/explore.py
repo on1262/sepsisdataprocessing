@@ -2,10 +2,15 @@ import tools
 from tools.colorful_logging import logger
 from .container import DataContainer
 import matplotlib.pyplot as plt
+import numpy as np
+from tqdm import tqdm
+import os
 
 class FeatureExplorer:
     def __init__(self, container:DataContainer) -> None:
-        pass
+        self.container = container
+        self.gbl_conf = container.gbl_conf
+        self.dataset = container.dataset
 
     def first_ards_time(self):
         '''打印首次呼衰出现的时间分布'''
@@ -28,8 +33,8 @@ class FeatureExplorer:
             if count != 0:
                 ards_count += 1
                 counts.append(count) 
-        tools.plot_single_dist(np.asarray(times), f"First ARDS time(hour)", os.path.join(out_dir, "first_ards_time.png"), restrict_area=True)
-        tools.plot_single_dist(np.asarray(counts), f"ARDS Count", os.path.join(out_dir, "ards_count.png"), restrict_area=True)
+        tools.plot_single_dist(np.asarray(times), f"First ARDS time(hour)", os.path.join(out_dir, "first_ards_time.png"), adapt=True)
+        tools.plot_single_dist(np.asarray(counts), f"ARDS Count", os.path.join(out_dir, "ards_count.png"), adapt=True)
         logger.info(f"ARDS patients count={ards_count}")
 
 
@@ -45,8 +50,8 @@ class FeatureExplorer:
         # 行缺失
         row_nas = na_table.mean(axis=1)
         col_nas = na_table.mean(axis=0)
-        tools.plot_single_dist(row_nas, f"Row miss rate", os.path.join(out_dir, "row_miss_rate.png"), discrete=False, restrict_area=True)
-        tools.plot_single_dist(col_nas, f"Column miss rate", os.path.join(out_dir, "col_miss_rate.png"), discrete=False, restrict_area=True)
+        tools.plot_single_dist(row_nas, f"Row miss rate", os.path.join(out_dir, "row_miss_rate.png"), discrete=False, adapt=True)
+        tools.plot_single_dist(col_nas, f"Column miss rate", os.path.join(out_dir, "col_miss_rate.png"), discrete=False, adapt=True)
 
     def feature_count(self):
         '''打印vital_sig中特征出现的次数和最短间隔排序'''
@@ -150,4 +155,4 @@ def label_explore(labels, mask, out_dir):
         '''
         cover_rate = np.sum(labels, axis=1) / np.sum(mask, axis=1)
         tools.plot_single_dist(
-            data=cover_rate, data_name='ARDS cover rate (per sample)', save_path=os.path.join(out_dir, 'cover_rate.png'), discrete=False, restrict_area=True)
+            data=cover_rate, data_name='ARDS cover rate (per sample)', save_path=os.path.join(out_dir, 'cover_rate.png'), discrete=False, adapt=True)

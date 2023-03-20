@@ -320,7 +320,7 @@ class DynamicPredictionMetric:
             pred = self.records['pred'][valid_mat]
             gt = self.records['gt'][valid_mat]
             plot_reg_correlation(
-                X=gt[:,None], fea_names=['ALL_gt'], Y=pred, target_name='ALL_Prediction', restrict_area=True, write_dir_path=corr_dir, comment=comment)
+                X=gt[:,None], fea_names=['ALL_gt'], Y=pred, target_name='ALL_Prediction', adapt=True, write_dir_path=corr_dir, comment=comment)
         else:
             valid_mat = (self.records['pred'][self.quantile_idx, ...] > 0) * self.records['mask']
             pred = self.records['pred'][:, valid_mat]

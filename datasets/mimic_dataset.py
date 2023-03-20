@@ -405,22 +405,22 @@ class MIMICIV:
             # plot distribution
             tools.plot_single_dist(
                 data=arr_points, data_name=f'Points of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'point_' + str(id) + '.png'), discrete=False, restrict_area=True)
+                save_path=os.path.join(dist_dir, 'point_' + str(id) + '.png'), discrete=False, adapt=True)
             tools.plot_single_dist(
                 data=arr_duration, data_name=f'Duration of {fea_name}(Hour)', 
-                save_path=os.path.join(dist_dir, 'duration_' + str(id) + '.png'), discrete=False, restrict_area=True)
+                save_path=os.path.join(dist_dir, 'duration_' + str(id) + '.png'), discrete=False, adapt=True)
             tools.plot_single_dist(
                 data=arr_frequency, data_name=f'Frequency of {fea_name}(Point/Hour)', 
-                save_path=os.path.join(dist_dir, 'freq_' + str(id) + '.png'), discrete=False, restrict_area=True)
+                save_path=os.path.join(dist_dir, 'freq_' + str(id) + '.png'), discrete=False, adapt=True)
             tools.plot_single_dist(
                 data=arr_avg_value, data_name=f'Avg Value of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'avgv_' + str(id) + '.png'), discrete=False, restrict_area=True)
+                save_path=os.path.join(dist_dir, 'avgv_' + str(id) + '.png'), discrete=False, adapt=True)
             tools.plot_single_dist(
                 data=arr_min_interval, data_name=f'Min interval of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'mininterv_' + str(id) + '.png'), discrete=False, restrict_area=True)
+                save_path=os.path.join(dist_dir, 'mininterv_' + str(id) + '.png'), discrete=False, adapt=True)
             tools.plot_single_dist(
                 data=arr_max_interval, data_name=f'Max interval of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'maxinterv_' + str(id) + '.png'), discrete=False, restrict_area=True)
+                save_path=os.path.join(dist_dir, 'maxinterv_' + str(id) + '.png'), discrete=False, adapt=True)
         # itemid hit rate
         hit_table = {}
         adm_count = np.sum([len(s.admissions) for s in self.subjects.values()])
@@ -450,6 +450,12 @@ class MIMICDataset(AbstractDataset):
     '''
     MIMIC-IV上层抽象, 从中间文件读取数据, 进行处理, 得到最终数据集
     '''
+    __name = 'mimic-iv'
+
+    @classmethod
+    def name(cls):
+        return cls.__name
+    
     def __init__(self):
         super().__init__()
         self.mimiciv = MIMICIV()
