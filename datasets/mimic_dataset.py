@@ -14,32 +14,12 @@ from tqdm import tqdm
 from .abstract_dataset import AbstractDataset
 # import multiprocessing as mp
 
-class Config:
-    '''
-        加载mimic对应的配置表
-    '''
-    def __init__(self, cache_path, manual_path) -> None:
-        self.cache_path = cache_path
-        self.manual_path = manual_path
-        self.configs = {}
-        with open(manual_path, 'r', encoding='utf-8') as fp:
-            manual_conf = json.load(fp)
-        if os.path.exists(cache_path):
-            with open(cache_path, 'r', encoding='utf-8') as fp:
-                self.configs = json.load(fp)
-        for key in manual_conf.keys(): # 覆盖
-            self.configs[key] = manual_conf[key]
-
-    def __getitem__(self, idx):
-        return self.configs.copy()[idx]
-    
-    def dump(self):
-        with open(self.manual_path, 'w', encoding='utf-8') as fp:
-            json.dump(self.configs, fp)
 
 class Admission:
     '''
     代表Subject/Admission
+    admittime: 起始时间
+    dischtime: 结束时间
     '''
     def __init__(self, hadm_id, admittime:float, dischtime:float) -> None:
         self.dynamic_data = {} # dict(fea_name:ndarray(value, time))
@@ -55,6 +35,7 @@ class Admission:
             self.dynamic_data[itemid].append((value, time))
 
     def update_data(self):
+        '''绝对时间变为相对时间'''
         for key in self.dynamic_data:
             if isinstance(self.dynamic_data[key], list):
                 arr = np.asarray(sorted(self.dynamic_data[key], key=lambda x:x[1]))
@@ -695,11 +676,18 @@ class MIMICDataset(AbstractDataset):
             for s_id in tqdm(self.subjects.keys(), desc='Generate aligned table'):
                 for adm in self.subjects[s_id].admissions:
                     if align_id not in adm.keys():
-                        logger.warning('Invalid admission')
+                        logger.warning('Invalid admission: no align id')
                         continue
-                    # 生成基准时间表
+                    # 起始时刻和终止时刻为pao2和fio2重合时段, 并且限制在sepsis出现时刻之后
                     t_start = max(adm[pao2_id][0,1], adm[fio2_id][0,1])
                     t_end = min(adm[pao2_id][-1,1], adm[fio2_id][-1,1])
+                    sepsis_time = (self.subjects[s_id].static_data['sepsis_time'] - adm.admittime)
+                    if sepsis_time >= t_end:
+                        logger.warning('Invalid admission: no matching sepsis time')
+                        continue
+                    else:
+                        t_start = max(sepsis_time, t_start)
+                    
                     ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
                     # 生成表本身, 缺失值为-1
                     table = -np.ones((len(static_keys) + len(dynamic_keys), ticks.shape[0]), dtype=np.float32)
@@ -717,8 +705,8 @@ class MIMICDataset(AbstractDataset):
                     if not np.all(table[index_dict['fio2'], :] > 0):
                         logger.warning('Skipped Zero FiO2 table')
                         continue
-                    self._feature_engineering(table, index_dict, self._additional_feas)
-                    for idx, key in enumerate(reversed(self._additional_feas)):
+                    self._feature_engineering(table, index_dict, self._additional_feas) # 特征工程
+                    for idx, key in enumerate(reversed(self._additional_feas)): # 记录附加信息
                         additional_vals[key].append(table[-(idx+1), :])
                     data.append(table)
             additional_vals = {key:np.concatenate(val, axis=0) for key, val in additional_vals.items()}
@@ -810,6 +798,7 @@ class MIMICDataset(AbstractDataset):
             else:
                 logger.error(f'Invalid feature name:{name}')
                 assert(0)
+
 
 
     def __getitem__(self, idx):

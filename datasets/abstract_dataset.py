@@ -6,6 +6,7 @@ class AbstractDataset(Dataset, metaclass=abc.ABCMeta):
     '''抽象的Dataset, 要求所有dataset提供一个类似的接口'''
     def __init__(self) -> None:
         super().__init__()
+        self.data = None
 
     @abc.abstractmethod
     def register_split(self, train_index:list, valid_index:list, test_index:list):

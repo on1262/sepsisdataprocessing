@@ -203,6 +203,7 @@ class DichotomyMetric:
 
 
 class DynamicPredictionMetric:
+    '''回归任务评价指标, 支持分位点预测, 内部存储为1d'''
     def __init__(self, target_name:str, out_dir:str) -> None:
         self.target_name = target_name
         self.records = None
@@ -212,6 +213,7 @@ class DynamicPredictionMetric:
         self.quantile_list = None
     
     def set_quantile(self, q_list, q_idx):
+        '''开启quantile mode'''
         self.quantile_flag = True
         self.quantile_list = q_list
         self.quantile_idx = q_idx
@@ -329,4 +331,21 @@ class DynamicPredictionMetric:
                 quantile=self.quantile_list, plot_dash=True, write_dir_path=corr_dir, 
                 comment=comment)
 
+class MultiClassMetric:
+    '''
+    多分类指标, 主要是输出混淆矩阵
+    '''
+    def __init__(self, class_names:list, out_dir:str) -> None:
+        pass
+
+    def add_prediction(self, prediction:np.ndarray, gt:np.ndarray, mask:np.ndarray):
+        assert(prediction.shape == gt.shape and gt.shape == mask.shape)
+
+    def confusion_matrix(self, comment:str=''):
+        '''输出混淆矩阵'''
+        pass
+
+    def write_result(self):
+        '''输出准确率等信息'''
+        pass
     
