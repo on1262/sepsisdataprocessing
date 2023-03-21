@@ -1,80 +1,56 @@
 {
     "work_dir": "/home/chenyt/sepsisinducedards",
-    "dataset_static": {
-        "paths":{
-            "csv_origin_path": "data_static/sepsis_fixed.csv",
-            "conf_cache_path": "data_static/configs_cache.json",
-            "conf_manual_path": "data_static/configs_manual.json",
-            "profile_conf_path": "data_static/profile_conf.yaml",
-            "profile_save_path": "static_model_out/profile.html",
-            "output_cleaned_path": "data_static/cleaned.csv",
-            "apriori_df_path": "data_static/data_apriori.pkl",
-            "dataframe_save_path": "data_static/data_cache.pkl",
-            "out_dir": "static_model_out"
-        }
-    },
-    "static_analyzer": {
-        "shap_names": {"超敏C反应蛋白_D1": [0, 400], "A-ado2": [0, 700], "SOFA_氧合指数": [0, 800], "PaO2": [0, 400]},
-        "baseline_names": ["SOFA_氧合指数", "SOFA分值", "A-ado2"],
-        "apriori_consequents": ["ARDS=1", "ARDS=0", "年龄=>65", "年龄=45-65", "年龄=<45"],
-        "apriori_iter": 3,
-        "apriori_min_support": 0.05,
-        "apriori_min_confidence": 0,
-        "paths":{
-            "plot_dir": "static_model_out",
-            "feature_discretization_out": "static_model_out/data_for_apriori.csv",
-            "fea_discrt_conf": "data_static/第一次数据.json",
-            "shap_values": "static_model_out/SHAP_values.txt",
-            "fea_importance": "static_model_out/shap_importance.png",
-            "ROC_path": "static_model_out/ROC_cal.log", 
-            "apriori_items": "static_model_out/apriori_items.csv",
-            "apriori_rules": "static_model_out/apriori_rules.csv"
-        }
-    },
-    "dataset_dynamic": {
-        "paths":{
-            "csv_origin_path": "data_dynamic/data_combined.csv",
-            "csv_raw_new_path": "data_dynamic/data_raw_new.csv",
-            "csv_slice_path": "data_dynamic/data_slice.csv",
-            "csv_target_time_path": "data_dynamic/data_target_time.csv",
-            "conf_cache_path": "data_dynamic/configs_cache.json",
-            "conf_manual_path": "data_dynamic/configs_manual.json",
-            "profile_conf_path": "data_dynamic/profile_conf.yaml",
-            "profile_save_path": "dynamic_model_out/profile.html",
-            "output_cleaned_path": "data_dynamic/dyn_cleaned.csv",
-            "dataframe_save_path": "data_dynamic/dyn_data_cache.pkl",
-            "slice_result_save_path": "data_dynamic/slice_data.pkl",
-            "fea_manager_save_path": "data_dynamic/fea_manager.pkl",
-            "out_dir": "dynamic_model_out"
-        }
-    },
-    "dynamic_analyzer": {
-        "paths": {
-            "out_dir": "dynamic_model_out",
-            "lstm_dataset_save_path": "dynamic_model_out/cache/lstm_dataset.pkl",
-            "lstm_model_cache_dir": "dynamic_model_out/cache/lstm_model"
+    "dataset":{
+        "mimic-iv":{
+            "paths": {
+                "mimic_dir":"mimic-iv",
+                "cache_dir": "mimic-iv/cache",
+                "conf_cache_path": "mimic-iv/configs/config_cache.json",
+                "conf_manual_path": "mimic-iv/configs/config_manual.json",
+                "sepsis_patient_path": "mimic-iv/sepsis_result/sepsis3.csv",
+                "out_dir":"mimic_out"
+            }
         },
-        "dynamic_target_name":"target",
-        "shap_names": {"dyn_PaO2/FiO2": [0, 600], "sta_PaO2": [0, 500], "sta_SOFA_氧合指数": [0, 800], "dyn_PaO2": [0, 500]}
-    },
-    "mimic-iv":{
-        "paths": {
-            "mimic_dir":"mimic-iv",
-            "cache_dir": "mimic-iv/cache",
-            "conf_cache_path": "mimic-iv/configs/config_cache.json",
-            "conf_manual_path": "mimic-iv/configs/config_manual.json",
-            "sepsis_patient_path": "mimic-iv/sepsis_result/sepsis3.csv",
-            "out_dir":"mimic_out"
+        "NanjingA": {
+            "paths":{
+                "csv_origin_path": "data_dynamic/data_combined.csv",
+                "csv_raw_new_path": "data_dynamic/data_raw_new.csv",
+                "csv_slice_path": "data_dynamic/data_slice.csv",
+                "csv_target_time_path": "data_dynamic/data_target_time.csv",
+                "conf_cache_path": "data_dynamic/configs_cache.json",
+                "conf_manual_path": "data_dynamic/configs_manual.json",
+                "profile_conf_path": "data_dynamic/profile_conf.yaml",
+                "profile_save_path": "dynamic_model_out/profile.html",
+                "output_cleaned_path": "data_dynamic/dyn_cleaned.csv",
+                "dataframe_save_path": "data_dynamic/dyn_data_cache.pkl",
+                "slice_result_save_path": "data_dynamic/slice_data.pkl",
+                "fea_manager_save_path": "data_dynamic/fea_manager.pkl",
+                "out_dir": "dynamic_model_out"
+            }
         }
     },
-    "mimic_analyzer":{
-        "paths": {
-            "out_dir":"mimic_out",
-            "lstm_cls_cache": "mimic_out/cache/lstm_cls",
-            "conf_cache_path": "mimic-iv/configs/config_cache.json",
-            "conf_manual_path": "mimic-iv/configs/config_manual.json"
+    "analyzer":{
+        "data_container":{
+            "ards_threshold":300,
+            "n_fold":5,
+            "seed":100
         },
-        "ards_threshold":200
+        "mimic-iv":{
+            "paths": {
+                "out_dir":"outputs/mimic-iv",
+                "lstm_cls_cache": "outputs/mimic-iv/cache/lstm_cls",
+                "lstm_reg_cache": "outputs/mimic-iv/cache/lstm_reg",
+                "catboost_static_cache":"outputs/mimic-iv/cache/catboost_static",
+                "conf_cache_path": "mimic-iv/configs/config_cache.json",
+                "conf_manual_path": "mimic-iv/configs/config_manual.json"
+            }
+        },
+        "NanjingA": {
+            "paths": {
+                "out_dir": "dynamic_model_out",
+                "lstm_dataset_save_path": "dynamic_model_out/cache/lstm_dataset.pkl",
+                "lstm_model_cache_dir": "dynamic_model_out/cache/lstm_model"
+            }
+        }
     }
-    
 }

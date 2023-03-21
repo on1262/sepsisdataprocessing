@@ -181,3 +181,4 @@ def split_csv(path, max_len=1000000, out_folder:str=None):
             tmp = fp.readline()
         if nfp is not None:
             nfp.close()
+

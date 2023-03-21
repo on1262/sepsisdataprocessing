@@ -9,8 +9,8 @@ from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
 from .explore import FeatureExplorer
-from .method_4cls import LSTM4ClsAnalyzer
-from .method_reg import lstm_reg, nearest_reg
+from .method_4cls import LSTM4ClsAnalyzer, BaselineNearestClsAnalyzer
+from .method_reg import LSTMRegAnalyzer, BaselineNearestClsAnalyzer
 from datasets import AbstractDataset
 
 
@@ -18,15 +18,24 @@ class Analyzer:
     def __init__(self, dataset:AbstractDataset) -> None:
         self.container = DataContainer(dataset)
         self.explorer = FeatureExplorer(self.container)
+        self.analyzer_dict= {
+            'lstm_4cls':LSTM4ClsAnalyzer,
+            'nearest_4cls': BaselineNearestClsAnalyzer,
+            'lstm_reg': LSTMRegAnalyzer,
+            'nearest_reg': BaselineNearestClsAnalyzer
+        }
         
-    def lstm_4cls(self):
-        params = self.container
-        sub_analyzer = LSTM4ClsAnalyzer()
+    def run_sub_analyzer(self, analyzer_name):
+        params = self.container.get_model_params(analyzer_name)
+        sub_analyzer = self.analyzer_dict[analyzer_name](params, self.container.dataset)
+        sub_analyzer.run()
+        # utils.create_final_result()
+
 
     def feature_explore(self):
         '''输出mimic-iv数据集的统计特征, 独立于模型和研究方法'''
         logger.info('Analyzer: Feature explore')
-        out_dir = self.container.gbl_conf['paths']['out_dir']
+        out_dir = self.container._conf['paths']['out_dir']
         # random plot sample time series
         self.explorer.plot_time_series_samples(self.target_name, n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "target_plot"))
         self.explorer.plot_time_series_samples("220224", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "pao2_plot"))

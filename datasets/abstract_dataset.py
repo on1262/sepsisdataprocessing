@@ -8,6 +8,7 @@ class AbstractDataset(Dataset, metaclass=abc.ABCMeta):
     def __init__(self) -> None:
         super().__init__()
         self.data = None
+        self.target_idx = None
 
     @classmethod
     @abc.abstractmethod

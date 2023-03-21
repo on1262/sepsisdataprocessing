@@ -483,7 +483,7 @@ def match_dyn_feature(name:str, time_prefix:list, name_set:set, signs={"[day]", 
             hours += 6 * (int(result.group(idx))-1)
             idx += 1
     return (residual, hours)
-    
+
 '''
 计算可用的时间分布, 第一段连续的非NA值
 input: 
@@ -572,6 +572,22 @@ class TimeConverter:
     def __call__(self, in_str:str) -> float:
         dt = datetime.datetime.strptime(in_str, self.format)
         return dt.timestamp() / self.coeff
+
+def make_mask(m_shape, seq_lens) -> np.ndarray:
+    '''
+        m_shape: (batch, seq_lens) 或者 (batch, n_fea, seq_lens)
+        mask: (batch, seq_lens) or (batch, n_fea, seq_lens) 取决于m_shape
+    '''
+    mask = np.zeros(m_shape, dtype=bool)
+    if len(m_shape) == 2:
+        for idx in range(m_shape[0]):
+            mask[idx, :seq_lens[idx]] = True
+    elif len(m_shape) == 3:
+        for idx in range(m_shape[0]):
+            mask[idx, :, :seq_lens[idx]] = True
+    else:
+        assert(0)
+    return mask
 
 
 set_chinese_font()

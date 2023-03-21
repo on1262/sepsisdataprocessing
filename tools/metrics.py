@@ -5,7 +5,7 @@ from scipy.interpolate import interp1d
 from sklearn.metrics import auc as sk_auc
 from .colorful_logging import logger
 from .generic import reinit_dir, remove_slash
-from .plot import draw_band, plot_single_dist, plot_correlation_with_quantile, plot_reg_correlation
+from .plot import draw_band, plot_single_dist, plot_correlation_with_quantile, plot_reg_correlation, plot_confusion_matrix
 
 
 
@@ -342,7 +342,7 @@ class MultiClassMetric:
         self.out_dir = out_dir
 
         # calculate statistics
-        self.calculated = False# lazy update
+        self.calculated = False # lazy update
         self.cm = None
     
     def calculate_cm(self):
@@ -381,8 +381,8 @@ class MultiClassMetric:
         cm[x][y] 代表pred=x, gt=y
         '''
         self.calculate_cm()
-        tools.plot_confusion_matrix(self.cm, labels=self.class_names, 
-            title='Confusion matrix', save_path=os.path.join(self.out_dir, 'confusion_matrix.png')):
+        plot_confusion_matrix(self.cm, labels=self.class_names, 
+            title='Confusion matrix', save_path=os.path.join(self.out_dir, 'confusion_matrix.png'))
 
     def write_result(self, fp=sys.stdout):
         '''输出准确率等信息'''

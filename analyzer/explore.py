@@ -9,7 +9,7 @@ import os
 class FeatureExplorer:
     def __init__(self, container:DataContainer) -> None:
         self.container = container
-        self.gbl_conf = container.gbl_conf
+        self.gbl_conf = container._conf
         self.dataset = container.dataset
 
     def first_ards_time(self):

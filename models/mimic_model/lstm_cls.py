@@ -43,20 +43,6 @@ def Collect_Fn(data_list:list):
     result['length'] = np.asarray([d['length'] for d in data_list], dtype=np.int32)
     return result
 
-def make_mask(m_shape, seq_lens) -> np.ndarray:
-    '''
-        mask: (batch, seq_lens) or (batch, n_fea, seq_lens) 取决于m_shape
-    '''
-    mask = np.zeros(m_shape, dtype=bool)
-    if len(m_shape) == 2:
-        for idx in range(m_shape[0]):
-            mask[idx, :seq_lens[idx]] = True
-    elif len(m_shape) == 3:
-        for idx in range(m_shape[0]):
-            mask[idx, :, :seq_lens[idx]] = True
-    else:
-        assert(0)
-    return mask
 
 class LSTMClsTrainer():
     def __init__(self, params:dict, dataset) -> None:
@@ -157,23 +143,56 @@ class LSTMClsTrainer():
 
 class LabelGenerator():
     '''从data: (batch, seq_lens)生成每个时间点在预测窗口内的ARDS标签'''
-    def __init__(self, window=16, threshold=300) -> None:
+    def __init__(self, window=16, centers=list(), smoothing_band=50) -> None:
+        assert(len(centers) == 4)
         self.window = window # 向前预测多少个点内的ARDS
-        self.threshold = threshold # 判断ARDS的界限
+        self.centers = centers # 判断ARDS的界限
+        self.band = smoothing_band # 平滑程度, 不能超过两个center之间的距离
 
+    def _label_smoothing(centers:list, nums:np.ndarray, band=50):
+        '''
+        标签平滑
+        centers: 每个class的中心点, 需要是递增的, n_cls = len(centers)
+        nums: 输入(in_shape,) 可以是任意的
+        band: 在两个class之间进行线性平滑, band是需要平滑的总宽度
+            当输入在band外时(靠近各个中心或者超过两侧), 是硬标签, 只有在band内才是软标签
+        '''
+        num_classes = len(centers)
+        smoothed_labels = np.zeros((nums.shape + (num_classes,)))
+        for i in range(num_classes-1):
+            center_i = centers[i]
+            center_j = centers[i+1]
+            lower = 0.5*(center_i + center_j) - band/2
+            upper = 0.5*(center_i + center_j) + band/2
+            mask = np.logical_and(nums > lower, nums <= upper)
+            hard_i = np.logical_and(nums >= center_i, nums <= lower)
+            hard_j = np.logical_and(nums < center_j, nums > upper)
+            if mask.any() and band > 0:
+                diff = (nums - center_i) / (center_j - center_i)
+                smooth_i = 1 - diff
+                smooth_j = diff
+                smoothed_labels[..., i][mask] = smooth_i[mask]
+                smoothed_labels[..., i+1][mask] = smooth_j[mask]
+            smoothed_labels[..., i][hard_i] = 1
+            smoothed_labels[..., i+1][hard_j] = 1
+        smoothed_labels[..., 0][nums <= centers[0]] = 1
+        smoothed_labels[..., -1][nums > centers[-1]] = 1
+        return smoothed_labels
+    
     def __call__(self, data:np.ndarray, mask:np.ndarray) -> np.ndarray:
         '''
         data不能正则化
         mask, data: (batch, seq_lens)
-        return: (batch, seq_lens)
+        return: (batch, seq_lens, n_cls)
         '''
         assert(len(data.shape) == 2 and len(mask.shape) == 2)
-        result = np.zeros(data.shape, dtype=np.float32)
+        result = np.zeros(data.shape + (len(self.centers),), dtype=np.float32)
         for idx in range(data.shape[1]-1): # 最后一个格子预测一格
             stop = min(data.shape[1], idx+self.window)
-            mat = mask[:, idx+1:stop] * data[:, idx+1:stop]
-            result[:, idx] = np.max((mat > 0) * (mat < self.threshold), axis=1)
-        return result
+            mat = mask[:, idx+1:stop] * data[:, idx+1:stop] + (1-mask) * np.inf # 对于有效的result, 至少有一个格子是有效的
+            mat_min = np.min(mat, axis=1) # (batch,)
+            result[:, idx, :] = self._label_smoothing(self.centers, mat_min, band=50)
+        return (result * mask[..., None]).astype(np.int32)
   
 
 class ClassificationLoss(nn.Module):

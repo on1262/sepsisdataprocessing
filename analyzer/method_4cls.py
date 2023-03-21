@@ -2,70 +2,80 @@ import torch
 import torchinfo
 import numpy as np
 from datasets.mimic_dataset import MIMICDataset, Subject, Admission, Config # 这个未使用的import是pickle的bug
-import models.mimic_model as mimic_model
 from sklearn.model_selection import KFold
-
 import tools
-import os
+import os, pickle
 from tqdm import tqdm
 from tools import logger as logger
-from datasets import AbstractDataset
+from .container import DataContainer
+
 
 class LSTM4ClsAnalyzer:
-    def __init__(self, params, dataset:AbstractDataset) -> None:
+    '''动态模型, 四分类预测'''
+    def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
-        self.dataset = dataset
+        self.paths = params['paths']
+        self.container = container
         self.model_name = 'LSTM_4cls'
+        self.loss_logger = tools.LossLogger()
+        # copy attribute from container
+        self.target_idx = self.dataset.target_idx
+        self.dataset = container.dataset
+        self.data = self.dataset.data
+        # initialize
+        self.out_dir = os.path.join(self.paths['out_dir'], self.model_name)
+        tools.reinit_dir(self.out_dir, build=True)
 
+    def generate_labels(self, generator):
+        '''生成4class标签'''
+        self.dataset.mode('all')
+        pkl_path = os.path.join(self.out_dir, 'dataset_derived.pkl')
+        if os.path.exists(pkl_path):
+            logger.info(f'Load derived data set from {pkl_path}')
+            with open(pkl_path, 'rb') as fp:
+                mask, label = pickle.load(fp)
+        else:
+            logger.info('Generating label')
+            mask = tools.make_mask((self.data.shape[0], self.data.shape[2]), self.dataset.seqs_len) # -> (batch, seq_lens)
+            mask[:, -1] = False # 最后一格无法预测
+            label = generator(self.data[:, self.target_idx, :], mask)
+        return mask, label
 
-    def __call__(self):
+    def label_explore(self, labels):
+        pass
+
+    def run(self):
         '''预测窗口内是否发生ARDS的分类器'''
         if self.dataset.name() == 'mimic-iv':
             import models.mimic_model as mlib
         # step 1: append additional params
-        params = self.loc_conf['lstm_cls']
-        params['cache_path'] = self.gbl_conf['paths']['lstm_cls_cache']
-        params['in_channels'] = self.data.shape[1]
+        self.params['in_channels'] = self.dataset.data.shape[1]
         # step 2: init variables
-        kf = KFold(n_splits=params['n_fold'], shuffle=True, random_state=params['seed'])
+        kf = KFold(n_splits=self.container.n_fold, shuffle=True, random_state=self.container.seed)
         out_dir = os.path.join(self.gbl_conf['paths']['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
-        metric = tools.DichotomyMetric()
-        # loss logger
-        loss_logger = tools.LossLogger()
-        # 制作ARDS标签
-        self.dataset.mode('all') # 恢复原本状态
-        logger.info('Generating ARDS label')
-        generator = mlib.LabelGenerator(window=params['window'], threshold=self.ards_threshold)
-        mask = mlib.make_mask((self.data.shape[0], self.data.shape[2]), self.dataset.seqs_len) # -> (batch, seq_lens)
-        # 手动去掉最后一格
-        mask[:, -1] = False
-        labels = generator(self.data[:, self.target_idx, :], mask)
-        self.label_explore(labels, mask, out_dir)
-        positive_proportion = np.sum(labels[:]) / np.sum(mask)
-        logger.info(f'Positive label={positive_proportion:.2f}')
-        # 训练集划分
-        for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)):
+        metric_2cls = tools.DichotomyMetric()
+        metric_4cls = tools.MultiClassMetric()
+        # step 3: generate labels
+        generator = mlib.LabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        mask, label = self.generate_labels(generator)
+        # step 4: train and predict
+        for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
             self.dataset.register_split(train_index, valid_index, test_index)
-            trainer = mlib.Trainer(params, self.dataset)
+            trainer = mlib.LSTMClsTrainer(self.params, self.dataset)
             if idx == 0:
                 trainer.summary()
             trainer.train()
-            loss_logger.add_loss(trainer.get_loss())
+            self.loss_logger.add_loss(trainer.get_loss())
             Y_mask = mask[test_index, :]
-            Y_gt = labels[test_index, :]
+            Y_gt = label[test_index, :]
             Y_pred = trainer.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
-            Y_pred = (Y_pred - Y_pred.min()) / (Y_pred.max() - Y_pred.min()) # 使得K-fold每个model输出的分布相近, 避免average性能下降
-            if idx == 0: # 探查prediction和gt差异大的点
-                logger.info('Explore result')
-                self.explore_cls_result(Y_pred, Y_gt, Y_mask, out_dir, f'idx={idx}')
-            Y_mask = Y_mask[:]
-            metric.add_prediction(Y_pred[:][Y_mask], Y_gt[:][Y_mask]) # 去掉mask外的数据
+            metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
             self.dataset.mode('all') # 恢复原本状态
-        loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
+        self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
         metric.plot_roc(title='LSTM cls model ROC', save_path=os.path.join(out_dir, 'lstm_cls_ROC.png'))
         print(metric.generate_info())
@@ -75,7 +85,7 @@ class BaselineNearestClsAnalyzer:
         self.params = params
         self.dataset = dataset
 
-    def __call__(self):
+    def run(self):
         '''预测窗口内是否发生ARDS的分类器'''
         if self.dataset.name() == 'mimic-iv':
             import datasets.mimic_dataset as dlib
