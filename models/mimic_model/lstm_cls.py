@@ -10,13 +10,14 @@ import torchinfo
 
 
 class LSTMClsModel(nn.Module):
-    '''带预测窗口的二元判别模型'''
-    def __init__(self, dev:str, in_channels:int, hidden_size=128, dp=0) -> None:
+    '''带预测窗口的多分类判别模型'''
+    def __init__(self, dev:str, in_channels:int, n_cls=4, hidden_size=128, dp=0) -> None:
         super().__init__()
         self.device = torch.device(dev)
         self.norm = nn.BatchNorm1d(num_features=in_channels)
         self.ebd = nn.Linear(in_features=in_channels, out_features=in_channels)
-        self.den = nn.Linear(in_features=hidden_size, out_features=1)
+        self.den = nn.Linear(in_features=hidden_size, out_features=n_cls)
+        self.sf = nn.Softmax(dim=-1)
         self.lstm = nn.LSTM(input_size=in_channels, hidden_size=hidden_size, batch_first=True, dropout=dp, device=self.device)
         self.c_0 = nn.Parameter(torch.zeros((1, 1, hidden_size), device=self.device), requires_grad=True)
         self.h_0 = nn.Parameter(torch.zeros((1, 1, hidden_size), device=self.device), requires_grad=True)
@@ -34,8 +35,8 @@ class LSTMClsModel(nn.Module):
         # x: (batch, time, feature) out带有tanh
         x, _ = self.lstm(x, (self.h_0.expand(-1, x.size(0), -1).contiguous(), self.c_0.expand(-1, x.size(0), -1).contiguous()))
         # x: (batch, time, hidden_size)
-        x = self.den(x).squeeze(-1)
-        return x # (batch, time)
+        x = self.sf(self.den(x))
+        return x # (batch, time, n_cls)
 
 def Collect_Fn(data_list:list):
     result = {}
@@ -51,7 +52,7 @@ class LSTMClsTrainer():
         self.cache_path = params['cache_path']
         tools.reinit_dir(self.cache_path, build=True)
         self.model = LSTMClsModel(params['device'], params['in_channels'])
-        self.criterion = ClassificationLoss(self.params['window'])
+        self.criterion = ClassificationLoss(len(self.params['centers']))
         self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
         self.dataset = dataset
         self.target_idx = dataset.target_idx
@@ -74,7 +75,7 @@ class LSTMClsTrainer():
     def _batch_forward(self, data):
         np_data = np.asarray(data['data'])
         seq_lens = data['length']
-        mask = make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
+        mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
         mask[:, -1] = False
         labels = torch.as_tensor(self.generator(np_data[:, self.target_idx, :], mask), device=self.device)
         x = data['data'].to(self.device)
@@ -196,24 +197,24 @@ class LabelGenerator():
   
 
 class ClassificationLoss(nn.Module):
-    def __init__(self, forcast_window=16) -> None:
+    def __init__(self, n_cls:int) -> None:
         '''
         forecast window: 向前预测的窗口
         '''
         super().__init__()
-        self.window = forcast_window
-        self.criterion = nn.CrossEntropyLoss(reduction='none')
+        self.n_cls = n_cls
+        self.criterion = nn.CrossEntropyLoss(reduction='none') # input: (N,C,d1,...dk)
 
     def forward(self, pred:torch.Tensor, labels:torch.Tensor, mask:torch.Tensor):
         '''
-            pred, labels, mask: (batch, seq_len)
-            labels不是PaO2/FiO2而是经过LabelGenerator生成的0/1标签
-            pred不需要移位, 就是输出本身
+            pred, labels: (batch, seq_len, n_cls)
+            mask: (batch, seq_len)
+            labels可以是软标签
         '''
         assert(pred.size() == labels.size())
+        if len(mask.size()) + 1 == len(pred.size()):
+            mask = mask[..., None]
         pred, labels = pred*mask, labels*mask
-        pred = torch.stack([1-pred, pred], dim=1) # (batch,seq_len)->(batch, classs=2, seq_len)
-        labels = torch.stack([1-labels, labels], dim=1)
         # 创建标签矩阵
-        loss = torch.sum(self.criterion(pred, labels)) / torch.sum(mask)
+        loss = torch.sum(self.criterion(pred.permute(0, 2, 1), labels.permute(0, 2, 1))) / torch.sum(mask)
         return loss

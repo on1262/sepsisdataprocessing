@@ -52,10 +52,10 @@ class LSTM4ClsAnalyzer:
         self.params['in_channels'] = self.dataset.data.shape[1]
         # step 2: init variables
         kf = KFold(n_splits=self.container.n_fold, shuffle=True, random_state=self.container.seed)
-        out_dir = os.path.join(self.gbl_conf['paths']['out_dir'], self.model_name)
+        out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
         metric_2cls = tools.DichotomyMetric()
-        metric_4cls = tools.MultiClassMetric()
+        metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
         generator = mlib.LabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = self.generate_labels(generator)
@@ -69,16 +69,22 @@ class LSTM4ClsAnalyzer:
                 trainer.summary()
             trainer.train()
             self.loss_logger.add_loss(trainer.get_loss())
-            Y_mask = mask[test_index, :]
-            Y_gt = label[test_index, :]
+            Y_mask = mask[test_index, ...]
+            Y_gt = label[test_index, ...]
             Y_pred = trainer.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
+            metric_2cls.add_prediction(map_func(Y_pred)[..., 1][Y_mask][:], map_func(Y_gt)[..., 1][Y_mask][:])
             self.dataset.mode('all') # 恢复原本状态
+        # step 5: result explore
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
-        metric.plot_roc(title='LSTM cls model ROC', save_path=os.path.join(out_dir, 'lstm_cls_ROC.png'))
-        print(metric.generate_info())
+        metric_4cls.confusion_matrix(comment=self.model_name)
+        metric_4cls.write_result()
+
+        metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
+        print('Metric 2 classes:')
+        print(metric_2cls.generate_info())
 
 class BaselineNearestClsAnalyzer:
     def __init__(self, params, dataset) -> None:
@@ -127,6 +133,21 @@ class BaselineNearestClsAnalyzer:
             self.dataset.mode('all') # 恢复原本状态
         metric.plot_roc(title='Baseline cls model ROC', save_path=os.path.join(out_dir, 'baseline_nearest_cls_ROC.png'))
         print(metric.generate_info())
+
+def map_func(a:np.ndarray):
+    '''
+    将4分类的结果map到2分类的结果
+    默认是[0,1,2,3]对应[重度,中度,轻度,无]
+    映射是ARDS=[0,1,2], No ARDS=[3]
+    a: (..., n_cls) 可以是软标签
+    return (..., 2) 其中[...,0]代表无ARDS, [...,1]代表有ARDS, 可以是软标签
+    '''
+    a_shape = a.shape
+    a_shape[-1] = 2
+    result = np.zeros(a_shape)
+    result[..., 0] = a[..., 3]
+    result[..., 1] = a[..., 0] + a[..., 1] + a[..., 2]
+    return result
 
 
 def explore_result(ards_threshold, Y_pred, Y_gt, mask, out_dir, cmt):
