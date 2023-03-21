@@ -202,12 +202,13 @@ class DichotomyMetric:
         return result
 
 
-class DynamicPredictionMetric:
+class RegressionMetric:
     '''回归任务评价指标, 支持分位点预测, 内部存储为1d'''
     def __init__(self, target_name:str, out_dir:str) -> None:
         self.target_name = target_name
-        self.records = None
+        self.records = {'pred':[], 'gt':[]}
         self.out_dir = out_dir
+        # TODO 增加quantile mode支持
         self.quantile_flag = False
         self.quantile_idx = None
         self.quantile_list = None
@@ -218,43 +219,21 @@ class DynamicPredictionMetric:
         self.quantile_list = q_list
         self.quantile_idx = q_idx
 
-    def get_record(self):
+    def get_record(self) -> dict:
         return {key:val.copy() for key, val in self.records.items()}
 
-    def add_prediction(self, prediction:np.ndarray, gt:np.ndarray, start_idx:np.ndarray, duration:np.ndarray):
+    def add_prediction(self, _pred:np.ndarray, _gt:np.ndarray, _mask:np.ndarray):
         '''
             添加预测结果和真实值
-            prediction: (sample, ticks) or (quantile, sample, ticks) in quantile mode
-            gt: shape=prediction, gt的每个位置和prediction对应位置就是一组预测-真实值的pair, 没有偏移
-            start_idx: (sample,) 每个样本起始开始的序号, None代表全部为0
-            duration: (sample,) 每个样本持续的点数, 一个有效值->duration=1
+            _pred, _gt, _mask 相同shape
         '''
-        assert(prediction.shape == gt.shape)
+        assert(_pred.shape == _gt.shape and _mask.shape == _gt.shape)
 
-        if self.records is None:
-            self.records = {
-                'pred': prediction.copy(),
-                'gt': gt.copy(),
-                'start_idx': start_idx.copy(),
-                'duration':duration.copy()
-            }
-            self.records['mask'] = self._make_mask(prediction.shape, start_idx, duration)
-        else:
-            # 所有记录的行都累积起来
-            self.records['pred'] = np.concatenate((self.records['pred'], prediction),axis=(1 if self.quantile_flag else 0))
-            self.records['gt'] = np.concatenate((self.records['gt'], gt), axis=0)
-            self.records['start_idx'] = np.concatenate((self.records['start_idx'], start_idx), axis=0)
-            self.records['duration'] = np.concatenate((self.records['duration'], duration), axis=0)
-            self.records['mask'] = np.concatenate((self.records['mask'], self._make_mask(prediction.shape, start_idx, duration)), axis=0)
+        pred = _pred[_mask][:]
+        gt = _gt[_mask][:]
+        self.records['pred'].append(pred)
+        self.records['gt'].append(gt)
 
-    def _make_mask(self, m_shape, start_idx, duration):
-        if self.quantile_flag: # quantile
-            mask = np.zeros((m_shape[1], m_shape[2]), dtype=bool)
-        else:
-            mask = np.zeros((m_shape), dtype=bool)
-        for idx in range(start_idx.shape[0]):
-            mask[idx, start_idx[idx]:start_idx[idx] + duration[idx]] = True
-        return mask
 
     def plot(self, method_name:str):
         corr_dir = os.path.join(self.out_dir, remove_slash(method_name), 'correlation')
@@ -265,14 +244,8 @@ class DynamicPredictionMetric:
         self.plot_corr(corr_dir=corr_dir)
 
     def write_result(self, method_name:str, log_path:str):
-        if self.quantile_flag:
-            valid_mat = (self.records['pred'][self.quantile_idx, ...] > 0) * self.records['mask']
-            pred = self.records['pred'][self.quantile_idx, ...][valid_mat]
-            gt = self.records['gt'][valid_mat]
-        else:
-            valid_mat = (self.records['pred'] > 0) * self.records['mask']
-            pred = self.records['pred'][valid_mat]
-            gt = self.records['gt'][valid_mat]
+        pred = self.records['pred']
+        gt = self.records['gt']
         rmse = np.sqrt(np.mean((pred-gt)**2))
         mae = np.abs(pred - gt).mean()
         bias = (pred - gt).mean()
@@ -281,55 +254,20 @@ class DynamicPredictionMetric:
             f.write(f'Root Mean Squared Error(RMSE)={rmse}'+ '\t') # 误差的均方根值
             f.write(f'Mean Absolute Error(MAE)={mae}'+ '\t') # 误差的平均值
             f.write(f'Prediction bias={bias}'+ '\n')
-        
 
-    # 绘制残差分布
-    def plot_residual(self, res_dir:str):
-        logger.info('DynamicPredictionMetric: Plotting residual')
-        os.makedirs(res_dir,exist_ok=True)
-        name = self.target_name
-        if self.records is None:
-            logger.error('DynamicPredictionMetric: no record')
-            return
-        if self.quantile_flag:
-            r_pred = self.records['pred'][self.quantile_idx, ...]
-        else:
-            r_pred = self.records['pred']
-        for idx in range(r_pred.shape[-1]):
-            valid_mat = (r_pred[..., idx] > 0) * self.records['mask'][..., idx]
-            if np.any(valid_mat):
-                pred = r_pred[..., idx][valid_mat]
-                gt = self.records['gt'][..., idx][valid_mat]
-                res = pred - gt
-                plot_single_dist(
-                    data=res, data_name='Residual distribution: ' + name, save_path=os.path.join(res_dir, f'{idx}_name={remove_slash(name)}.png'),  discrete=False)
-            else:
-                logger.warning(f'Plot residual: no valid row in name={name}')
+    def plot_residual(self, out_dir):
+        '''绘制残差分布'''
+        res = self.records['pred'] - self.records['gt']
+        plot_single_dist(
+            data=res, data_name='Residual (pred-gt)', save_path=os.path.join(out_dir, 'residual.png'), discrete=False, adapt=True)
 
-    # 绘制预测值和真实值的关联度
     def plot_corr(self, corr_dir:str, comment:str=''):
-        logger.info('DynamicPredictionMetric: Plotting Correlation')
-        
+        '''绘制预测值和真实值的关联度'''
         os.makedirs(corr_dir, exist_ok=True)
-        if self.records is None:
-            logger.error('DynamicPredictionMetric: no record')
-            return
-        if not self.quantile_flag:
-            # plot all correlation
-            valid_mat = (self.records['pred'] > 0) * self.records['mask']
-            pred = self.records['pred'][valid_mat]
-            gt = self.records['gt'][valid_mat]
-            plot_reg_correlation(
-                X=gt[:,None], fea_names=['ALL_gt'], Y=pred, target_name='ALL_Prediction', adapt=True, write_dir_path=corr_dir, comment=comment)
-        else:
-            valid_mat = (self.records['pred'][self.quantile_idx, ...] > 0) * self.records['mask']
-            pred = self.records['pred'][:, valid_mat]
-            gt = self.records['gt'][valid_mat]
-            plot_correlation_with_quantile(
-                X_pred=pred, x_name=['ALL_Prediction'], 
-                Y_gt=gt, equal_lim=True, target_name='ALL_gt',
-                quantile=self.quantile_list, plot_dash=True, write_dir_path=corr_dir, 
-                comment=comment)
+        x = np.reshape(self.records['gt'], (np.sum(self.records['gt'].shape), 1))
+        plot_reg_correlation(
+            X=x, fea_names=['ALL_gt'], Y=self.records['pred'], \
+            target_name='ALL_Prediction', adapt=True, write_dir_path=corr_dir, comment=comment)
 
 class MultiClassMetric:
     '''

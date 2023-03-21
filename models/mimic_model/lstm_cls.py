@@ -56,7 +56,7 @@ class LSTMClsTrainer():
         self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
         self.dataset = dataset
         self.target_idx = dataset.target_idx
-        self.generator = LabelGenerator(window=self.params['window']) # 生成标签
+        self.generator = ClsLabelGenerator(window=self.params['window']) # 生成标签
         self.train_dataloader = DataLoader(dataset=self.dataset, batch_size=params['batch_size'], shuffle=True, collate_fn=Collect_Fn)
         self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=True, collate_fn=Collect_Fn)
         self.test_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
@@ -142,7 +142,7 @@ class LSTMClsTrainer():
         return pred
 
 
-class LabelGenerator():
+class ClsLabelGenerator():
     '''从data: (batch, seq_lens)生成每个时间点在预测窗口内的ARDS标签'''
     def __init__(self, window=16, centers=list(), smoothing_band=50) -> None:
         assert(len(centers) == 4)
@@ -150,35 +150,6 @@ class LabelGenerator():
         self.centers = centers # 判断ARDS的界限
         self.band = smoothing_band # 平滑程度, 不能超过两个center之间的距离
 
-    def _label_smoothing(centers:list, nums:np.ndarray, band=50):
-        '''
-        标签平滑
-        centers: 每个class的中心点, 需要是递增的, n_cls = len(centers)
-        nums: 输入(in_shape,) 可以是任意的
-        band: 在两个class之间进行线性平滑, band是需要平滑的总宽度
-            当输入在band外时(靠近各个中心或者超过两侧), 是硬标签, 只有在band内才是软标签
-        '''
-        num_classes = len(centers)
-        smoothed_labels = np.zeros((nums.shape + (num_classes,)))
-        for i in range(num_classes-1):
-            center_i = centers[i]
-            center_j = centers[i+1]
-            lower = 0.5*(center_i + center_j) - band/2
-            upper = 0.5*(center_i + center_j) + band/2
-            mask = np.logical_and(nums > lower, nums <= upper)
-            hard_i = np.logical_and(nums >= center_i, nums <= lower)
-            hard_j = np.logical_and(nums < center_j, nums > upper)
-            if mask.any() and band > 0:
-                diff = (nums - center_i) / (center_j - center_i)
-                smooth_i = 1 - diff
-                smooth_j = diff
-                smoothed_labels[..., i][mask] = smooth_i[mask]
-                smoothed_labels[..., i+1][mask] = smooth_j[mask]
-            smoothed_labels[..., i][hard_i] = 1
-            smoothed_labels[..., i+1][hard_j] = 1
-        smoothed_labels[..., 0][nums <= centers[0]] = 1
-        smoothed_labels[..., -1][nums > centers[-1]] = 1
-        return smoothed_labels
     
     def __call__(self, data:np.ndarray, mask:np.ndarray) -> np.ndarray:
         '''
@@ -192,7 +163,7 @@ class LabelGenerator():
             stop = min(data.shape[1], idx+self.window)
             mat = mask[:, idx+1:stop] * data[:, idx+1:stop] + (1-mask) * np.inf # 对于有效的result, 至少有一个格子是有效的
             mat_min = np.min(mat, axis=1) # (batch,)
-            result[:, idx, :] = self._label_smoothing(self.centers, mat_min, band=50)
+            result[:, idx, :] = tools.label_smoothing(self.centers, mat_min, band=50)
         return (result * mask[..., None]).astype(np.int32)
   
 

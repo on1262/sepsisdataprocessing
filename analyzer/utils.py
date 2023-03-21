@@ -1,6 +1,22 @@
 from tools import logger as logger
+import pickle
+import tools
 import os
 
+def generate_labels(dataset, data, target_idx, generator, out_dir):
+    '''生成标签'''
+    dataset.mode('all')
+    pkl_path = os.path.join(out_dir, 'dataset_derived.pkl')
+    if os.path.exists(pkl_path):
+        logger.info(f'Load derived data set from {pkl_path}')
+        with open(pkl_path, 'rb') as fp:
+            mask, label = pickle.load(fp)
+    else:
+        logger.info('Generating label')
+        mask = tools.make_mask((data.shape[0], data.shape[2]), dataset.seqs_len) # -> (batch, seq_lens)
+        mask[:, -1] = False # 最后一格无法预测
+        label = generator(data[:, target_idx, :], mask)
+    return mask, label
 
 def detect_adm_data(id:str, subjects:dict):
     '''直接打印某个id的输出'''
