@@ -1,10 +1,11 @@
 from tools import logger as logger
 import pickle
+import numpy as np
 import tools
 import os
 
 def generate_labels(dataset, data, target_idx, generator, out_dir):
-    '''生成标签'''
+    '''生成标签的通用代码'''
     dataset.mode('all')
     pkl_path = os.path.join(out_dir, 'dataset_derived.pkl')
     if os.path.exists(pkl_path):
@@ -25,6 +26,20 @@ def detect_adm_data(id:str, subjects:dict):
             logger.info(adm[id][:,0])
             input()
 
+def map_func(a:np.ndarray):
+    '''
+    将4分类的结果map到2分类的结果
+    默认是[0,1,2,3]对应[重度,中度,轻度,无]
+    映射是ARDS=[0,1,2], No ARDS=[3]
+    a: (..., n_cls) 可以是软标签
+    return (..., 2) 其中[...,0]代表无ARDS, [...,1]代表有ARDS, 可以是软标签
+    '''
+    a_shape = a.shape
+    a_shape[-1] = 2
+    result = np.zeros(a_shape)
+    result[..., 0] = a[..., 3]
+    result[..., 1] = a[..., 0] + a[..., 1] + a[..., 2]
+    return result
 
 def create_final_result(out_dir):
     '''收集各个文件夹里面的result.log, 合并为final result.log'''

@@ -1,14 +1,11 @@
-import torch
-import torchinfo
 import numpy as np
-from datasets.mimic_dataset import MIMICDataset, Subject, Admission, Config # 这个未使用的import是pickle的bug
 from sklearn.model_selection import KFold
 import tools
-import os, pickle
+import os
 from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
-from .utils import generate_labels
+from .utils import generate_labels, map_func
 
 
 class LSTM4ClsAnalyzer:
@@ -43,7 +40,7 @@ class LSTM4ClsAnalyzer:
         metric_2cls = tools.DichotomyMetric()
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
-        generator = mlib.ClsLabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        generator = mlib.Cls4LabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
@@ -105,7 +102,7 @@ class BaselineNearestClsAnalyzer:
         metric_2cls = tools.DichotomyMetric()
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
-        generator = mlib.ClsLabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        generator = mlib.Cls4LabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
         # step 4: train and predict
         for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
@@ -125,20 +122,6 @@ class BaselineNearestClsAnalyzer:
         print('Metric 2 classes:')
         print(metric_2cls.generate_info())
 
-def map_func(a:np.ndarray):
-    '''
-    将4分类的结果map到2分类的结果
-    默认是[0,1,2,3]对应[重度,中度,轻度,无]
-    映射是ARDS=[0,1,2], No ARDS=[3]
-    a: (..., n_cls) 可以是软标签
-    return (..., 2) 其中[...,0]代表无ARDS, [...,1]代表有ARDS, 可以是软标签
-    '''
-    a_shape = a.shape
-    a_shape[-1] = 2
-    result = np.zeros(a_shape)
-    result[..., 0] = a[..., 3]
-    result[..., 1] = a[..., 0] + a[..., 1] + a[..., 2]
-    return result
 
 
 def explore_result(ards_threshold, Y_pred, Y_gt, mask, out_dir, cmt):

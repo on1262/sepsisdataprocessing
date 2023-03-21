@@ -1,10 +1,8 @@
-import torch
-import torchinfo
 import numpy as np
-from datasets.mimic_dataset import MIMICDataset, Subject, Admission, Config # 这个未使用的import是pickle的bug
+# from datasets.mimic_dataset import MIMICDataset, Subject, Admission, Config # 这个未使用的import是pickle的bug
 from sklearn.model_selection import KFold
 import tools
-import os, pickle
+import os
 from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
@@ -43,7 +41,7 @@ class LSTM4RegAnalyzer:
         tools.reinit_dir(out_dir, build=True)
         metric = tools.RegressionMetric(target_name=self.container.target_name, out_dir=self.out_dir)
         # step 3: generate labels
-        generator = mlib.ClsLabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        generator = mlib.Cls4LabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
@@ -96,7 +94,7 @@ class BaselineNearestRegAnalyzer:
         tools.reinit_dir(out_dir, build=True)
         metric = tools.RegressionMetric(target_name=self.container.target_name, out_dir=self.out_dir)
         # step 3: generate labels
-        generator = mlib.ClsLabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        generator = mlib.Cls4LabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
         # step 4: train and predict
         for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 

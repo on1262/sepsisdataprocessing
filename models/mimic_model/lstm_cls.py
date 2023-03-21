@@ -56,7 +56,7 @@ class LSTMClsTrainer():
         self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
         self.dataset = dataset
         self.target_idx = dataset.target_idx
-        self.generator = ClsLabelGenerator(window=self.params['window']) # 生成标签
+        self.generator = Cls4LabelGenerator(window=self.params['window']) # 生成标签
         self.train_dataloader = DataLoader(dataset=self.dataset, batch_size=params['batch_size'], shuffle=True, collate_fn=Collect_Fn)
         self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=True, collate_fn=Collect_Fn)
         self.test_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
@@ -142,7 +142,7 @@ class LSTMClsTrainer():
         return pred
 
 
-class ClsLabelGenerator():
+class Cls4LabelGenerator():
     '''从data: (batch, seq_lens)生成每个时间点在预测窗口内的ARDS标签'''
     def __init__(self, window=16, centers=list(), smoothing_band=50) -> None:
         assert(len(centers) == 4)
