@@ -203,7 +203,7 @@ def plot_hotspot(data:np.ndarray, fea_names:list):
     plt.show()
     plt.close()
 
-def plot_confusion_matrix(cm:np.ndarray, labels:list, title='Confusion matrix', save_path='./out.png'):
+def plot_confusion_matrix(cm:np.ndarray, labels:list, title='Confusion matrix', comment='', save_path='./out.png'):
     '''
     生成混淆矩阵
     cm: 沿axis=0是predicted label轴, 沿axis=1是true label轴, cm[x][y]代表pred=x, gt=y
@@ -214,6 +214,8 @@ def plot_confusion_matrix(cm:np.ndarray, labels:list, title='Confusion matrix', 
     plt.figure(figsize=(10, 10))
     plt.gca().grid(False)
     plt.imshow(cm, interpolation='nearest', cmap=plt.cm.OrRd)
+    if comment != '':
+        title = title + f'[{comment}]'
     plt.title(title, size=18)
     plt.colorbar()
     tick_marks = np.arange(len(labels))

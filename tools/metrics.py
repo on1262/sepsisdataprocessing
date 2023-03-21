@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import os
+import os, sys
 from scipy.interpolate import interp1d
 from sklearn.metrics import auc as sk_auc
 from .colorful_logging import logger
@@ -336,16 +336,63 @@ class MultiClassMetric:
     多分类指标, 主要是输出混淆矩阵
     '''
     def __init__(self, class_names:list, out_dir:str) -> None:
-        pass
+        self.records = {'pred':[], 'gt':[]} # 记录格式: (sample, n_cls)
+        self.class_names = class_names
+        self.n_cls = len(class_names)
+        self.out_dir = out_dir
 
-    def add_prediction(self, prediction:np.ndarray, gt:np.ndarray, mask:np.ndarray):
-        assert(prediction.shape == gt.shape and gt.shape == mask.shape)
+        # calculate statistics
+        self.calculated = False# lazy update
+        self.cm = None
+    
+    def calculate_cm(self):
+        if self.calculated:
+            return
+        self.calculated = True
+        self.cm = np.zeros((self.n_cls, self.n_cls), dtype=np.int32)
+        pred = np.concatenate(self.records['pred'], axis=0)
+        gt = np.concatenate(self.records['gt'], axis=0)
+        gt_label = np.argmax(gt, axis=1)
+        pred_label = np.argmax(pred, axis=1)
+        for idx in range(pred.shape[0]):
+            self.cm[pred_label[idx]][gt_label[idx]] += 1
+            
+
+    def add_prediction(self, _prediction:np.ndarray, _gt:np.ndarray, _mask:np.ndarray):
+        '''
+        添加若干条记录, mask=True代表有效值
+        prediction: (..., n_cls)
+        gt: (..., n_cls) 可以是one-hot也可以是smooth label
+        mask: (...) 必须和前两者保持一致
+        '''
+        assert(len(prediction.shape) >= 2)
+        assert(prediction.shape == gt.shape and gt.shape[:-1] == mask.shape)
+        expand_len = np.sum(prediction.shape[:-1])
+        prediction = np.reshape(_prediction, (expand_len, self.n_cls))
+        gt = np.reshape(_gt, (expand_len, self.n_cls))
+        mask = np.reshape(_mask, (expand_len, ))
+        self.records['pred'].append(prediction[mask, :])
+        self.records['gt'].append(gt[mask, :])
+        self.calculated = False
 
     def confusion_matrix(self, comment:str=''):
-        '''输出混淆矩阵'''
-        pass
+        '''
+        输出混淆矩阵
+        cm[x][y] 代表pred=x, gt=y
+        '''
+        self.calculate_cm()
+        tools.plot_confusion_matrix(self.cm, labels=self.class_names, 
+            title='Confusion matrix', save_path=os.path.join(self.out_dir, 'confusion_matrix.png')):
 
-    def write_result(self):
+    def write_result(self, fp=sys.stdout):
         '''输出准确率等信息'''
-        pass
+        self.calculate_cm()
+        # 每个类的正确率
+        accs = [self.cm[idx, idx] / np.sum(self.cm[:, idx]) for idx in range(self.n_cls)]
+        # 平均正确率, 每个类的权重是相等的
+        mean_acc = np.mean(accs)
+        for idx, name in enumerate(self.class_names):
+            print(f'{name} accuracy={accs[idx]}', file=fp)
+        print('='*20, file=fp)
+        print(f'Mean accuracy={mean_acc}')
     
