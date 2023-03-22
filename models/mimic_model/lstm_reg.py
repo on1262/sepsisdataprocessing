@@ -55,8 +55,10 @@ class LSTMRegTrainer():
         self.device = torch.device(self.params['device'])
         self.cache_path = self.paths['lstm_reg_cache']
         tools.reinit_dir(self.cache_path, build=True)
-        self.model = LSTMRegModel(params['device'], params['in_channels'])
-        self.criterion = RegressionLoss(len(self.params['centers']))
+        self.model = LSTMRegModel(
+            params['device'], params['in_channels'], target_norm=dataset.norm_dict[dataset.target_name],
+            hidden_size=params['hidden_size'])
+        self.criterion = RegressionLoss()
         self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
         self.dataset = dataset
         self.target_idx = dataset.target_idx
@@ -81,7 +83,8 @@ class LSTMRegTrainer():
         seq_lens = data['length']
         mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
         mask[:, -1] = False
-        labels = torch.as_tensor(self.generator(np_data[:, self.target_idx, :], mask), device=self.device)
+        mask, labels = self.generator(np_data[:, self.target_idx, :], mask)
+        mask, labels = torch.as_tensor(mask, device=self.device), torch.as_tensor(labels, device=self.device)
         x = data['data'].to(self.device)
         pred = self.model(x)
         loss = self.criterion(pred, labels, torch.as_tensor(mask, device=self.device))
@@ -149,23 +152,24 @@ class LSTMRegTrainer():
 class RegLabelGenerator():
     '''从data: (batch, seq_lens)生成每个时间点在预测窗口内最小PF_ratio'''
     def __init__(self, window=16) -> None:
-        self.window = window # 向前预测多少个点内的ARDS
+        self.window = window # 预测窗口
     
     def __call__(self, data:np.ndarray, mask:np.ndarray) -> np.ndarray:
         '''
         data不能正则化
         mask, data: (batch, seq_lens)
-        return: (batch, seq_lens, n_cls)
+        return: (batch, seq_lens)
         '''
         assert(len(data.shape) == 2 and len(mask.shape) == 2)
-        result = np.zeros(data.shape + (len(self.centers),), dtype=np.float32)
+        result = np.zeros(data.shape, dtype=np.float32)
         data_max = data.max()
         for idx in range(data.shape[1]-1): # 最后一个格子预测一格
             stop = min(data.shape[1], idx+self.window)
-            mat = mask[:, idx+1:stop] * data[:, idx+1:stop] + (1-mask) * data_max # 对于有效的result, 至少有一个格子是有效的
+            mat = mask[:, idx+1:stop] * data[:, idx+1:stop] + np.logical_not(mask[:, idx+1:stop]) * (data_max+1)
             mat_min = np.min(mat, axis=1) # (batch,)
-            result[:, idx, :] = mat_min
-        return (result * mask[..., None]).astype(np.int32)
+            result[:, idx] = mat_min
+        mask[result > data_max+0.5] = False
+        return mask, (result * mask)
   
 
 class RegressionLoss(nn.Module):
@@ -185,5 +189,5 @@ class RegressionLoss(nn.Module):
         assert(pred.size() == labels.size() and labels.size() == mask.size())
         pred, labels = pred*mask, labels*mask
         # 创建标签矩阵
-        loss = torch.sum(self.criterion(pred, labels)) / torch.sum(mask)
+        loss = torch.sqrt(torch.sum(self.criterion(pred, labels)) / torch.sum(mask))
         return loss

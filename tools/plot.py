@@ -206,12 +206,12 @@ def plot_hotspot(data:np.ndarray, fea_names:list):
 def plot_confusion_matrix(cm:np.ndarray, labels:list, title='Confusion matrix', comment='', save_path='./out.png'):
     '''
     生成混淆矩阵
-    cm: 沿axis=0是predicted label轴, 沿axis=1是true label轴, cm[x][y]代表pred=x, gt=y
+    cm: cm[x][y]代表pred=x, gt=y
     labels: list(str) 各个class的名字
     save_path: 完整路径名
     '''
     sns.set_style("whitegrid")
-    plt.figure(figsize=(10, 10))
+    plt.figure(figsize=(12, 10))
     plt.gca().grid(False)
     plt.imshow(cm, interpolation='nearest', cmap=plt.cm.OrRd)
     if comment != '':
@@ -227,7 +227,7 @@ def plot_confusion_matrix(cm:np.ndarray, labels:list, title='Confusion matrix', 
     for x in range(width):
         for y in range(height):
             num_color = 'black' if cm[x][y] < 1.5*cm.mean() else 'white'
-            plt.annotate(str(cm[x][y]), xy=(y, x), fontsize=24, color=num_color,
+            plt.annotate(str(cm[y][x]), xy=(y, x), fontsize=24, color=num_color,
                         horizontalalignment='center',
                         verticalalignment='center')
     plt.savefig(save_path)

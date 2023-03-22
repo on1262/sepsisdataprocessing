@@ -16,7 +16,7 @@ def generate_labels(dataset, data, target_idx, generator, out_dir):
         logger.info('Generating label')
         mask = tools.make_mask((data.shape[0], data.shape[2]), dataset.seqs_len) # -> (batch, seq_lens)
         mask[:, -1] = False # 最后一格无法预测
-        label = generator(data[:, target_idx, :], mask)
+        mask, label = generator(data[:, target_idx, :], mask)
     return mask, label
 
 def detect_adm_data(id:str, subjects:dict):

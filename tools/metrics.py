@@ -208,19 +208,18 @@ class RegressionMetric:
         self.target_name = target_name
         self.records = {'pred':[], 'gt':[]}
         self.out_dir = out_dir
-        # TODO 增加quantile mode支持
-        self.quantile_flag = False
-        self.quantile_idx = None
-        self.quantile_list = None
-    
-    def set_quantile(self, q_list, q_idx):
-        '''开启quantile mode'''
-        self.quantile_flag = True
-        self.quantile_list = q_list
-        self.quantile_idx = q_idx
+        self.is_calculated = False
 
     def get_record(self) -> dict:
         return {key:val.copy() for key, val in self.records.items()}
+
+    def calculate(self):
+        if self.is_calculated:
+            return
+        else:
+            self.records['pred'] = np.concatenate(self.records['pred'], axis=0)
+            self.records['gt'] = np.concatenate(self.records['gt'], axis=0)
+            self.is_calculated = True
 
     def add_prediction(self, _pred:np.ndarray, _gt:np.ndarray, _mask:np.ndarray):
         '''
@@ -235,15 +234,12 @@ class RegressionMetric:
         self.records['gt'].append(gt)
 
 
-    def plot(self, method_name:str):
-        corr_dir = os.path.join(self.out_dir, remove_slash(method_name), 'correlation')
-        res_dir = os.path.join(self.out_dir, remove_slash(method_name), 'residual')
-        reinit_dir(write_dir_path=corr_dir)
-        reinit_dir(write_dir_path=res_dir)
-        self.plot_residual(res_dir=res_dir)
-        self.plot_corr(corr_dir=corr_dir)
+    def plot(self):
+        self.plot_residual(out_dir=self.out_dir)
+        self.plot_corr(out_dir=self.out_dir)
 
     def write_result(self, method_name:str, log_path:str):
+        self.calculate()
         pred = self.records['pred']
         gt = self.records['gt']
         rmse = np.sqrt(np.mean((pred-gt)**2))
@@ -257,17 +253,19 @@ class RegressionMetric:
 
     def plot_residual(self, out_dir):
         '''绘制残差分布'''
+        self.calculate()
         res = self.records['pred'] - self.records['gt']
         plot_single_dist(
             data=res, data_name='Residual (pred-gt)', save_path=os.path.join(out_dir, 'residual.png'), discrete=False, adapt=True)
 
-    def plot_corr(self, corr_dir:str, comment:str=''):
+    def plot_corr(self, out_dir:str, comment:str=''):
         '''绘制预测值和真实值的关联度'''
-        os.makedirs(corr_dir, exist_ok=True)
+        self.calculate()
+        os.makedirs(out_dir, exist_ok=True)
         x = np.reshape(self.records['gt'], (np.sum(self.records['gt'].shape), 1))
         plot_reg_correlation(
             X=x, fea_names=['ALL_gt'], Y=self.records['pred'], \
-            target_name='ALL_Prediction', adapt=True, write_dir_path=corr_dir, comment=comment)
+            target_name='ALL_Prediction', adapt=True, write_dir_path=out_dir, comment=comment)
 
 class MultiClassMetric:
     '''
@@ -294,6 +292,10 @@ class MultiClassMetric:
         pred_label = np.argmax(pred, axis=1)
         for idx in range(pred.shape[0]):
             self.cm[pred_label[idx]][gt_label[idx]] += 1
+        for x in range(self.n_cls):
+            for y in range(self.n_cls):
+                logger.debug(f'pred={x}, gt={y}: {self.cm[x][y]}')
+
             
 
     def add_prediction(self, _prediction:np.ndarray, _gt:np.ndarray, _mask:np.ndarray):
@@ -326,6 +328,7 @@ class MultiClassMetric:
 
     def write_result(self, fp=sys.stdout):
         '''输出准确率等信息'''
+        print('='*10 + 'Metric 4 classes:'+ '='*10)
         self.calculate_cm()
         # 每个类的正确率
         accs = [self.cm[idx, idx] / np.sum(self.cm[:, idx]) for idx in range(self.n_cls)]

@@ -78,7 +78,8 @@ class LSTMClsTrainer():
         seq_lens = data['length']
         mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
         mask[:, -1] = False
-        labels = torch.as_tensor(self.generator(np_data[:, self.target_idx, :], mask), device=self.device)
+        mask, labels = self.generator(np_data[:, self.target_idx, :], mask)
+        mask, labels = torch.as_tensor(mask, device=self.device), torch.as_tensor(labels, device=self.device)
         x = data['data'].to(self.device)
         pred = self.model(x)
         loss = self.criterion(pred, labels, torch.as_tensor(mask, device=self.device))
@@ -144,7 +145,7 @@ class LSTMClsTrainer():
 
 
 class Cls4LabelGenerator():
-    '''从data: (batch, seq_lens)生成每个时间点在预测窗口内的ARDS标签'''
+    '''从data: (batch, seq_lens)生成每个时间点在预测窗口内的ARDS标签, 软标签'''
     def __init__(self, window=16, centers=list(), smoothing_band=50) -> None:
         assert(len(centers) == 4)
         self.window = window # 向前预测多少个点内的ARDS
@@ -163,10 +164,11 @@ class Cls4LabelGenerator():
         data_max = data.max()
         for idx in range(data.shape[1]-1): # 最后一个格子预测一格
             stop = min(data.shape[1], idx+self.window)
-            mat = mask[:, idx+1:stop] * data[:, idx+1:stop] + (1-mask[:, idx+1:stop]) * data_max # 对于有效的result, 至少有一个格子是有效的
+            mat = mask[:, idx+1:stop] * data[:, idx+1:stop] + np.logical_not(mask[:, idx+1:stop]) * (data_max+1) # seq_len的最后一个格子是无效的
             mat_min = np.min(mat, axis=1) # (batch,)
+            mask[mat_min > data_max+0.5, idx] = False
             result[:, idx, :] = tools.label_smoothing(self.centers, mat_min, band=50)
-        return (result * mask[..., None]).astype(np.int32)
+        return mask, (result * mask[..., None])
   
 
 class ClassificationLoss(nn.Module):

@@ -59,9 +59,12 @@ class LSTMRegAnalyzer:
             Y_pred = np.asarray(Y_pred)
             metric.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
             self.dataset.mode('all') # 恢复原本状态
-        # step 5: result explore
-        self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
+        # step 5: explore result
+        self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM reg Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
+        metric.plot()
+        metric.write_result(self.model_name, os.path.join(out_dir, 'result.log'))
+        
 
 
 class BaselineNearestRegAnalyzer:
@@ -79,7 +82,7 @@ class BaselineNearestRegAnalyzer:
         output: (test_batch, seq_len)
         '''
         self.dataset.mode(mode)
-        pred = np.zeros((len(self.dataset), self.dataset.data.shape[1]))
+        pred = np.zeros((len(self.dataset), self.dataset.data.shape[-1]))
         for idx, data in tqdm(enumerate(self.dataset), desc='testing', total=len(self.dataset)):
             np_data = data['data']
             pred[idx, :] = np_data[self.target_idx, :]
@@ -109,4 +112,6 @@ class BaselineNearestRegAnalyzer:
             Y_pred = np.asarray(Y_pred)
             metric.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
             self.dataset.mode('all') # 恢复原本状态
-
+        # step 5: explore result
+        metric.plot()
+        metric.write_result(self.model_name, os.path.join(out_dir, 'result.log'))

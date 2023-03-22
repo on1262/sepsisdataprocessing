@@ -2,8 +2,8 @@ from analyzer import Analyzer
 from datasets import MIMICDataset
 
 analyzer_params = [
-    'nearest_4cls',
-    'LSTM_4cls',
+    #'nearest_4cls',
+    # 'LSTM_4cls',
     'nearest_reg',
     'LSTM_reg'
 ]
