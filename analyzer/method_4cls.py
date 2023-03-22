@@ -6,7 +6,7 @@ from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
 from .utils import generate_labels, map_func
-
+from .explore import plot_cover_rate
 
 class LSTM4ClsAnalyzer:
     '''动态模型, 四分类预测'''
@@ -24,8 +24,18 @@ class LSTM4ClsAnalyzer:
         self.out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(self.out_dir, build=True)
 
-    def label_explore(self, labels):
-        pass
+    def label_explore(self, label, mask):
+        logger.info('Label explore')
+        # 2 class
+        cls2_label = map_func(label)
+        cls2_out = os.path.join(self.out_dir, '2cls')
+        tools.reinit_dir(cls2_out, build=True)
+        plot_cover_rate(['No_ARDS', 'ARDS'], cls2_label, mask, cls2_out)
+        # 4 class
+        cls4_out = os.path.join(self.out_dir, '4cls')
+        tools.reinit_dir(cls4_out, build=True)
+        plot_cover_rate(['Severe','Moderate', 'Mild', 'No_ARDS'], label, mask, cls4_out)
+
 
     def run(self):
         '''预测窗口内是否发生ARDS的分类器'''
@@ -39,9 +49,10 @@ class LSTM4ClsAnalyzer:
         tools.reinit_dir(out_dir, build=True)
         metric_2cls = tools.DichotomyMetric()
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
-        # step 3: generate labels
+        # step 3: generate labels & label explore
         generator = mlib.Cls4LabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
+        self.label_explore(label, mask)
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)
@@ -125,20 +136,19 @@ class BaselineNearestClsAnalyzer:
         print(metric_2cls.generate_info())
 
 
-
 def explore_result(ards_threshold, Y_pred, Y_gt, mask, out_dir, cmt):
-        '''
-        输出二分类误差和flips的统计关系, 观察误差大的样本是否存在特殊的分布
-        Y_pred, Y_gt: (batch, seq_lens), 值域只能是[0,1]
-        '''
-        delta = np.abs(Y_pred - Y_gt)
-        cover = (Y_gt > 0) * (Y_gt < ards_threshold) * mask
-        diffs = np.diff(cover.astype(int), axis=1)
-        # count the number of flips
-        num_flips = np.count_nonzero(diffs, axis=1)
-        num_flips = np.repeat(num_flips[:, None], Y_pred.shape[1], axis=1)
-        mask = mask[:]
-        num_flips = num_flips[:][mask]
-        delta = delta[:][mask][:, None]
-        tools.plot_reg_correlation(
-            X=delta, fea_names=['Prediction Abs Error'], Y=num_flips, target_name='Num flips', adapt=True, write_dir_path=out_dir, plot_dash=False, comment=cmt)
+    '''
+    输出二分类误差和flips的统计关系, 观察误差大的样本是否存在特殊的分布
+    Y_pred, Y_gt: (batch, seq_lens), 值域只能是[0,1]
+    '''
+    delta = np.abs(Y_pred - Y_gt)
+    cover = (Y_gt > 0) * (Y_gt < ards_threshold) * mask
+    diffs = np.diff(cover.astype(int), axis=1)
+    # count the number of flips
+    num_flips = np.count_nonzero(diffs, axis=1)
+    num_flips = np.repeat(num_flips[:, None], Y_pred.shape[1], axis=1)
+    mask = mask[:]
+    num_flips = num_flips[:][mask]
+    delta = delta[:][mask][:, None]
+    tools.plot_reg_correlation(
+        X=delta, fea_names=['Prediction Abs Error'], Y=num_flips, target_name='Num flips', adapt=True, write_dir_path=out_dir, plot_dash=False, comment=cmt)

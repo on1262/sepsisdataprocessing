@@ -63,7 +63,6 @@ class CatboostClsTrainer():
             'valid': np.asarray(vaild_df[self.params['loss_function']])[:]
         }
         return data
-    
 
     def train(self):
         tools.reinit_dir(self.cache_path, build=True) # 这是catboost输出loss的文件夹
@@ -77,6 +76,7 @@ class CatboostClsTrainer():
         pool_test = Pool(data=self.data_dict[mode]['X'])
         return self.model.predict(pool_test, prediction_type='Probability')[:,1]
 
+
 class Cls2LabelGenerator():
     '''给出未来长期是否发生ARDS和静态模型可用的特征(t=0)'''
     def __init__(self, window=144, ards_threshold=300) -> None:
@@ -88,12 +88,12 @@ class Cls2LabelGenerator():
         data: (batch, n_fea, seq_lens)
         mask: (batch, seq_lens)
         return: (X, Y)
-            X: (batch, n_fea-1) without first PF_ratio
+            X: (batch, n_fea)
             Y: (batch,)
         '''
         seq_lens = mask.sum(axis=1)
-        Y = np.zeros((data.shape[0],))
+        Y_label = np.zeros((data.shape[0],))
         for idx in range(data.shape[0]):
-            Y[idx] = np.max(data[idx, -1, :min(seq_lens[idx], self.window)] < self.ards_threshold)
-        return mask, {'X': data[:, :-1, 0], 'Y': Y}
+            Y_label[idx] = np.max(data[idx, -1, :min(seq_lens[idx], self.window)] < self.ards_threshold)
+        return mask, {'X': data[:, :, 0], 'Y': Y_label}
   

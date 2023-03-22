@@ -166,7 +166,7 @@ def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
     plt.close()
 
 
-def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True, adapt=False):
+def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True, adapt=False, **kwargs):
     '''
     从源数据直接打印直方图
     data: shape任意, 每个元素代表一个样本
@@ -176,7 +176,7 @@ def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=Tr
     '''
     data = data[:]
     mu, sigma = scipy.stats.norm.fit(data)
-    ax = sns.histplot(data=data, stat='proportion', discrete=discrete)
+    ax = sns.histplot(data=data, stat='proportion', discrete=discrete, **kwargs)
     if adapt:
         ax.set_xlim(left=max(mu-3*sigma, np.min(data)), right=min(mu+3*sigma, np.max(data)))
 
@@ -213,7 +213,7 @@ def plot_confusion_matrix(cm:np.ndarray, labels:list, title='Confusion matrix', 
     sns.set_style("whitegrid")
     plt.figure(figsize=(12, 10))
     plt.gca().grid(False)
-    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.OrRd)
+    plt.imshow(cm.T, interpolation='nearest', cmap=plt.cm.OrRd)
     if comment != '':
         title = title + f'[{comment}]'
     plt.title(title, size=18)
@@ -224,10 +224,12 @@ def plot_confusion_matrix(cm:np.ndarray, labels:list, title='Confusion matrix', 
     plt.ylabel('True label', size=18)
     plt.xlabel('Predicted label', size=18)
     width, height = cm.shape
+    out_type = 'int' if np.max(cm) > 1+1e-3 else 'float'
     for x in range(width):
         for y in range(height):
             num_color = 'black' if cm[x][y] < 1.5*cm.mean() else 'white'
-            plt.annotate(str(cm[y][x]), xy=(y, x), fontsize=24, color=num_color,
+            cm_str = str(cm[y][x]) if out_type == 'int' else f'{cm[y][x]:.2f}'
+            plt.annotate(cm_str, xy=(y, x), fontsize=24, color=num_color,
                         horizontalalignment='center',
                         verticalalignment='center')
     plt.savefig(save_path)

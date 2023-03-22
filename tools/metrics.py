@@ -325,6 +325,9 @@ class MultiClassMetric:
         self.calculate_cm()
         plot_confusion_matrix(self.cm, labels=self.class_names, 
             title='Confusion matrix', save_path=os.path.join(self.out_dir, 'confusion_matrix.png'))
+        cm_norm = self.cm / np.sum(self.cm, axis=0)[None, ...]
+        plot_confusion_matrix(cm_norm, labels=self.class_names, 
+            title='Confusion matrix(norm)', save_path=os.path.join(self.out_dir, 'confusion_matrix(norm).png'))
 
     def write_result(self, fp=sys.stdout):
         '''输出准确率等信息'''

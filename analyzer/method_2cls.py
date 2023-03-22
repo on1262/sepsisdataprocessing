@@ -62,6 +62,3 @@ class Catboost2ClsAnalyzer:
         metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
         print('Metric 2 classes:')
         print(metric_2cls.generate_info())
-
-
-

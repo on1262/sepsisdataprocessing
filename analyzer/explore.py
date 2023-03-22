@@ -147,12 +147,28 @@ class FeatureExplorer:
             plt.close()
 
 
-def label_explore(labels, mask, out_dir):
-        '''
-        生成标签的统计信息
-        labels, mask: (sample, seq_lens)
-        out_dir: 输出文件夹
-        '''
-        cover_rate = np.sum(labels, axis=1) / np.sum(mask, axis=1)
-        tools.plot_single_dist(
-            data=cover_rate, data_name='ARDS cover rate (per sample)', save_path=os.path.join(out_dir, 'cover_rate.png'), discrete=False, adapt=True)
+def plot_cover_rate(class_names, labels, mask, out_dir):
+    '''
+    二分类/多分类问题的覆盖率探究
+    labels: (sample, seq_lens, n_cls)
+    mask: (sample, seq_lens)
+    out_dir: 输出文件夹
+    '''
+    assert(mask.shape == labels.shape[:-1])
+    assert(len(class_names) == labels.shape[-1])
+    mask_sum = np.sum(mask, axis=1)
+    valid = (mask_sum > 0) # 有效的行, 极少样本无效
+    logger.debug(f'sum valid: {valid.sum()}')
+    label_class = (np.argmax(labels, axis=-1) + 1) * mask # 被mask去掉的是0,第一个class从1开始
+    if len(class_names) == 2:
+        cover_rate = np.sum(label_class==2, axis=1)[valid] / mask_sum[valid] # ->(sample,)
+        tools.plot_single_dist(data=cover_rate, 
+            data_name=f'{class_names[1]} cover rate (per sample)', 
+            save_path=os.path.join(out_dir, 'cover_rate.png'), discrete=False, adapt=False,bins=10)
+    else:
+        for idx, name in enumerate(class_names):
+            cover_rate = np.sum(label_class==idx+1, axis=1)[valid] / mask_sum[valid] # ->(sample,)
+            tools.plot_single_dist(data=cover_rate, 
+                data_name=f'{name} cover rate (per sample)', 
+                save_path=os.path.join(out_dir, f'coverrate_{name}.png'), discrete=False, adapt=False, bins=10)
+
