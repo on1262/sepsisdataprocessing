@@ -51,15 +51,16 @@ def Collect_Fn(data_list:list):
 class LSTMRegTrainer():
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
+        self.paths = params['paths']
         self.device = torch.device(self.params['device'])
-        self.cache_path = params['cache_path']
+        self.cache_path = self.paths['lstm_reg_cache']
         tools.reinit_dir(self.cache_path, build=True)
         self.model = LSTMRegModel(params['device'], params['in_channels'])
         self.criterion = RegressionLoss(len(self.params['centers']))
         self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
         self.dataset = dataset
         self.target_idx = dataset.target_idx
-        self.generator = LabelGenerator(window=self.params['window']) # 生成标签
+        self.generator = RegLabelGenerator(window=self.params['window']) # 生成标签
         self.train_dataloader = DataLoader(dataset=self.dataset, batch_size=params['batch_size'], shuffle=True, collate_fn=Collect_Fn)
         self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=True, collate_fn=Collect_Fn)
         self.test_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
@@ -158,9 +159,10 @@ class RegLabelGenerator():
         '''
         assert(len(data.shape) == 2 and len(mask.shape) == 2)
         result = np.zeros(data.shape + (len(self.centers),), dtype=np.float32)
+        data_max = data.max()
         for idx in range(data.shape[1]-1): # 最后一个格子预测一格
             stop = min(data.shape[1], idx+self.window)
-            mat = mask[:, idx+1:stop] * data[:, idx+1:stop] + (1-mask) * np.inf # 对于有效的result, 至少有一个格子是有效的
+            mat = mask[:, idx+1:stop] * data[:, idx+1:stop] + (1-mask) * data_max # 对于有效的result, 至少有一个格子是有效的
             mat_min = np.min(mat, axis=1) # (batch,)
             result[:, idx, :] = mat_min
         return (result * mask[..., None]).astype(np.int32)

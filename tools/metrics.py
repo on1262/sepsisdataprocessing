@@ -303,9 +303,11 @@ class MultiClassMetric:
         gt: (..., n_cls) 可以是one-hot也可以是smooth label
         mask: (...) 必须和前两者保持一致
         '''
-        assert(len(prediction.shape) >= 2)
-        assert(prediction.shape == gt.shape and gt.shape[:-1] == mask.shape)
-        expand_len = np.sum(prediction.shape[:-1])
+        assert(len(_prediction.shape) >= 2)
+        assert(_prediction.shape == _gt.shape and _prediction.shape[:-1] == _mask.shape)
+        expand_len = 1
+        for x in (_prediction.shape[:-1]):
+            expand_len *= x
         prediction = np.reshape(_prediction, (expand_len, self.n_cls))
         gt = np.reshape(_gt, (expand_len, self.n_cls))
         mask = np.reshape(_mask, (expand_len, ))

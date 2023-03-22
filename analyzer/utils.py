@@ -34,9 +34,9 @@ def map_func(a:np.ndarray):
     a: (..., n_cls) 可以是软标签
     return (..., 2) 其中[...,0]代表无ARDS, [...,1]代表有ARDS, 可以是软标签
     '''
-    a_shape = a.shape
+    a_shape = list(a.shape)
     a_shape[-1] = 2
-    result = np.zeros(a_shape)
+    result = np.zeros(tuple(a_shape))
     result[..., 0] = a[..., 3]
     result[..., 1] = a[..., 0] + a[..., 1] + a[..., 2]
     return result

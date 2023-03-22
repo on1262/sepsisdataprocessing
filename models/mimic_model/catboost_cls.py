@@ -5,9 +5,6 @@ from tools import logger as logger
 import os
 from tqdm import tqdm
 
-from sklearn.model_selection import KFold
-from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsRegressor
 from catboost import CatBoostClassifier, Pool
 
 

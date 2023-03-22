@@ -9,8 +9,8 @@ from .container import DataContainer
 from .utils import generate_labels
 
 
-class LSTM4RegAnalyzer:
-    '''动态模型, 四分类预测'''
+class LSTMRegAnalyzer:
+    '''动态模型, 回归预测窗口内最小值'''
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
@@ -18,7 +18,7 @@ class LSTM4RegAnalyzer:
         self.model_name = 'LSTM_reg'
         self.loss_logger = tools.LossLogger()
         # copy attribute from container
-        self.target_idx = self.dataset.target_idx
+        self.target_idx = container.dataset.target_idx
         self.dataset = container.dataset
         self.data = self.dataset.data
         # initialize
@@ -41,7 +41,7 @@ class LSTM4RegAnalyzer:
         tools.reinit_dir(out_dir, build=True)
         metric = tools.RegressionMetric(target_name=self.container.target_name, out_dir=self.out_dir)
         # step 3: generate labels
-        generator = mlib.Cls4LabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        generator = mlib.RegLabelGenerator(window=self.params['window'])
         mask, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
@@ -65,9 +65,11 @@ class LSTM4RegAnalyzer:
 
 
 class BaselineNearestRegAnalyzer:
-    def __init__(self, params, dataset) -> None:
+    def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
-        self.dataset = dataset
+        self.paths = params['paths']
+        self.dataset = container.dataset
+        self.container= container
         self.target_idx = self.dataset.target_idx
         self.model_name = 'nearest_reg'
 
@@ -92,10 +94,10 @@ class BaselineNearestRegAnalyzer:
         kf = KFold(n_splits=self.container.n_fold, shuffle=True, random_state=self.container.seed)
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
-        metric = tools.RegressionMetric(target_name=self.container.target_name, out_dir=self.out_dir)
+        metric = tools.RegressionMetric(target_name=self.container.target_name, out_dir=out_dir)
         # step 3: generate labels
-        generator = mlib.Cls4LabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
-        mask, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
+        generator = mlib.RegLabelGenerator(window=self.params['window'])
+        mask, label = generate_labels(self.dataset, self.dataset.data, self.target_idx, generator, out_dir)
         # step 4: train and predict
         for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)

@@ -17,7 +17,7 @@ class LSTM4ClsAnalyzer:
         self.model_name = 'LSTM_4cls'
         self.loss_logger = tools.LossLogger()
         # copy attribute from container
-        self.target_idx = self.dataset.target_idx
+        self.target_idx = container.dataset.target_idx
         self.dataset = container.dataset
         self.data = self.dataset.data
         # initialize
@@ -40,7 +40,7 @@ class LSTM4ClsAnalyzer:
         metric_2cls = tools.DichotomyMetric()
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
-        generator = mlib.Cls4LabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        generator = mlib.Cls4LabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
@@ -70,9 +70,11 @@ class LSTM4ClsAnalyzer:
         print(metric_2cls.generate_info())
 
 class BaselineNearestClsAnalyzer:
-    def __init__(self, params, dataset) -> None:
+    def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
-        self.dataset = dataset
+        self.paths = params['paths']
+        self.dataset = container.dataset
+        self.container= container
         self.target_idx = self.dataset.target_idx
         self.model_name = 'nearest_4cls'
         # copy params
@@ -81,10 +83,10 @@ class BaselineNearestClsAnalyzer:
     def predict(self, mode:str):
         '''
         input: mode: ['test']
-        output: (test_batch, seq_len)
+        output: (test_batch, seq_len, n_cls)
         '''
         self.dataset.mode(mode)
-        pred = np.zeros((len(self.dataset), self.dataset.data.shape[1], len(self.centers)))
+        pred = np.zeros((len(self.dataset), self.dataset.data.shape[-1], len(self.centers)))
         for idx, data in tqdm(enumerate(self.dataset), desc='testing', total=len(self.dataset)):
             np_data = data['data']
             pred[idx, :, :] = tools.label_smoothing(self.centers, np_data[self.target_idx, :], band=50)
@@ -102,8 +104,8 @@ class BaselineNearestClsAnalyzer:
         metric_2cls = tools.DichotomyMetric()
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
-        generator = mlib.Cls4LabelGenerator(window=self.params['window'], threshold=self.params['centers'], smoothing_band=self.params['smoothing_band'])
-        mask, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
+        generator = mlib.Cls4LabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        mask, label = generate_labels(self.dataset, self.dataset.data, self.target_idx, generator, out_dir)
         # step 4: train and predict
         for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)

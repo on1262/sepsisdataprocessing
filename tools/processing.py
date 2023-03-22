@@ -2,7 +2,7 @@ import pandas as pd
 import json
 from .colorful_logging import logger
 from .generic import reinit_dir
-
+import os
 
 '''
 合并两个文件中cmp_cols都相同的样本, 同时列标签加上new和old

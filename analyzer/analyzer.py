@@ -10,24 +10,37 @@ from tools import logger as logger
 from .container import DataContainer
 from .explore import FeatureExplorer
 from .method_4cls import LSTM4ClsAnalyzer, BaselineNearestClsAnalyzer
-from .method_reg import LSTMRegAnalyzer, BaselineNearestClsAnalyzer
+from .method_reg import LSTMRegAnalyzer, BaselineNearestRegAnalyzer
 from datasets import AbstractDataset
 
 
 class Analyzer:
-    def __init__(self, dataset:AbstractDataset) -> None:
+    def __init__(self, params:list, dataset:AbstractDataset) -> None:
+        '''
+        params: 启动脚本, 否则需要手动run_sub_analyzer, 可以是None
+        dataset: 数据集
+        '''
         self.container = DataContainer(dataset)
         self.explorer = FeatureExplorer(self.container)
-        self.analyzer_dict= {
-            'lstm_4cls':LSTM4ClsAnalyzer,
+        self.analyzer_dict = {
+            'LSTM_4cls':LSTM4ClsAnalyzer,
             'nearest_4cls': BaselineNearestClsAnalyzer,
-            'lstm_reg': LSTMRegAnalyzer,
-            'nearest_reg': BaselineNearestClsAnalyzer
+            'LSTM_reg': LSTMRegAnalyzer,
+            'nearest_reg': BaselineNearestRegAnalyzer
         }
+        if params is not None:
+            for key in params:
+                if key in self.analyzer_dict:
+                    self.run_sub_analyzer(key)
+                elif key == 'feature_explore':
+                    self.feature_explore
+
+
         
     def run_sub_analyzer(self, analyzer_name):
+        logger.info(f'Run Analyzer: {analyzer_name}')
         params = self.container.get_model_params(analyzer_name)
-        sub_analyzer = self.analyzer_dict[analyzer_name](params, self.container.dataset)
+        sub_analyzer = self.analyzer_dict[analyzer_name](params, self.container)
         sub_analyzer.run()
         # utils.create_final_result()
 

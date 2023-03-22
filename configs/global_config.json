@@ -3,12 +3,12 @@
     "dataset":{
         "mimic-iv":{
             "paths": {
-                "mimic_dir":"mimic-iv",
-                "cache_dir": "mimic-iv/cache",
-                "conf_cache_path": "mimic-iv/configs/config_cache.json",
-                "conf_manual_path": "mimic-iv/configs/config_manual.json",
-                "sepsis_patient_path": "mimic-iv/sepsis_result/sepsis3.csv",
-                "out_dir":"mimic_out"
+                "mimic_dir":"data/mimic-iv",
+                "cache_dir": "data/mimic-iv/cache",
+                "conf_cache_path": "configs/mimic-iv/config_cache.json",
+                "conf_manual_path": "configs/mimic-iv/config_manual.json",
+                "sepsis_patient_path": "data/mimic-iv/sepsis_result/sepsis3.csv",
+                "out_dir":"outputs/mimic-iv"
             }
         },
         "NanjingA": {
@@ -41,8 +41,8 @@
                 "lstm_cls_cache": "outputs/mimic-iv/cache/lstm_cls",
                 "lstm_reg_cache": "outputs/mimic-iv/cache/lstm_reg",
                 "catboost_static_cache":"outputs/mimic-iv/cache/catboost_static",
-                "conf_cache_path": "mimic-iv/configs/config_cache.json",
-                "conf_manual_path": "mimic-iv/configs/config_manual.json"
+                "conf_cache_path": "configs/mimic-iv/config_cache.json",
+                "conf_manual_path": "configs/mimic-iv/config_manual.json"
             }
         },
         "NanjingA": {

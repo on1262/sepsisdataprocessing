@@ -28,6 +28,6 @@ class ConfigLoader():
     
 
 
-GLOBAL_CONF_LOADER = ConfigLoader('global_config.json')
+GLOBAL_CONF_LOADER = ConfigLoader('./configs/global_config.json')
         
         

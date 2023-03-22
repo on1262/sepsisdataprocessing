@@ -2,12 +2,9 @@
 
 import os
 import pickle
-import json
 import tools
 import numpy as np
 import pandas as pd
-import torch
-from torch.utils.data import Dataset
 from tools import GLOBAL_CONF_LOADER
 from tools import logger
 from tqdm import tqdm
@@ -126,30 +123,31 @@ class MIMICIV:
     这一步的数据是不对齐的, 仅考虑抽取和类型转化问题
     '''
     def __init__(self):
-        self.gbl_conf = GLOBAL_CONF_LOADER['mimic-iv']
+        self.gbl_conf = GLOBAL_CONF_LOADER['dataset']['mimic-iv']
         # paths
         self.mimic_dir = self.gbl_conf['paths']['mimic_dir']
         # configs
-        self.loc_conf = Config(cache_path=self.gbl_conf['paths']['conf_cache_path'], manual_path=self.gbl_conf['paths']['conf_manual_path'])
+        self.loc_conf = tools.Config(cache_path=self.gbl_conf['paths']['conf_cache_path'], manual_path=self.gbl_conf['paths']['conf_manual_path'])
         self.procedure_flag = 'init' # 控制标志, 进行不同阶段的cache和dump
         self.converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
-        self.target_icu_ids = self.loc_conf['extract']['target_icu_id']
+        self.target_icu_ids = self.loc_conf['dataset']['target_icu_id']
         # variable for phase 1
         self.sepsis_result = None
         self.hosp_item = None
         self.icu_item = None
         # variable for phase 2
         self.subjects = {} # subject_id:Subject
-
+        # hit table
+        self.__hit_table = None
         self.preprocess()
         # post process
-        self.remove_invalid_data(rules=self.loc_conf['extract']['remove_rule'])
+        self.remove_invalid_data(rules=self.loc_conf['dataset']['remove_rule'])
         logger.info('MIMICIV inited')
 
-    def preprocess(self, from_pkl=True, split_csv=False):
+    def preprocess(self, from_pkl=True):
         self.preprocess_phase1(from_pkl)
         self.preprocess_phase2(from_pkl)
-        self.preprocess_phase3(split_csv, from_pkl)
+        self.preprocess_phase3(from_pkl)
  
     def preprocess_phase1(self, from_pkl=True):
         pkl_path = os.path.join(self.gbl_conf['paths']['cache_dir'], '1_phase1.pkl')
@@ -163,17 +161,9 @@ class MIMICIV:
             self.procedure_flag = 'phase1'
             return
         logger.info(f'MIMIC-IV: processing dim file, flag={self.procedure_flag}')
-        # 抽取icd名称中含有sepsis的icd编号
-        d_diagnoses = pd.read_csv(os.path.join(self.mimic_dir, 'hosp', 'd_icd_diagnoses.csv'), encoding='utf-8')
-        sepsis_icds = set()
-        for _,row in tqdm(d_diagnoses.iterrows(), desc='sepsis icds'):
-            if str(row['long_title']).lower().find('sepsis') != -1:
-                sepsis_icds.add(row['icd_code'])
-        logger.info('Sepsis icd code: ')
-        logger.info(sepsis_icds)
         # 抽取符合条件的患者id
         sepsis_result = load_sepsis_patients(self.gbl_conf['paths']['sepsis_patient_path'])
-        logger.info(f'Extracted {len(self.sepsis_result)} sepsis subjects')
+        logger.info(f'Extracted {len(sepsis_result.keys())} sepsis subjects')
         # 建立hospital lab_item编号映射
         d_hosp_item = pd.read_csv(os.path.join(self.mimic_dir, 'hosp', 'd_labitems.csv'), encoding='utf-8')
         hosp_item = {}
@@ -244,7 +234,7 @@ class MIMICIV:
         self.procedure_flag = 'phase2'
 
 
-    def preprocess_phase3(self, split_csv=False, from_pkl=True):
+    def preprocess_phase3(self, from_pkl=True):
         pkl_path = os.path.join(self.gbl_conf['paths']['cache_dir'], '3_subjects.pkl')
         if from_pkl and os.path.exists(pkl_path):
             with open(pkl_path, 'rb') as fp:
@@ -263,7 +253,7 @@ class MIMICIV:
                 enabled_item_id.add(id)
         # 采集icu内的动态数据
         out_cache_dir = os.path.join(self.gbl_conf['paths']['cache_dir'], 'icu_events')
-        if split_csv:
+        if not os.path.exists(out_cache_dir):
             tools.split_csv(os.path.join(self.mimic_dir, 'icu', 'chartevents.csv'), out_folder=out_cache_dir)
         icu_events = None
         logger.info('Loading icu events')
@@ -358,6 +348,23 @@ class MIMICIV:
                             if id in sids:
                                 tp.write(sentence)
 
+    def hit_table(self):
+        '''
+        生成特征在subject粒度的覆盖率
+        return: dict(key=feature_id, val=cover_rate)
+        '''
+        if self.__hit_table is None:
+            hit_table = {}
+            adm_count = np.sum([len(s.admissions) for s in self.subjects.values()])
+            for sub in self.subjects.values():
+                for adm in sub.admissions:
+                    for id in adm.keys():
+                        if hit_table.get(id) is None:
+                            hit_table[id] = 1
+                        else:
+                            hit_table[id] += 1
+            self.__hit_table = {key:val / adm_count for key,val in hit_table.items()}
+        return self.__hit_table.copy()
 
         
     def make_report(self):
@@ -422,20 +429,12 @@ class MIMICIV:
                 data=arr_max_interval, data_name=f'Max interval of {fea_name}', 
                 save_path=os.path.join(dist_dir, 'maxinterv_' + str(id) + '.png'), discrete=False, adapt=True)
         # itemid hit rate
-        hit_table = {}
-        adm_count = np.sum([len(s.admissions) for s in self.subjects.values()])
-        for sub in self.subjects.values():
-            for adm in sub.admissions:
-                for id in adm.keys():
-                    if hit_table.get(id) is None:
-                        hit_table[id] = 1
-                    else:
-                        hit_table[id] += 1
+        hit_table = self.hit_table()
         key_list = sorted(hit_table.keys(), key= lambda key:hit_table[key], reverse=True)
         write_lines.append('='*10 + 'Feature hit table(>0.5)' + '='*10)
         for key in key_list:
             fea_name = self.icu_item[key][0]
-            value = hit_table[key] / adm_count
+            value = hit_table[key]
             if value < 0.5:
                 continue
             write_lines.append(f"{value:.2f}\t({key}){fea_name} ")
@@ -460,8 +459,10 @@ class MIMICDataset(AbstractDataset):
         super().__init__()
         self.mimiciv = MIMICIV()
         self.subjects = self.mimiciv.subjects
-        self.g_conf = self.mimiciv.gbl_conf
-        self.configs = self.mimiciv.loc_conf
+        self.gbl_conf = self.mimiciv.gbl_conf
+        self.loc_conf = self.mimiciv.loc_conf
+        self.target_name = self.loc_conf['dataset']['target_label']
+        self._additional_feas = self.loc_conf['dataset']['additional_features']
         # preload data
         self.data = None # ndarray(samples, n_fea, ticks)
         self.norm_dict = None # key=str(name/id) value={'mean':mean, 'std':std}
@@ -472,11 +473,8 @@ class MIMICDataset(AbstractDataset):
         self.preprocess()
         
         logger.info(f'Dataset length={self.data.shape[0]} admissions')
-        self.target_name = self.configs['process']['target_label']
-        self._additional_feas = self.configs['process']['additional_features']
         self.target_idx = self.data.shape[1] - 1
-        # idx_dict: fea_name->idx
-        self.idx_dict = dict(
+        self.idx_dict = dict( # idx_dict: fea_name->idx
             {str(key):val for val, key in enumerate(self.static_keys)}, \
                 **{str(key):val+len(self.static_keys) for val, key in enumerate(self.dynamic_keys)})
         
@@ -536,7 +534,6 @@ class MIMICDataset(AbstractDataset):
         缩放到正常范围
         mask: 只变换mask=True的部分
         '''
-        # TODO 这个地方有bug, -1和norm后的值域重合了
         if isinstance(name_or_idx, int):
             name_or_idx = self.total_keys[name_or_idx]
         norm = self.norm_dict[name_or_idx]
@@ -546,13 +543,27 @@ class MIMICDataset(AbstractDataset):
             assert(mask.shape == data.shape)
             return (data * norm['std'] + norm['mean']) * (mask > 0) + data * (mask <= 0)
 
+    def _available_dyn_id(self, min_cover_rate=0.5) -> list:
+        '''
+        根据hit table生成符合最小覆盖率的动态特征id
+        return: list(id)
+        '''
+        hit_table = self.mimiciv.hit_table()
+        result = []
+        for key in hit_table.keys():
+            if hit_table[key] > min_cover_rate:
+                result.append(key)
+        return result
+
+
     def preprocess(self, from_pkl=True):
-        p_numeric_subject = os.path.join(self.g_conf['paths']['cache_dir'], 'numeric_subject.pkl')
-        p_norm_dict = os.path.join(self.g_conf['paths']['cache_dir'], 'norm_dict.pkl')
+        p_numeric_subject = os.path.join(self.gbl_conf['paths']['cache_dir'], '4_numeric_subject.pkl')
+        p_norm_dict = os.path.join(self.gbl_conf['paths']['cache_dir'], '5_norm_dict.pkl')
         # preprocessing
         self.static_feas = set()
-        self.target_label = self.configs['process']['target_label']
-        self.dyamic_ids = self.configs['process']['dynamic_id']
+        self.target_label = self.loc_conf['dataset']['target_label']
+        self.dyamic_ids = self._available_dyn_id()
+        logger.info(f'Detected {len(self.dyamic_ids)} available dynamic features')
 
         if from_pkl and os.path.exists(p_numeric_subject):
             with open(p_numeric_subject, 'rb') as fp:
@@ -604,7 +615,7 @@ class MIMICDataset(AbstractDataset):
                     s.static_data.pop(key)
                     s.static_data['systolic pressure'] = np.asarray(s.static_data['systolic pressure'])
                     s.static_data['diastolic pressure'] = np.asarray(s.static_data['diastolic pressure'])
-                elif key != 'age':
+                elif isinstance(s.static_data[key], list):
                     valid_idx = []
                     for idx in range(len(s.static_data[key])):
                         v,t = s.static_data[key][idx]
@@ -660,9 +671,9 @@ class MIMICDataset(AbstractDataset):
 
     def preprocess_table(self, from_pkl=True, t_step=0.5):
         '''对每个subject生成时间轴对齐的表, tick(hour)是生成的表的间隔'''
-        p_origin_table = os.path.join(self.g_conf['paths']['cache_dir'], 'table_origin.pkl')
-        p_final_table = os.path.join(self.g_conf['paths']['cache_dir'], 'table_norm.pkl')
-        p_length = os.path.join(self.g_conf['paths']['cache_dir'], 'table_length.pkl')
+        p_origin_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '6_table_origin.pkl')
+        p_normed_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '7_table_norm.pkl')
+        p_final_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '8_table_final.pkl')
         # step1: 插值并生成表格
         if from_pkl and os.path.exists(p_origin_table):
             with open(p_origin_table, 'rb') as fp:
@@ -670,7 +681,7 @@ class MIMICDataset(AbstractDataset):
             logger.info(f'load original aligned table from {p_origin_table}')
         else:
             data = []
-            align_id = self.configs['process']['align_target_id'] # 用来确认对齐的基准时间
+            align_id = self.loc_conf['dataset']['align_target_id'] # 用来确认对齐的基准时间
             static_keys = list(self.static_feas)
             dynamic_keys = self.dyamic_ids + self._additional_feas
             # 基准id和对应的index
@@ -727,10 +738,10 @@ class MIMICDataset(AbstractDataset):
             logger.info(f'data table dumped at {p_origin_table}')
             
         # step2: 补充缺失值
-        if from_pkl and os.path.exists(p_final_table):
-            with open(p_final_table, 'rb') as fp:
+        if from_pkl and os.path.exists(p_normed_table):
+            with open(p_normed_table, 'rb') as fp:
                 self.data = pickle.load(fp)
-            logger.info(f'load normalized aligned table from {p_final_table}')
+            logger.info(f'load normalized aligned table from {p_normed_table}')
         else:
             # 缺失值采用均值填充
             for s_id in tqdm(range(len(self.data)), desc='normalize'):
@@ -743,15 +754,15 @@ class MIMICDataset(AbstractDataset):
                     if np.abs(self.data[s_id][arr_idx, 0] + 1) < 1e-4:
                         self.data[s_id][arr_idx, :] = self.norm_dict[str(key)]['mean']
                 
-            with open(p_final_table, 'wb') as fp:
+            with open(p_normed_table, 'wb') as fp:
                 pickle.dump(self.data, fp)
-            logger.info(f'data table dumped at {p_final_table}')
+            logger.info(f'data table dumped at {p_normed_table}')
         # step3: 时间轴长度对齐, 生成seqs_len, 进行某些特征的最后处理
-        if from_pkl and os.path.exists(p_length):
-            with open(p_length, 'rb') as fp:
+        if from_pkl and os.path.exists(p_final_table):
+            with open(p_final_table, 'rb') as fp:
                 seqs_len, self.static_keys, self.data = pickle.load(fp)
                 self.seqs_len = seqs_len
-            logger.info(f'load length aligned table from {p_length}')
+            logger.info(f'load length aligned table from {p_final_table}')
         else:
             seqs_len = [d.shape[1] for d in self.data]
             self.seqs_len = seqs_len
@@ -775,9 +786,9 @@ class MIMICDataset(AbstractDataset):
                 self.static_keys.pop(idx)
                 rest_feas.pop(idx)
             self.data = self.data[:,  rest_feas, :]
-            with open(p_length, 'wb') as fp:
+            with open(p_final_table, 'wb') as fp:
                 pickle.dump((seqs_len, self.static_keys, self.data), fp)
-            logger.info(f'length aligned table dumped at {p_length}')
+            logger.info(f'length aligned table dumped at {p_final_table}')
 
     def _feature_engineering(self, table:np.ndarray, index_dict:dict, addi_feas:list):
         '''
@@ -819,10 +830,10 @@ class MIMICDataset(AbstractDataset):
         else:
             return len(self.index)
 
-def generate_subset():
-    p_origin = os.path.join(dataset.mimiciv.mimic_dir, 'icu', 'outputevents.csv')
-    p_save = os.path.join(GLOBAL_CONF_LOADER['mimic_analyzer']['paths']['out_dir'], 'subset_output.csv')
-    dataset.mimiciv.generate_subdataset(p_origin=p_origin, p_save=p_save, sids={10161042, 10014610, 10122371})
+# TODO 改为和dataset无关的方法
+# def generate_subset(p_save):
+#     p_origin = os.path.join(dataset.mimiciv.mimic_dir, 'icu', 'outputevents.csv')
+#     dataset.mimiciv.generate_subdataset(p_origin=p_origin, p_save=p_save, sids={10161042, 10014610, 10122371})
 
 def reduce_peak(x: np.ndarray):
     '''
@@ -841,7 +852,7 @@ def reduce_peak(x: np.ndarray):
             x[i] = avg_value
     return x
 
-def load_sepsis_patients(csv_path:str):
+def load_sepsis_patients(csv_path:str) -> dict:
     '''
     从csv中读取按照mimic-iv pipeline生成的sepsis3.0表格
     sepsis_dict: dict(int(subject_id):list)
@@ -850,7 +861,7 @@ def load_sepsis_patients(csv_path:str):
     converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
     sepsis_dict = {}
     def extract_time(row): # 提取sepsis发生时间, 返回float
-        return min(converter(row['antibiotic_time'], converter(row['culture_time'])))
+        return min(converter(row['antibiotic_time']), converter(row['culture_time']))
     def build_dict(row): # 提取sepsis dict
         id = row['subject_id']
         sepsis_time = row['sepsis_time']
@@ -862,12 +873,12 @@ def load_sepsis_patients(csv_path:str):
     df = pd.read_csv(csv_path, encoding='utf-8')
     df['sepsis_time'] = df.apply(extract_time, axis=1)
     df.apply(build_dict, axis=1)
-    logger.info(f'Load {len(sepsis_dict)} sepsis patients based on sepsis3.csv')
+    logger.info(f'Load {len(sepsis_dict.keys())} sepsis patients based on sepsis3.csv')
     return sepsis_dict
 
 
 
 if __name__ == '__main__':
     dataset = MIMICDataset()
-    dataset.mimiciv.make_report()
+    # dataset.mimiciv.make_report()
     

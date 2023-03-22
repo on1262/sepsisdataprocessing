@@ -13,36 +13,12 @@
             "justMyCode": true
         },
         {
-            "name": "StaticAnalyzer",
+            "name": "Main",
             "type": "python",
             "request": "launch",
-            "program": "${cwd}/static_analyzer.py",
+            "program": "${cwd}/main.py",
             "console": "integratedTerminal",
             "justMyCode": true
         },
-        {
-            "name": "DynamicAnalyzer",
-            "type": "python",
-            "request": "launch",
-            "program": "${cwd}/dynamic_analyzer.py",
-            "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
-            "name": "MIMICAnalyzer",
-            "type": "python",
-            "request": "launch",
-            "program": "${cwd}/mimic_analyzer.py",
-            "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
-            "name": "Scripts",
-            "type": "python",
-            "request": "launch",
-            "program": "${cwd}\\run_scripts.py",
-            "console": "integratedTerminal",
-            "justMyCode": true
-        }
     ]
 }

@@ -1,13 +1,13 @@
+from analyzer import Analyzer
+from datasets import MIMICDataset
 
-
+analyzer_params = [
+    'nearest_4cls',
+    'LSTM_4cls',
+    'nearest_reg',
+    'LSTM_reg'
+]
 
 if __name__ == '__main__':
     dataset = MIMICDataset()
-    analyzer = Analyzer(dataset)
-    # analyzer._detect_adm_data("220224")
-    # analyzer.feature_explore()
-    analyzer.nearest_cls()
-    # analyzer.lstm_cls()
-    
-    # analyzer.lstm_model()
-    # analyzer.nearest_method()
+    analyzer = Analyzer(analyzer_params, dataset)
