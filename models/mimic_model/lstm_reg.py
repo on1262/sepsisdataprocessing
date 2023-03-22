@@ -83,7 +83,7 @@ class LSTMRegTrainer():
         seq_lens = data['length']
         mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
         mask[:, -1] = False
-        mask, labels = self.generator(np_data[:, self.target_idx, :], mask)
+        mask, labels = self.generator(np_data, mask)
         mask, labels = torch.as_tensor(mask, device=self.device), torch.as_tensor(labels, device=self.device)
         x = data['data'].to(self.device)
         pred = self.model(x)
@@ -154,12 +154,13 @@ class RegLabelGenerator():
     def __init__(self, window=16) -> None:
         self.window = window # 预测窗口
     
-    def __call__(self, data:np.ndarray, mask:np.ndarray) -> np.ndarray:
+    def __call__(self, _data:np.ndarray, mask:np.ndarray) -> np.ndarray:
         '''
-        data不能正则化
+        data: (batch, n_fea, seq_lens)
         mask, data: (batch, seq_lens)
         return: (batch, seq_lens)
         '''
+        data = _data[:, -1, :]
         assert(len(data.shape) == 2 and len(mask.shape) == 2)
         result = np.zeros(data.shape, dtype=np.float32)
         data_max = data.max()

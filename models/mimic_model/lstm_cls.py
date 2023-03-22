@@ -78,7 +78,7 @@ class LSTMClsTrainer():
         seq_lens = data['length']
         mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
         mask[:, -1] = False
-        mask, labels = self.generator(np_data[:, self.target_idx, :], mask)
+        mask, labels = self.generator(np_data, mask)
         mask, labels = torch.as_tensor(mask, device=self.device), torch.as_tensor(labels, device=self.device)
         x = data['data'].to(self.device)
         pred = self.model(x)
@@ -153,12 +153,13 @@ class Cls4LabelGenerator():
         self.band = smoothing_band # 平滑程度, 不能超过两个center之间的距离
 
     
-    def __call__(self, data:np.ndarray, mask:np.ndarray) -> np.ndarray:
+    def __call__(self, _data:np.ndarray, mask:np.ndarray) -> np.ndarray:
         '''
-        data不能正则化
-        mask, data: (batch, seq_lens)
+        data: (batch, n_fea, seq_lens)
+        mask: (batch, seq_lens)
         return: (batch, seq_lens, n_cls)
         '''
+        data = _data[:, -1, :]
         assert(len(data.shape) == 2 and len(mask.shape) == 2)
         result = np.zeros(data.shape + (len(self.centers),), dtype=np.float32)
         data_max = data.max()

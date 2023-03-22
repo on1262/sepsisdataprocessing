@@ -10,3 +10,4 @@ outputs/
 *.pt
 *.log
 *.csv
+catboost_info/
