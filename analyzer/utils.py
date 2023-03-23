@@ -4,7 +4,7 @@ import numpy as np
 import tools
 import os
 
-def generate_labels(dataset, data, target_idx, generator, out_dir):
+def generate_labels(dataset, data, generator, out_dir):
     '''生成标签的通用代码'''
     dataset.mode('all')
     pkl_path = os.path.join(out_dir, 'dataset_derived.pkl')
@@ -15,8 +15,8 @@ def generate_labels(dataset, data, target_idx, generator, out_dir):
     else:
         logger.info('Generating label')
         mask = tools.make_mask((data.shape[0], data.shape[2]), dataset.seqs_len) # -> (batch, seq_lens)
-        mask[:, -1] = False # 最后一格无法预测
         mask, label = generator(data, mask)
+        # TODO 加入存储cache
     return mask, label
 
 def detect_adm_data(id:str, subjects:dict):

@@ -42,7 +42,7 @@ class LSTMRegAnalyzer:
         metric = tools.RegressionMetric(target_name=self.container.target_name, out_dir=self.out_dir)
         # step 3: generate labels
         generator = mlib.RegLabelGenerator(window=self.params['window'])
-        mask, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
+        mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)
@@ -100,7 +100,7 @@ class BaselineNearestRegAnalyzer:
         metric = tools.RegressionMetric(target_name=self.container.target_name, out_dir=out_dir)
         # step 3: generate labels
         generator = mlib.RegLabelGenerator(window=self.params['window'])
-        mask, label = generate_labels(self.dataset, self.dataset.data, self.target_idx, generator, out_dir)
+        mask, label = generate_labels(self.dataset, self.dataset.data, generator, out_dir)
         # step 4: train and predict
         for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)

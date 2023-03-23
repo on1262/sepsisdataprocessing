@@ -38,8 +38,12 @@ class Catboost2ClsAnalyzer:
         tools.reinit_dir(out_dir, build=True)
         metric_2cls = tools.DichotomyMetric()
         # step 3: generate labels
-        generator = mlib.Cls2LabelGenerator(window=self.params['window'], ards_threshold=self.params['ards_threshold'])
-        _, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
+        forbidden_idx = {self.dataset.idx_dict[name] for name in self.params['forbidden_feas']}
+        generator = mlib.Cls2LabelGenerator(
+            window=self.params['window'], ards_threshold=self.params['ards_threshold'],
+            target_idx=self.target_idx,  sepsis_time_idx=self.dataset.idx_dict['sepsis_time'],
+            post_sepsis_time=self.params['max_post_sepsis_hour'], forbidden_idx=forbidden_idx)
+        mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)
@@ -48,7 +52,7 @@ class Catboost2ClsAnalyzer:
             trainer = mlib.CatboostClsTrainer(self.params, self.dataset)
             trainer.train()
             self.loss_logger.add_loss(trainer.get_loss())
-            Y_gt = label['Y'][test_index, ...]
+            Y_gt = label['Y'][test_index][label['mask'][test_index]]
             Y_pred = trainer.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
             metric_2cls.add_prediction(Y_pred, Y_gt)

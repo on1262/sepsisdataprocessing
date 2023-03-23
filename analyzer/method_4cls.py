@@ -51,7 +51,7 @@ class LSTM4ClsAnalyzer:
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels & label explore
         generator = mlib.Cls4LabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
-        mask, label = generate_labels(self.dataset, self.data, self.target_idx, generator, self.out_dir)
+        mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
         self.label_explore(label, mask)
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
@@ -116,7 +116,7 @@ class BaselineNearestClsAnalyzer:
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
         generator = mlib.Cls4LabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
-        mask, label = generate_labels(self.dataset, self.dataset.data, self.target_idx, generator, out_dir)
+        mask, label = generate_labels(self.dataset, self.dataset.data, generator, out_dir)
         # step 4: train and predict
         for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)

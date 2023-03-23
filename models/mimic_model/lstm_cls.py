@@ -44,7 +44,6 @@ def Collect_Fn(data_list:list):
     result['length'] = np.asarray([d['length'] for d in data_list], dtype=np.int32)
     return result
 
-
 class LSTMClsTrainer():
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
@@ -170,7 +169,7 @@ class Cls4LabelGenerator():
             mask[mat_min > data_max+0.5, idx] = False
             result[:, idx, :] = tools.label_smoothing(self.centers, mat_min, band=50)
         return mask, (result * mask[..., None])
-  
+
 
 class ClassificationLoss(nn.Module):
     def __init__(self, n_cls:int) -> None:

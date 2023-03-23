@@ -1,15 +1,13 @@
-"""mimic数据集抽象"""
-
-import os
-import pickle
+import os, sys
+sys.path.insert(0, os.getcwd())
 import tools
+import pickle
 import numpy as np
 import pandas as pd
 from tools import GLOBAL_CONF_LOADER
 from tools import logger
 from tqdm import tqdm
-from .abstract_dataset import AbstractDataset
-# import multiprocessing as mp
+from datasets.abstract_dataset import AbstractDataset
 
 
 class Admission:
@@ -131,6 +129,7 @@ class MIMICIV:
         self.procedure_flag = 'init' # 控制标志, 进行不同阶段的cache和dump
         self.converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
         self.target_icu_ids = self.loc_conf['dataset']['target_icu_id']
+        self.report_ids = self.loc_conf['dataset']['make_report']
         # variable for phase 1
         self.sepsis_result = None
         self.hosp_item = None
@@ -196,22 +195,30 @@ class MIMICIV:
         for _,row in tqdm(patients.iterrows(), 'construct subject', total=len(patients)):
             s_id = row['subject_id']
             if s_id in self.sepsis_result:
-                sepsis_time, stay_id, sofa_score, respiration, liver, cardiovascular, cns, renal = self.sepsis_result[s_id]
-                self.subjects[s_id] = Subject(row['subject_id'], anchor_year=row['anchor_year'])
-                self.subjects[s_id].append_static(None, 'age', row['anchor_age'])
-                self.subjects[s_id].append_static(None, 'gender', row['gender'])
-                self.subjects[s_id].append_static(None, 'sepsis_time', sepsis_time)
-                self.subjects[s_id].append_static(None, 'sofa_score', sofa_score)
-                self.subjects[s_id].append_static(None, 'respiration', respiration)
-                self.subjects[s_id].append_static(None, 'liver', liver)
-                self.subjects[s_id].append_static(None, 'cardiovascular', cardiovascular)
-                self.subjects[s_id].append_static(None, 'cns', cns)
-                self.subjects[s_id].append_static(None, 'renal', renal)
+                '''
+                NOTE: sepsis time的处理方式
+                sepsis time被看作一个静态特征添加到subject下, 一个subject可以有多个sepsis time
+                如果一个admission没有sepsis time对应, 那么这个admission无效
+                在最终的三维数据上, sepsis_time会变为距离起始点t_start的相对值(sep-t_start)
+                由于起始点设为max(sepsis, t_start), 所以sepsis_time只会是负数或者0
+                当sepsis_time<0的时候, 表明sepsis发生得早, 对于一些模型, sepsis time不能太小, 可以用来筛选数据
+                '''
+                for element in self.sepsis_result[s_id]:
+                    sepsis_time, _, sofa_score, respiration, liver, cardiovascular, cns, renal = element
+                    self.subjects[s_id] = Subject(row['subject_id'], anchor_year=row['anchor_year'])
+                    self.subjects[s_id].append_static(sepsis_time, 'age', row['anchor_age'])
+                    self.subjects[s_id].append_static(sepsis_time, 'gender', row['gender'])
+                    self.subjects[s_id].append_static(sepsis_time, 'sepsis_time', sepsis_time)
+                    self.subjects[s_id].append_static(sepsis_time, 'sofa_score', sofa_score)
+                    self.subjects[s_id].append_static(sepsis_time, 'respiration', respiration)
+                    self.subjects[s_id].append_static(sepsis_time, 'liver', liver)
+                    self.subjects[s_id].append_static(sepsis_time, 'cardiovascular', cardiovascular)
+                    self.subjects[s_id].append_static(sepsis_time, 'cns', cns)
+                    self.subjects[s_id].append_static(sepsis_time, 'renal', renal)
         # 更新sepsis_result, 去除不存在的s_id
         self.sepsis_result = {key:self.sepsis_result[key] for key in self.subjects.keys()}
         # 抽取admission
         table_admission = pd.read_csv(os.path.join(self.mimic_dir, 'hosp', 'admissions.csv'), encoding='utf-8')
-        
         for _,row in tqdm(table_admission.iterrows(), desc='extract admission', total=len(table_admission)):
             s_id = row['subject_id']
             if s_id in self.subjects:
@@ -303,6 +310,11 @@ class MIMICIV:
                                     flag = 0
                             else:
                                 flag = 0
+                            if flag != 0:
+                                # 检查sepsis time, 必须要有一个sepsis time和这次admission对应上
+                                sepsis_time = self.subjects[s_id].nearest_static('sepsis_time', adm.admittime+start_time)
+                                if not (-10 < adm.admittime+start_time-sepsis_time < 30):
+                                    flag = 0
                         
                         if flag != 0:
                             new_adm_idx.append(idx)
@@ -348,6 +360,7 @@ class MIMICIV:
                             if id in sids:
                                 tp.write(sentence)
 
+
     def hit_table(self):
         '''
         生成特征在subject粒度的覆盖率
@@ -366,12 +379,17 @@ class MIMICIV:
             self.__hit_table = {key:val / adm_count for key,val in hit_table.items()}
         return self.__hit_table.copy()
 
-        
     def make_report(self):
         '''进行数据集的信息统计'''
         out_path = os.path.join(self.gbl_conf['paths']['out_dir'], 'dataset_report.txt')
         dist_dir = os.path.join(self.gbl_conf['paths']['out_dir'], 'report_dist')
         tools.reinit_dir(dist_dir, build=True)
+        os.makedirs(os.path.join(dist_dir, 'points'))
+        os.makedirs(os.path.join(dist_dir, 'duration'))
+        os.makedirs(os.path.join(dist_dir, 'frequency'))
+        os.makedirs(os.path.join(dist_dir, 'value'))
+        os.makedirs(os.path.join(dist_dir, 'interval'))
+        os.makedirs(os.path.join(dist_dir, 'from_sepsis'))
         logger.info('MIMIC-IV: generating dataset report')
         write_lines = []
         # basic statistics
@@ -384,7 +402,8 @@ class MIMICIV:
             for adm in s.admissions:
                 avg_adm_time.append(adm.duration())
         write_lines.append(f'average admission time(hour): {np.mean(avg_adm_time):.2f}')
-        for id in self.target_icu_ids:
+        # feature explore
+        for id in self.report_ids:
             fea_name = self.icu_item[id][0]
             write_lines.append('='*10 + f'{fea_name}({id})' + '='*10)
             arr_points = []
@@ -393,7 +412,12 @@ class MIMICIV:
             arr_min_interval = []
             arr_max_interval = []
             arr_avg_value = []
-            for s in self.subjects.values():
+            arr_from_sepsis_time = []
+            for s in tqdm(self.subjects.values(), desc=f'id={id}'):
+                sepsis_time = s.nearest_static('sepsis_time', None)
+                t_sep = s.admissions[0][id][0, 1] + s.admissions[0].admittime - sepsis_time
+                if np.abs(t_sep) < 72:
+                    arr_from_sepsis_time.append(t_sep)
                 for adm in s.admissions:
                     if id in adm.keys():
                         arr_points.append(adm[id].shape[0])
@@ -404,6 +428,7 @@ class MIMICIV:
                         arr_avg_value.append(adm[id][:,0].mean())
                         assert(arr_duration[-1] > 0)
             arr_points, arr_duration, arr_frequency, arr_min_interval,arr_max_interval,arr_avg_value = np.asarray(arr_points), np.asarray(arr_duration), np.asarray(arr_frequency), np.asarray(arr_min_interval), np.asarray(arr_max_interval), np.asarray(arr_avg_value)
+            arr_from_sepsis_time = np.asarray(arr_from_sepsis_time)
             write_lines.append(f'average points per admission: {arr_points.mean():.3f}')
             write_lines.append(f'average duration(hour) per admission: {arr_duration.mean():.3f}')
             write_lines.append(f'average frequency(point/hour) per admission: {arr_frequency.mean():.3f}')
@@ -412,23 +437,23 @@ class MIMICIV:
             # plot distribution
             tools.plot_single_dist(
                 data=arr_points, data_name=f'Points of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'point_' + str(id) + '.png'), discrete=False, adapt=True)
+                save_path=os.path.join(dist_dir, 'points', 'point_' + str(id) + '.png'), discrete=False, adapt=True)
             tools.plot_single_dist(
                 data=arr_duration, data_name=f'Duration of {fea_name}(Hour)', 
-                save_path=os.path.join(dist_dir, 'duration_' + str(id) + '.png'), discrete=False, adapt=True)
+                save_path=os.path.join(dist_dir, 'duration', 'duration_' + str(id) + '.png'), discrete=False, adapt=True)
             tools.plot_single_dist(
                 data=arr_frequency, data_name=f'Frequency of {fea_name}(Point/Hour)', 
-                save_path=os.path.join(dist_dir, 'freq_' + str(id) + '.png'), discrete=False, adapt=True)
+                save_path=os.path.join(dist_dir, 'frequency', 'freq_' + str(id) + '.png'), discrete=False, adapt=True)
             tools.plot_single_dist(
                 data=arr_avg_value, data_name=f'Avg Value of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'avgv_' + str(id) + '.png'), discrete=False, adapt=True)
+                save_path=os.path.join(dist_dir, 'value', 'avgv_' + str(id) + '.png'), discrete=False, adapt=True)
             tools.plot_single_dist(
                 data=arr_min_interval, data_name=f'Min interval of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'mininterv_' + str(id) + '.png'), discrete=False, adapt=True)
+                save_path=os.path.join(dist_dir, 'interval', 'mininterv_' + str(id) + '.png'), discrete=False, adapt=True)
             tools.plot_single_dist(
-                data=arr_max_interval, data_name=f'Max interval of {fea_name}', 
-                save_path=os.path.join(dist_dir, 'maxinterv_' + str(id) + '.png'), discrete=False, adapt=True)
-        # itemid hit rate
+                data=arr_from_sepsis_time, data_name=f'Start-Sepsis time of {fea_name}', 
+                save_path=os.path.join(dist_dir, 'from_sepsis', 't_sepsis_' + str(id) + '.png'), discrete=False, adapt=True)
+        # write hit table
         hit_table = self.hit_table()
         key_list = sorted(hit_table.keys(), key= lambda key:hit_table[key], reverse=True)
         write_lines.append('='*10 + 'Feature hit table(>0.5)' + '='*10)
@@ -438,7 +463,7 @@ class MIMICIV:
             if value < 0.5:
                 continue
             write_lines.append(f"{value:.2f}\t({key}){fea_name} ")
-
+        # write report
         with open(out_path, 'w', encoding='utf-8') as fp:
             for line in write_lines:
                 fp.write(line + '\n')
@@ -626,6 +651,8 @@ class MIMICDataset(AbstractDataset):
                         except Exception as e:
                             logger.warning(f'Invalid value {v} for {key}')
                     s.static_data[key] = np.asarray(s.static_data[key])[valid_idx, :]
+            
+            # pao2和fio2的上下界约束
             for adm in s.admissions:
                 for id in adm.keys():
                     if id == "223835": # fio2, 空气氧含量
@@ -698,8 +725,8 @@ class MIMICDataset(AbstractDataset):
                     # 起始时刻和终止时刻为pao2和fio2重合时段, 并且限制在sepsis出现时刻之后
                     t_start = max(adm[pao2_id][0,1], adm[fio2_id][0,1])
                     t_end = min(adm[pao2_id][-1,1], adm[fio2_id][-1,1])
-                    sepsis_time = (self.subjects[s_id].static_data['sepsis_time'] - adm.admittime)
-                    if sepsis_time >= t_end:
+                    sepsis_time = self.subjects[s_id].nearest_static('sepsis_time', t_start+adm.admittime) - adm.admittime
+                    if sepsis_time >= (t_end-self.loc_conf['dataset']['remove_rule']['min_duration']):
                         logger.warning('Invalid admission: no matching sepsis time')
                         continue
                     else:
@@ -708,10 +735,12 @@ class MIMICDataset(AbstractDataset):
                     ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
                     # 生成表本身, 缺失值为-1
                     table = -np.ones((len(static_keys) + len(dynamic_keys), ticks.shape[0]), dtype=np.float32)
-                    # 填充static data
+                    # 填充static data, 找最近的点
                     static_data = np.zeros((len(static_keys)))
                     for idx, key in enumerate(static_keys):
                         static_data[idx] = self.subjects[s_id].nearest_static(key, adm[align_id][0, 1] + adm.admittime)
+                        if key == 'sepsis_time': # sepsis time 基准变为表格的起始点
+                            static_data[idx] = static_data[idx] - adm.admittime - t_start
                     table[:len(static_keys), :] = static_data[:, None]
                     # 插值dynamic data
                     for idx, key in enumerate(dynamic_keys[:-1]):
@@ -855,8 +884,9 @@ def reduce_peak(x: np.ndarray):
 def load_sepsis_patients(csv_path:str) -> dict:
     '''
     从csv中读取按照mimic-iv pipeline生成的sepsis3.0表格
-    sepsis_dict: dict(int(subject_id):list)
-        list: [sepsis_time(float), stay_id, sofa_score, respiration, liver, cardiovascular, cns, renal]
+    sepsis_dict: dict(int(subject_id):list(element))
+        element: [sepsis_time(float), stay_id, sofa_score, respiration, liver, cardiovascular, cns, renal]
+        多次出现会记录多个sepsis_time
     '''
     converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
     sepsis_dict = {}
@@ -865,10 +895,12 @@ def load_sepsis_patients(csv_path:str) -> dict:
     def build_dict(row): # 提取sepsis dict
         id = row['subject_id']
         sepsis_time = row['sepsis_time']
-        if (id in sepsis_dict and sepsis_dict[id][0] > sepsis_time) or id not in sepsis_dict: # only keep earliest sepsis occurence
-                sepsis_dict[id] = [sepsis_time, \
-                    int(row['stay_id']), row['sofa_score'], row['respiration'], \
-                    row['liver'], row['cardiovascular'], row['cns'], row['renal']]
+        element = [sepsis_time, int(row['stay_id']), row['sofa_score'], \
+            row['respiration'], row['liver'], row['cardiovascular'], row['cns'], row['renal']]
+        if id in sepsis_dict:
+            sepsis_dict[id].append(element)
+        else:
+            sepsis_dict[id] = [element]
         
     df = pd.read_csv(csv_path, encoding='utf-8')
     df['sepsis_time'] = df.apply(extract_time, axis=1)
@@ -880,5 +912,5 @@ def load_sepsis_patients(csv_path:str) -> dict:
 
 if __name__ == '__main__':
     dataset = MIMICDataset()
-    # dataset.mimiciv.make_report()
+    dataset.mimiciv.make_report()
     

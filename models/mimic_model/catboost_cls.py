@@ -26,7 +26,10 @@ class CatboostClsTrainer():
         # self.model = LSTMClsModel(params['device'], params['in_channels'])
         self.dataset = dataset
         self.target_idx = dataset.target_idx
-        self.generator = Cls2LabelGenerator(window=self.params['window'], ards_threshold=self.params['ards_threshold']) # 生成标签
+        self.generator = Cls2LabelGenerator(
+            window=self.params['window'], ards_threshold=self.params['ards_threshold'],
+            target_idx=self.target_idx, sepsis_time_idx=dataset.idx_dict['sepsis_time'],
+            post_sepsis_time=self.params['max_post_sepsis_hour']) # 生成标签
         # self.register_vals = {'shap_value':[]}
         # model
         # NOTICE: 为了确保out loss一样长, 不加overfit detector, 时间的损耗其实也很少
@@ -50,7 +53,10 @@ class CatboostClsTrainer():
                 seq_lens.append(batch['length'])
             data = np.stack(data, axis=0)
             mask = tools.make_mask((data.shape[0], data.shape[-1]), seq_lens)
-            _, result[phase] = self.generator(data, mask) # e.g. [phase]['X']
+            mask, out_dict = self.generator(data, mask) # e.g. [phase]['X']
+            out_dict.update({'mask':mask})
+            result[phase] = out_dict
+            dict.update()
         self.dataset.mode('all')
         return result
 
@@ -66,33 +72,64 @@ class CatboostClsTrainer():
     def train(self):
         tools.reinit_dir(self.cache_path, build=True) # 这是catboost输出loss的文件夹
         self.data_dict = self._extract_data()
-        pool_train = Pool(self.data_dict['train']['X'], self.data_dict['train']['Y'])
-        pool_valid = Pool(self.data_dict['valid']['X'], self.data_dict['valid']['Y'])
-        
+        train_X = self.data_dict['train']['X'][self.data_dict['train']['mask']]
+        train_Y = self.data_dict['train']['Y'][self.data_dict['train']['mask']]
+        valid_X = self.data_dict['valid']['X'][self.data_dict['valid']['mask']]
+        valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
+        pool_train = Pool(train_X, train_Y)
+        pool_valid = Pool(valid_X, valid_Y)
         self.model.fit(pool_train, eval_set=pool_valid, use_best_model=True)
         
     def predict(self, mode):
-        pool_test = Pool(data=self.data_dict[mode]['X'])
+        test_X = self.data_dict[mode]['X'][self.data_dict[mode]['mask']]
+        pool_test = Pool(data=test_X)
         return self.model.predict(pool_test, prediction_type='Probability')[:,1]
 
 
 class Cls2LabelGenerator():
-    '''给出未来长期是否发生ARDS和静态模型可用的特征(t=0)'''
-    def __init__(self, window=144, ards_threshold=300) -> None:
+    '''给出静态模型可用的特征'''
+    def __init__(self, window, ards_threshold, target_idx, sepsis_time_idx, post_sepsis_time, forbidden_idx=None) -> None:
+        '''
+        window: 静态模型考虑多少时长内的ARDS
+        ards_threshold: ARDS的PF_ratio阈值
+        target_idx: PF_ratio位置
+        sepsis_time_idx: sepsis_time位置
+        post_sepsis_time: 最长能容忍距离发生sepsis多晚(小时)
+        forbidden_idx: 为了避免static model受到影响, 需要屏蔽一些特征
+        '''
         self.window = window # 静态模型cover多少点数
         self.ards_threshold = ards_threshold
-    
+        self.target_idx = target_idx
+        self.sepsis_time_idx = sepsis_time_idx
+        self.post_sepsis_time = post_sepsis_time
+        self.forbidden_idx = forbidden_idx
+        # generate idx
+        self.used_idx = None
+
+    def available_idx(self, n_fea):
+        if self.used_idx is not None:
+            return self.used_idx
+        else:
+            self.used_idx = []
+            for idx in range(n_fea):
+                if idx not in self.forbidden_idx:
+                    self.used_idx.append(idx)
+            return self.used_idx
     def __call__(self, data:np.ndarray, mask:np.ndarray) -> np.ndarray:
         '''
         data: (batch, n_fea, seq_lens)
         mask: (batch, seq_lens)
         return: (X, Y)
-            X: (batch, n_fea)
+            X: (batch, new_n_fea)
             Y: (batch,)
+            mask: (batch,)
         '''
         seq_lens = mask.sum(axis=1)
+        sepsis_time = data[:, self.sepsis_time_idx, 0]
+        first_ards = data[:, self.target_idx, 0] < self.ards_threshold
+        mask = np.logical_and(np.logical_not(first_ards), sepsis_time > -self.post_sepsis_time)
         Y_label = np.zeros((data.shape[0],))
         for idx in range(data.shape[0]):
             Y_label[idx] = np.max(data[idx, -1, :min(seq_lens[idx], self.window)] < self.ards_threshold)
-        return mask, {'X': data[:, :, 0], 'Y': Y_label}
+        return mask, {'X': data[:, self.available_idx(), 0], 'Y': Y_label}
   
