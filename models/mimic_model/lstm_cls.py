@@ -192,5 +192,6 @@ class ClassificationLoss(nn.Module):
             mask = mask[..., None]
         pred, labels = pred*mask, labels*mask
         # 创建标签矩阵
+        # permute: ->(batch, n_cls, seq_len)
         loss = torch.sum(self.criterion(pred.permute(0, 2, 1), labels.permute(0, 2, 1))) / torch.sum(mask)
         return loss

@@ -227,7 +227,7 @@ def plot_confusion_matrix(cm:np.ndarray, labels:list, title='Confusion matrix', 
     out_type = 'int' if np.max(cm) > 1+1e-3 else 'float'
     for x in range(width):
         for y in range(height):
-            num_color = 'black' if cm[x][y] < 1.5*cm.mean() else 'white'
+            num_color = 'black' if cm[y][x] < 1.5*cm.mean() else 'white'
             cm_str = str(cm[y][x]) if out_type == 'int' else f'{cm[y][x]:.2f}'
             plt.annotate(cm_str, xy=(y, x), fontsize=24, color=num_color,
                         horizontalalignment='center',

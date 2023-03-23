@@ -29,14 +29,13 @@ class CatboostClsTrainer():
         self.generator = Cls2LabelGenerator(window=self.params['window'], ards_threshold=self.params['ards_threshold']) # 生成标签
         # self.register_vals = {'shap_value':[]}
         # model
+        # NOTICE: 为了确保out loss一样长, 不加overfit detector, 时间的损耗其实也很少
         self.model = CatBoostClassifier(
             train_dir=self.cache_path, # 读取数据
             iterations=params['iterations'],
             depth=params['depth'],
             loss_function=params['loss_function'],
-            learning_rate=params['learning_rate'],
-            od_type = "Iter",
-            od_wait = 50
+            learning_rate=params['learning_rate']
         )
         self.data_dict = None
         
