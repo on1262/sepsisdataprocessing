@@ -52,7 +52,7 @@ class LSTMClsTrainer():
         self.cache_path = self.paths['lstm_cls_cache']
         tools.reinit_dir(self.cache_path, build=True)
         self.model = LSTMClsModel(params['device'], params['in_channels'])
-        self.criterion = ClassificationLoss(len(self.params['centers']))
+        self.criterion = ClassificationLoss(len(self.params['centers']), weight=params['weight'])
         self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
         self.dataset = dataset
         self.target_idx = dataset.target_idx
@@ -88,6 +88,7 @@ class LSTMClsTrainer():
         cache_path = os.path.join(self.cache_path)
         tools.reinit_dir(cache_path, build=True)
         self.model = self.model.to(self.device)
+        self.criterion = self.criterion.to(self.device)
         
         with tqdm(total=self.params['epochs']) as tq:
             tq.set_description(f'Training, Epoch')
@@ -172,13 +173,17 @@ class Cls4LabelGenerator():
 
 
 class ClassificationLoss(nn.Module):
-    def __init__(self, n_cls:int) -> None:
+    def __init__(self, n_cls:int, weight=None) -> None:
         '''
         forecast window: 向前预测的窗口
         '''
         super().__init__()
         self.n_cls = n_cls
-        self.criterion = nn.CrossEntropyLoss(reduction='none') # input: (N,C,d1,...dk)
+        if weight is None:
+            self.criterion = nn.CrossEntropyLoss(reduction='none') # input: (N,C,d1,...dk)
+        else:
+            self.weight = torch.as_tensor(weight)
+            self.criterion = nn.CrossEntropyLoss(reduction='none', weight=self.weight)
 
     def forward(self, pred:torch.Tensor, labels:torch.Tensor, mask:torch.Tensor):
         '''
@@ -192,5 +197,6 @@ class ClassificationLoss(nn.Module):
         pred, labels = pred*mask, labels*mask
         # 创建标签矩阵
         # permute: ->(batch, n_cls, seq_len)
-        loss = torch.sum(self.criterion(pred.permute(0, 2, 1), labels.permute(0, 2, 1))) / torch.sum(mask)
+        loss = self.criterion(pred.permute(0, 2, 1), labels.permute(0, 2, 1))
+        loss = torch.sum(loss) / torch.sum(mask)
         return loss

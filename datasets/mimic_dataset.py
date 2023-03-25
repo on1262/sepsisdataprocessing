@@ -83,6 +83,7 @@ class Subject:
             return self.static_data[key]
         else:
             nearest_idx, delta = 0, np.inf
+            assert(time is not None)
             for idx in range(self.static_data[key].shape[0]):
                 new_delta = np.abs(time-self.static_data[key][idx, 1])
                 if new_delta < delta:
@@ -312,7 +313,7 @@ class MIMICIV:
                                 flag = 0
                             if flag != 0:
                                 # 检查sepsis time, 必须要有一个sepsis time和这次admission对应上
-                                sepsis_time = self.subjects[s_id].nearest_static('sepsis_time', adm.admittime+start_time)
+                                sepsis_time = self.subjects[s_id].nearest_static('sepsis_time', adm.admittime+start_time)[0][0]
                                 if not (-10 < adm.admittime+start_time-sepsis_time < 30):
                                     flag = 0
                         
@@ -414,11 +415,11 @@ class MIMICIV:
             arr_avg_value = []
             arr_from_sepsis_time = []
             for s in tqdm(self.subjects.values(), desc=f'id={id}'):
-                sepsis_time = s.nearest_static('sepsis_time', None)
-                t_sep = s.admissions[0][id][0, 1] + s.admissions[0].admittime - sepsis_time
-                if np.abs(t_sep) < 72:
-                    arr_from_sepsis_time.append(t_sep)
                 for adm in s.admissions:
+                    sepsis_time = s.nearest_static('sepsis_time', s.admissions[0][id][0, 1])
+                    t_sep = s.admissions[0][id][0, 1] + s.admissions[0].admittime - sepsis_time
+                    if np.abs(t_sep) < 72:
+                        arr_from_sepsis_time.append(t_sep)
                     if id in adm.keys():
                         arr_points.append(adm[id].shape[0])
                         arr_duration.append(adm[id][-1,1] - adm[id][0,1])
@@ -496,7 +497,7 @@ class MIMICDataset(AbstractDataset):
         self.seqs_len = None # list(available_len)
 
         self.preprocess()
-        
+        self.mimiciv.subjects = self.subjects # update
         logger.info(f'Dataset length={self.data.shape[0]} admissions')
         self.target_idx = self.data.shape[1] - 1
         self.idx_dict = dict( # idx_dict: fea_name->idx

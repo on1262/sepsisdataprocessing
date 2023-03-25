@@ -26,19 +26,21 @@ class CatboostClsTrainer():
         # self.model = LSTMClsModel(params['device'], params['in_channels'])
         self.dataset = dataset
         self.target_idx = dataset.target_idx
+        forbidden_idx = {self.dataset.idx_dict[name] for name in self.params['forbidden_feas']}
         self.generator = Cls2LabelGenerator(
             window=self.params['window'], ards_threshold=self.params['ards_threshold'],
             target_idx=self.target_idx, sepsis_time_idx=dataset.idx_dict['sepsis_time'],
-            post_sepsis_time=self.params['max_post_sepsis_hour']) # 生成标签
+            forbidden_idx=forbidden_idx, post_sepsis_time=self.params['max_post_sepsis_hour']
+        ) # 生成标签
         # self.register_vals = {'shap_value':[]}
-        # model
         # NOTICE: 为了确保out loss一样长, 不加overfit detector, 时间的损耗其实也很少
         self.model = CatBoostClassifier(
             train_dir=self.cache_path, # 读取数据
             iterations=params['iterations'],
             depth=params['depth'],
             loss_function=params['loss_function'],
-            learning_rate=params['learning_rate']
+            learning_rate=params['learning_rate'],
+            verbose=0,
         )
         self.data_dict = None
         
@@ -56,7 +58,6 @@ class CatboostClsTrainer():
             mask, out_dict = self.generator(data, mask) # e.g. [phase]['X']
             out_dict.update({'mask':mask})
             result[phase] = out_dict
-            dict.update()
         self.dataset.mode('all')
         return result
 
@@ -115,6 +116,7 @@ class Cls2LabelGenerator():
                 if idx not in self.forbidden_idx:
                     self.used_idx.append(idx)
             return self.used_idx
+            
     def __call__(self, data:np.ndarray, mask:np.ndarray) -> np.ndarray:
         '''
         data: (batch, n_fea, seq_lens)
@@ -124,12 +126,12 @@ class Cls2LabelGenerator():
             Y: (batch,)
             mask: (batch,)
         '''
+        n_fea = data.shape[1]
         seq_lens = mask.sum(axis=1)
         sepsis_time = data[:, self.sepsis_time_idx, 0]
-        first_ards = data[:, self.target_idx, 0] < self.ards_threshold
-        mask = np.logical_and(np.logical_not(first_ards), sepsis_time > -self.post_sepsis_time)
+        mask = (sepsis_time > -self.post_sepsis_time)
         Y_label = np.zeros((data.shape[0],))
         for idx in range(data.shape[0]):
             Y_label[idx] = np.max(data[idx, -1, :min(seq_lens[idx], self.window)] < self.ards_threshold)
-        return mask, {'X': data[:, self.available_idx(), 0], 'Y': Y_label}
+        return mask, {'X': data[:, self.available_idx(n_fea), 0], 'Y': Y_label}
   

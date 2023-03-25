@@ -52,6 +52,7 @@ class LSTM4ClsAnalyzer:
         # step 3: generate labels & label explore
         generator = mlib.Cls4LabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
+        self.params['weight'] = cal_label_weight(len(self.params['centers']), mask, label)
         self.label_explore(label, mask)
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
@@ -90,6 +91,7 @@ class BaselineNearestClsAnalyzer:
         self.model_name = 'nearest_4cls'
         # copy params
         self.centers = params['centers']
+        self.n_cls = len(self.centers)
 
     def predict(self, mode:str):
         '''
@@ -152,3 +154,19 @@ def explore_result(ards_threshold, Y_pred, Y_gt, mask, out_dir, cmt):
     delta = delta[:][mask][:, None]
     tools.plot_reg_correlation(
         X=delta, fea_names=['Prediction Abs Error'], Y=num_flips, target_name='Num flips', adapt=True, write_dir_path=out_dir, plot_dash=False, comment=cmt)
+
+def cal_label_weight(n_cls, mask, label):
+    '''
+    获取n_cls反比于数量的权重
+    label: (batch, seq_lens, n_cls)
+    mask: (batch, seq_lens)
+    return: (n_cls,)
+    '''
+    hard_label = np.argmax(label, axis=-1)
+    hard_label = hard_label[:][mask[:]]
+    weight = np.asarray([np.mean(hard_label == c) for c in range(n_cls)])
+    weight = 1 / weight
+    weight = weight / np.sum(weight)
+    return weight
+
+

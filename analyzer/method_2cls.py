@@ -23,8 +23,11 @@ class Catboost2ClsAnalyzer:
         self.out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(self.out_dir, build=True)
 
-    def label_explore(self, labels):
-        pass
+    def label_explore(self, label, mask):
+        logger.info(f'2cls available labels: {np.sum(mask)}')
+        postive_rate = np.mean(label['Y'][mask])
+        logger.info(f'Positive Label: {postive_rate}')
+    
 
     def run(self):
         '''预测窗口内是否发生ARDS的分类器'''
@@ -44,6 +47,7 @@ class Catboost2ClsAnalyzer:
             target_idx=self.target_idx,  sepsis_time_idx=self.dataset.idx_dict['sepsis_time'],
             post_sepsis_time=self.params['max_post_sepsis_hour'], forbidden_idx=forbidden_idx)
         mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
+        self.label_explore(label, mask)
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)
@@ -52,7 +56,7 @@ class Catboost2ClsAnalyzer:
             trainer = mlib.CatboostClsTrainer(self.params, self.dataset)
             trainer.train()
             self.loss_logger.add_loss(trainer.get_loss())
-            Y_gt = label['Y'][test_index][label['mask'][test_index]]
+            Y_gt = label['Y'][test_index][mask[test_index]]
             Y_pred = trainer.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
             metric_2cls.add_prediction(Y_pred, Y_gt)
