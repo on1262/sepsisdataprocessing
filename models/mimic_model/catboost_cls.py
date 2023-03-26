@@ -26,13 +26,12 @@ class CatboostClsTrainer():
         # self.model = LSTMClsModel(params['device'], params['in_channels'])
         self.dataset = dataset
         self.target_idx = dataset.target_idx
-        forbidden_idx = {self.dataset.idx_dict[name] for name in self.params['forbidden_feas']}
         self.generator = Cls2LabelGenerator(
             window=self.params['window'], ards_threshold=self.params['ards_threshold'],
             target_idx=self.target_idx, sepsis_time_idx=dataset.idx_dict['sepsis_time'],
-            forbidden_idx=forbidden_idx, post_sepsis_time=self.params['max_post_sepsis_hour']
+            forbidden_idx=self.params['forbidden_idx'], post_sepsis_time=self.params['max_post_sepsis_hour'], 
+            limit_idx=self.params['limit_idx']
         ) # 生成标签
-        # self.register_vals = {'shap_value':[]}
         # NOTICE: 为了确保out loss一样长, 不加overfit detector, 时间的损耗其实也很少
         self.model = CatBoostClassifier(
             train_dir=self.cache_path, # 读取数据
@@ -89,7 +88,7 @@ class CatboostClsTrainer():
 
 class Cls2LabelGenerator():
     '''给出静态模型可用的特征'''
-    def __init__(self, window, ards_threshold, target_idx, sepsis_time_idx, post_sepsis_time, forbidden_idx=None) -> None:
+    def __init__(self, window, ards_threshold, target_idx, sepsis_time_idx, post_sepsis_time, forbidden_idx=None, limit_idx=None) -> None:
         '''
         window: 静态模型考虑多少时长内的ARDS
         ards_threshold: ARDS的PF_ratio阈值
@@ -97,6 +96,7 @@ class Cls2LabelGenerator():
         sepsis_time_idx: sepsis_time位置
         post_sepsis_time: 最长能容忍距离发生sepsis多晚(小时)
         forbidden_idx: 为了避免static model受到影响, 需要屏蔽一些特征
+        limit_idx: 如果为None, 则没有任何影响, 否则选择的特征只可能是其中的特征减去forbidden_idx的特征
         '''
         self.window = window # 静态模型cover多少点数
         self.ards_threshold = ards_threshold
@@ -104,17 +104,27 @@ class Cls2LabelGenerator():
         self.sepsis_time_idx = sepsis_time_idx
         self.post_sepsis_time = post_sepsis_time
         self.forbidden_idx = forbidden_idx
+        self.limit_idx = limit_idx
         # generate idx
         self.used_idx = None
 
-    def available_idx(self, n_fea):
+    def available_idx(self, n_fea=None):
+        '''
+        生成可用的特征序号
+        '''
         if self.used_idx is not None:
             return self.used_idx
         else:
+            assert(n_fea is not None)
             self.used_idx = []
-            for idx in range(n_fea):
-                if idx not in self.forbidden_idx:
-                    self.used_idx.append(idx)
+            if self.limit_idx is None or len(self.limit_idx) == 0:
+                for idx in range(n_fea):
+                    if idx not in self.forbidden_idx:
+                        self.used_idx.append(idx)
+            else:
+                for idx in range(n_fea):
+                    if idx not in self.forbidden_idx and idx in self.limit_idx:
+                        self.used_idx.append(idx)
             return self.used_idx
             
     def __call__(self, data:np.ndarray, mask:np.ndarray) -> np.ndarray:
@@ -134,4 +144,3 @@ class Cls2LabelGenerator():
         for idx in range(data.shape[0]):
             Y_label[idx] = np.max(data[idx, -1, :min(seq_lens[idx], self.window)] < self.ards_threshold)
         return mask, {'X': data[:, self.available_idx(n_fea), 0], 'Y': Y_label}
-  

@@ -35,19 +35,25 @@ class Catboost2ClsAnalyzer:
             import models.mimic_model as mlib
         # step 1: append additional params
         self.params['in_channels'] = self.dataset.data.shape[1]
+        forbidden_idx = {self.dataset.idx_dict[name] for name in self.params['forbidden_feas']}
+        limit_idx = {self.dataset.idx_dict[name] for name in self.params['feature_limit']}
+        self.params['forbidden_idx'] = forbidden_idx
+        self.params['limit_idx'] = limit_idx
         # step 2: init variables
         kf = KFold(n_splits=self.container.n_fold, shuffle=True, random_state=self.container.seed)
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
         metric_2cls = tools.DichotomyMetric()
         # step 3: generate labels
-        forbidden_idx = {self.dataset.idx_dict[name] for name in self.params['forbidden_feas']}
         generator = mlib.Cls2LabelGenerator(
             window=self.params['window'], ards_threshold=self.params['ards_threshold'],
             target_idx=self.target_idx,  sepsis_time_idx=self.dataset.idx_dict['sepsis_time'],
-            post_sepsis_time=self.params['max_post_sepsis_hour'], forbidden_idx=forbidden_idx)
+            post_sepsis_time=self.params['max_post_sepsis_hour'],
+            forbidden_idx=self.params['forbidden_idx'], limit_idx=self.params['limit_idx'])
         mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
         self.label_explore(label, mask)
+        fea_names = [self.dataset.get_fea_label(idx) for idx in generator.available_idx()]
+        imp_logger = tools.FeatureImportance(fea_names=fea_names, model_type='gbdt')
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)
@@ -60,11 +66,13 @@ class Catboost2ClsAnalyzer:
             Y_pred = trainer.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
             metric_2cls.add_prediction(Y_pred, Y_gt)
-            if idx == 0:
-                total_names = [self.dataset.get_fea_label(key) for key in self.dataset.total_keys]
-                tools.cal_feature_importance(trainer.model, label['X'], total_names, os.path.join(out_dir, 'shap.png'), model_type='gbdt')
+            imp_logger.add_record(trainer.model, label['X'])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
+        imp_logger.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
+        single_imp_out = os.path.join(out_dir, 'single_shap')
+        tools.reinit_dir(single_imp_out, build=True)
+        imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for Catboost cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
         metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))

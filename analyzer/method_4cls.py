@@ -165,8 +165,10 @@ def cal_label_weight(n_cls, mask, label):
     hard_label = np.argmax(label, axis=-1)
     hard_label = hard_label[:][mask[:]]
     weight = np.asarray([np.mean(hard_label == c) for c in range(n_cls)])
+    logger.info(f'4cls Label proportion: {weight}')
     weight = 1 / weight
     weight = weight / np.sum(weight)
+    logger.info(f'4cls weight: {weight}')
     return weight
 
 
