@@ -41,6 +41,7 @@
                 "lstm_cls_cache": "outputs/mimic-iv/cache/lstm_cls",
                 "lstm_reg_cache": "outputs/mimic-iv/cache/lstm_reg",
                 "catboost_cls_cache": "outputs/mimic-iv/cache/catboost_2cls",
+                "lstm_quantile_cache": "outputs/mimic-iv/cache/lstm_quantile",
                 "conf_cache_path": "configs/mimic-iv/config_cache.json",
                 "conf_manual_path": "configs/mimic-iv/config_manual.json"
             }

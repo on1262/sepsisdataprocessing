@@ -203,7 +203,7 @@ class DichotomyMetric:
 
 
 class RegressionMetric:
-    '''回归任务评价指标, 支持分位点预测, 内部存储为1d'''
+    '''回归任务评价指标, 内部存储为1d'''
     def __init__(self, target_name:str, out_dir:str) -> None:
         self.target_name = target_name
         self.records = {'pred':[], 'gt':[]}
@@ -262,10 +262,78 @@ class RegressionMetric:
         '''绘制预测值和真实值的关联度'''
         self.calculate()
         os.makedirs(out_dir, exist_ok=True)
-        x = np.reshape(self.records['gt'], (np.sum(self.records['gt'].shape), 1))
         plot_reg_correlation(
             X=x, fea_names=['ALL_gt'], Y=self.records['pred'], \
             target_name='ALL_Prediction', adapt=True, write_dir_path=out_dir, comment=comment)
+
+class QuantileRegressionMetric:
+    '''回归任务评价指标, 支持分位点预测, 内部存储为1d'''
+    def __init__(self, target_name:str, out_dir:str, taus:list) -> None:
+        '''
+        taus: [0.25, 0.5, 0.75] 表示分位点, 0.5必须在中间
+
+        '''
+        self.target_name = target_name
+        self.records = {'pred':[], 'gt':[]}
+        self.out_dir = out_dir
+        self.is_calculated = False
+        self.taus = taus
+        self.n_quantile = len(taus)
+        self.center_idx = round((self.n_quantile - 1)/2)
+        assert(np.abs(taus[self.center_idx] - 0.5) <1e-3)
+
+    def get_record(self) -> dict:
+        return {key:val.copy() for key, val in self.records.items()}
+
+    def update_record(self):
+        if self.is_calculated:
+            return
+        else:
+            self.records['pred'] = np.concatenate(self.records['pred'], axis=0)
+            self.records['gt'] = np.concatenate(self.records['gt'], axis=0)
+            self.is_calculated = True
+
+    def add_prediction(self, _pred:np.ndarray, _gt:np.ndarray, _mask:np.ndarray):
+        '''
+            添加预测结果和真实值
+            _gt, _mask 相同shape
+            _pred为(..., n_quantile)多出一个quantile维度
+        '''
+        assert(_pred.shape[:-1] == _gt.shape and _mask.shape == _gt.shape and _pred.shape[-1] == self.n_quantile)
+        _samples = 1
+        for s in list(_gt.shape):
+            _samples *= s
+        pred = np.reshape(_pred, (_samples,self.n_quantile))
+        gt = _gt[_mask][:]
+        mask = np.reshape(_mask, (_samples,))
+        pred = pred[mask, :]
+        self.records['pred'].append(pred)
+        self.records['gt'].append(gt)
+
+
+    def plot(self):
+        self.plot_corr(out_dir=self.out_dir)
+
+    def write_result(self, method_name:str, log_path:str):
+        self.update_record()
+        pred = self.records['pred'][:, self.center_idx]
+        gt = self.records['gt']
+        rmse = np.sqrt(np.mean((pred-gt)**2))
+        mae = np.abs(pred - gt).mean()
+        bias = (pred - gt).mean()
+        with open(log_path, 'w', encoding='utf-8') as f:
+            f.write('='*10 + f'Method: {method_name}' + '='*10 + '\n')
+            f.write(f'Root Mean Squared Error(RMSE)={rmse}'+ '\t') # 误差的均方根值
+            f.write(f'Mean Absolute Error(MAE)={mae}'+ '\t') # 误差的平均值
+            f.write(f'Prediction bias={bias}'+ '\n')
+
+    def plot_corr(self, out_dir:str, comment:str=''):
+        '''绘制预测值和真实值的关联度'''
+        self.update_record()
+        os.makedirs(out_dir, exist_ok=True)
+        plot_correlation_with_quantile(
+            X_pred=self.records['pred'].T, x_name='Prediction', Y_gt=self.records['gt'], target_name=self.target_name,
+            quantile=self.taus, equal_lim=True, plot_dash=True, write_dir_path=self.out_dir)
 
 class MultiClassMetric:
     '''

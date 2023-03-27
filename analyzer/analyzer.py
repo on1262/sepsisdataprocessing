@@ -12,6 +12,7 @@ from .explore import FeatureExplorer
 from .method_4cls import LSTM4ClsAnalyzer, BaselineNearestClsAnalyzer
 from .method_reg import LSTMRegAnalyzer, BaselineNearestRegAnalyzer
 from .method_2cls import Catboost2ClsAnalyzer
+from .method_quantile import LSTMQuantileAnalyzer
 from datasets import AbstractDataset
 
 
@@ -28,7 +29,8 @@ class Analyzer:
             'nearest_4cls': BaselineNearestClsAnalyzer,
             'LSTM_reg': LSTMRegAnalyzer,
             'nearest_reg': BaselineNearestRegAnalyzer,
-            'catboost_2cls':Catboost2ClsAnalyzer
+            'catboost_2cls':Catboost2ClsAnalyzer,
+            'LSTM_quantile': LSTMQuantileAnalyzer
         }
         if params is not None:
             for key in params:

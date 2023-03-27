@@ -299,11 +299,14 @@ def plot_correlation_with_quantile(
     '''
     生成预测值和真实值的散点图, 并用颜色表明分位数的范围, 从而表现出模型认为该预测是否可靠
     默认不生成回归线, 但是会生成一条Y=X线
-    不支持生成多个变量, X只能是(quantile, data_len)的形状
+    X_pred: (quantile, batch)
+    Y_gt: (batch,) or (batch, 1)
     '''
     if write_dir_path is not None:
         os.makedirs(write_dir_path, exist_ok=True)
-    Y_gt = Y_gt.reshape(Y_gt.shape[0], 1)
+    assert(len(Y_gt.shape) <= 2)
+    if len(Y_gt.shape) == 1:
+        Y_gt = Y_gt.reshape(Y_gt.shape[0], 1)
     assert(len(X_pred.shape) == 2)
     X_pred, Y_gt =  X_pred.astype(np.float32), Y_gt.astype(np.float32)
     valid = ((1 - np.isnan(X_pred[0,...])) * (1 - np.isnan(Y_gt[:,0]))).astype(bool) # 两者都是true才行
