@@ -11,10 +11,10 @@ class FeatureExplorer:
         self.container = container
         self.gbl_conf = container._conf
         self.dataset = container.dataset
+        self.data = self.dataset.data
 
-    def first_ards_time(self):
+    def first_ards_time(self, out_dir):
         '''打印首次呼衰出现的时间分布'''
-        out_dir = self.gbl_conf['paths']['out_dir']
         times = []
         counts = [] # 产生呼衰的次数
         ards_count = 0
@@ -27,7 +27,7 @@ class FeatureExplorer:
             pao2 = adm[pao2_id][:, 0]
             pf = pao2 / fio2
             for idx in range(pf.shape[0]):
-                if pf[idx] < self.ards_threshold:
+                if pf[idx] < self.container.ards_threshold:
                     times.append(adm[pao2_id][idx, 1])
                     count += 1
             if count != 0:
@@ -38,9 +38,8 @@ class FeatureExplorer:
         logger.info(f"ARDS patients count={ards_count}")
 
 
-    def miss_mat(self):
+    def miss_mat(self, out_dir):
         '''计算行列缺失分布并输出'''
-        out_dir = self.gbl_conf['paths']['out_dir']
         na_table = np.zeros((len(self.dataset.subjects), len(self.dataset.dynamic_keys)), dtype=bool)
         for r_id, s_id in enumerate(self.dataset.subjects):
             adm_key = set(self.dataset.subjects[s_id].admissions[0].keys())
@@ -53,9 +52,8 @@ class FeatureExplorer:
         tools.plot_single_dist(row_nas, f"Row miss rate", os.path.join(out_dir, "row_miss_rate.png"), discrete=False, adapt=True)
         tools.plot_single_dist(col_nas, f"Column miss rate", os.path.join(out_dir, "col_miss_rate.png"), discrete=False, adapt=True)
 
-    def feature_count(self):
+    def feature_count(self, out_dir):
         '''打印vital_sig中特征出现的次数和最短间隔排序'''
-        out_dir = self.gbl_conf['paths']['out_dir']
         adms = [adm for s in self.dataset.subjects.values() for adm in s.admissions]
         count_hist = {}
         for adm in adms:

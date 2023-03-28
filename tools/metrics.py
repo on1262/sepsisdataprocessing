@@ -213,7 +213,7 @@ class RegressionMetric:
     def get_record(self) -> dict:
         return {key:val.copy() for key, val in self.records.items()}
 
-    def calculate(self):
+    def update_record(self):
         if self.is_calculated:
             return
         else:
@@ -239,7 +239,7 @@ class RegressionMetric:
         self.plot_corr(out_dir=self.out_dir)
 
     def write_result(self, method_name:str, log_path:str):
-        self.calculate()
+        self.update_record()
         pred = self.records['pred']
         gt = self.records['gt']
         rmse = np.sqrt(np.mean((pred-gt)**2))
@@ -253,15 +253,16 @@ class RegressionMetric:
 
     def plot_residual(self, out_dir):
         '''绘制残差分布'''
-        self.calculate()
+        self.update_record()
         res = self.records['pred'] - self.records['gt']
         plot_single_dist(
             data=res, data_name='Residual (pred-gt)', save_path=os.path.join(out_dir, 'residual.png'), discrete=False, adapt=True)
 
     def plot_corr(self, out_dir:str, comment:str=''):
         '''绘制预测值和真实值的关联度'''
-        self.calculate()
+        self.update_record()
         os.makedirs(out_dir, exist_ok=True)
+        x = self.records['gt'][:, None]
         plot_reg_correlation(
             X=x, fea_names=['ALL_gt'], Y=self.records['pred'], \
             target_name='ALL_Prediction', adapt=True, write_dir_path=out_dir, comment=comment)
