@@ -8,6 +8,7 @@ import scipy
 import pandas as pd
 from collections.abc import Iterable
 import os, sys
+import random
 import subprocess
 import missingno as msno
 from .generic import reinit_dir, remove_slash
@@ -175,7 +176,12 @@ def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=Tr
     adapt: 自动调整输出取值范围, 可能会忽略某些极端值
     '''
     data = data[:]
+    if data.shape[0] > 2000:
+        data = np.asarray(random.choices(data, k=2000))
+    assert(not np.any(np.isnan(data)))
     mu, sigma = scipy.stats.norm.fit(data)
+    if adapt and sigma > 0.01:
+        data = data[np.logical_and(data >= mu-3*sigma, data <= mu+3*sigma)]
     ax = sns.histplot(data=data, stat='proportion', discrete=discrete, **kwargs)
     if adapt:
         ax.set_xlim(left=max(mu-3*sigma, np.min(data)), right=min(mu+3*sigma, np.max(data)))

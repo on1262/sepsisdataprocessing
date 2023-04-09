@@ -2,7 +2,6 @@ import shap
 import matplotlib.pyplot as plt
 import numpy as np
 import os
-from .generic import reinit_dir
 
 
 class FeatureImportance():
@@ -12,7 +11,7 @@ class FeatureImportance():
         # register
         self.records = []
 
-    def add_record(self, model, valid_X, ):
+    def add_record(self, model, valid_X):
         explainer = shap.Explainer(model)
         shap_values = explainer(valid_X)
         self.records.append((shap_values.base_values, shap_values.data, shap_values.values)) # (sample, n_fea)

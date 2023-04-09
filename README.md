@@ -57,7 +57,7 @@ psql -d mimiciv
 \i postgres-functions.sql -- only needs to be run once
 
 \i postgres-make-concepts.sql
-
+ 
 **extract csv**
 
 \copy (SELECT * FROM mimiciv_derived.sepsis3) TO '~/sepsisinducedards/mimic-iv/cache/sepsis3.csv' WITH CSV HEADER; -- 提取出csv文件

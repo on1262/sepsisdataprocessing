@@ -1,11 +1,6 @@
-import torch
-import torchinfo
 import numpy as np
-import models.mimic_model as mimic_model
-
 import tools
 import os
-from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
 from .explore import FeatureExplorer
@@ -38,7 +33,6 @@ class Analyzer:
                     self.run_sub_analyzer(key)
                 elif key == 'feature_explore':
                     self.feature_explore()
-
 
         
     def run_sub_analyzer(self, analyzer_name):
