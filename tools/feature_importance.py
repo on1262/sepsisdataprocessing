@@ -4,7 +4,7 @@ import numpy as np
 import os
 
 
-class FeatureImportance():
+class SHAPFeatureImportance():
     def __init__(self, fea_names, model_type=['gbdt', 'lstm']) -> None:
         self.model_type = model_type
         self.fea_names = fea_names
@@ -49,7 +49,15 @@ class FeatureImportance():
             plt.savefig(os.path.join(out_dir, f'{name}.png'))
             plt.close()
 
-        
+class IntegratedFeatureImportance():
+    '''基于intergrated-gradients对深度学习网络计算重要性'''
+    def __init__(self, fea_names, steps=200) -> None:
+        self.fea_names = fea_names
+        self.steps = steps # 一条积分路径的近似迭代步数
+        # register
+        self.records = []
+
+    
         
         
         

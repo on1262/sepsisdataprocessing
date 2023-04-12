@@ -6,8 +6,6 @@ from tools import logger as logger
 from .container import DataContainer
 from .utils import generate_labels
 
-
-
 class Catboost2ClsAnalyzer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
@@ -24,10 +22,10 @@ class Catboost2ClsAnalyzer:
         tools.reinit_dir(self.out_dir, build=True)
 
     def label_explore(self, label, mask):
-        logger.info(f'2cls available labels: {np.sum(mask)}')
-        postive_rate = np.mean(label['Y'][mask])
-        logger.info(f'Positive Label: {postive_rate}')
-    
+        with open(os.path.join(self.out_dir, 'result.txt'), 'w') as f:
+            f.write(f'2cls available labels: {np.sum(mask)}\n')
+            postive_rate = np.mean(label['Y'][mask])
+            f.write(f'Positive Label: {postive_rate}\n')
 
     def run(self):
         '''预测窗口内是否发生ARDS的分类器'''
@@ -53,7 +51,7 @@ class Catboost2ClsAnalyzer:
         mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
         self.label_explore(label, mask)
         fea_names = [self.dataset.get_fea_label(idx) for idx in generator.available_idx()]
-        imp_logger = tools.FeatureImportance(fea_names=fea_names, model_type='gbdt')
+        imp_logger = tools.SHAPFeatureImportance(fea_names=fea_names, model_type='gbdt')
         # step 4: train and predict
         for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)
@@ -76,5 +74,6 @@ class Catboost2ClsAnalyzer:
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for Catboost cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
         metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
-        print('Metric 2 classes:')
-        print(metric_2cls.generate_info())
+        with open(os.path.join(self.out_dir, 'result.txt'), 'a') as f:
+            f.write('Metric 2 classes:\n')
+            f.write(str(metric_2cls.generate_info()))

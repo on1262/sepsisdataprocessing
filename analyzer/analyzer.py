@@ -4,7 +4,7 @@ import os
 from tools import logger as logger
 from .container import DataContainer
 from .explore import FeatureExplorer
-from .method_4cls import LSTM4ClsAnalyzer, BaselineNearestClsAnalyzer
+from .method_4cls import LSTM4ClsAnalyzer, BaselineNearestClsAnalyzer, EnsembleClsAnalyzer
 from .method_reg import LSTMRegAnalyzer, BaselineNearestRegAnalyzer
 from .method_2cls import Catboost2ClsAnalyzer
 from .method_quantile import LSTMQuantileAnalyzer
@@ -25,7 +25,8 @@ class Analyzer:
             'LSTM_reg': LSTMRegAnalyzer,
             'nearest_reg': BaselineNearestRegAnalyzer,
             'catboost_2cls':Catboost2ClsAnalyzer,
-            'LSTM_quantile': LSTMQuantileAnalyzer
+            'LSTM_quantile': LSTMQuantileAnalyzer,
+            'ensemble_4cls': EnsembleClsAnalyzer
         }
         if params is not None:
             for key in params:

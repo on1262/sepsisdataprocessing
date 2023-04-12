@@ -87,7 +87,7 @@ class CatboostClsTrainer():
 
 
 class Cls2LabelGenerator():
-    '''给出静态模型可用的特征'''
+    '''给出静态模型可用的数据集'''
     def __init__(self, window, ards_threshold, target_idx, sepsis_time_idx, post_sepsis_time, forbidden_idx=None, limit_idx=None) -> None:
         '''
         window: 静态模型考虑多少时长内的ARDS

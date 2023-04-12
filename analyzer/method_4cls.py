@@ -4,6 +4,7 @@ import tools
 import os
 from tqdm import tqdm
 from tools import logger as logger
+from sklearn.linear_model import LogisticRegression
 from .container import DataContainer
 from .utils import generate_labels, map_func
 from .explore import plot_cover_rate
@@ -81,6 +82,8 @@ class LSTM4ClsAnalyzer:
         print('Metric 2 classes:')
         print(metric_2cls.generate_info())
 
+
+
 class BaselineNearestClsAnalyzer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
@@ -127,6 +130,95 @@ class BaselineNearestClsAnalyzer:
             Y_mask = mask[test_index, ...]
             Y_gt = label[test_index, ...]
             Y_pred = self.predict(mode='test')
+            Y_pred = np.asarray(Y_pred)
+            metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
+            metric_2cls.add_prediction(map_func(Y_pred)[..., 1][Y_mask][:], map_func(Y_gt)[..., 1][Y_mask][:])
+            self.dataset.mode('all') # 恢复原本状态
+        metric_4cls.confusion_matrix(comment=self.model_name)
+        metric_4cls.write_result()
+        metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
+        print('Metric 2 classes:')
+        print(metric_2cls.generate_info())
+
+
+class EnsembleClsAnalyzer:
+    def __init__(self, params:dict, container:DataContainer) -> None:
+        self.params = params
+        self.params['paths']['lstm_cls_cache'] = self.params['paths']['ensemble_cache']
+        self.paths = params['paths']
+        
+        self.dataset = container.dataset
+        self.container= container
+        self.target_idx = self.dataset.target_idx
+        self.model_name = 'ensemble_4cls'
+        # copy params
+        self.centers = params['centers']
+        self.n_cls = len(self.centers)
+        self.lstm_dir = self.paths['lstm_cls_cache']
+
+    def nearest_predict(self, mode:str):
+        '''
+        input: mode: ['test']
+        output: (test_batch, seq_len, n_cls)
+        '''
+        self.dataset.mode(mode)
+        pred = np.zeros((len(self.dataset), self.dataset.data.shape[-1], len(self.centers)))
+        for idx, data in tqdm(enumerate(self.dataset), desc='testing', total=len(self.dataset)):
+            np_data = data['data']
+            pred[idx, :, :] = tools.label_smoothing(self.centers, np_data[self.target_idx, :], band=50)
+        return pred
+
+    def meta_classifier(self, train_data, train_label, pred_data):
+        '''
+        train_data: (batch, seqs_len, 2*n_cls)
+        train_label: (batch, seqs_len, n_cls)
+        pred_data: (batch, seqs_len, 2*n_cls)
+        '''
+        batch, seqs, n_fea = train_data.shape
+        t_batch, t_seqs, _ = pred_data.shape
+        n_cls = train_label.shape[-1]
+        train_data = np.reshape(train_data, (batch*seqs, n_fea))
+        train_label = np.reshape(train_label, (batch*seqs, n_cls))
+
+        pred_data = np.reshape(pred_data, (t_batch*t_seqs, n_fea))
+
+        meta_model = LogisticRegression(penalty='l2', multi_class='multinomial', max_iter=1000)
+        meta_model.fit(train_data, np.argmax(train_label, axis=-1).astype(np.int32))
+        result = meta_model.predict_proba(pred_data)
+        return np.reshape(result, (t_batch, t_seqs, n_cls))
+
+    def run(self):
+        if self.dataset.name() == 'mimic-iv':
+            import models.mimic_model as mlib
+        # step 1: append additional params
+        self.params['in_channels'] = self.dataset.data.shape[1]
+        # step 2: init variables
+        kf = KFold(n_splits=self.container.n_fold, shuffle=True, random_state=self.container.seed)
+        out_dir = os.path.join(self.paths['out_dir'], self.model_name)
+        tools.reinit_dir(out_dir, build=True)
+        metric_2cls = tools.DichotomyMetric()
+        metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
+        # step 3: generate labels
+        generator = mlib.Cls4LabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        mask, label = generate_labels(self.dataset, self.dataset.data, generator, out_dir)
+        self.params['weight'] = cal_label_weight(len(self.params['centers']), mask, label)
+        # step 4: train and predict
+        for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
+            valid_num = round(len(data_index)*0.15)
+            train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
+            self.dataset.register_split(train_index, valid_index, test_index)
+            trainer = mlib.LSTMClsTrainer(self.params, self.dataset)
+            trainer.train() # 不能直接用结果, 因为每个k-fold会覆盖上一次出来的结果, 导致测试集和训练集出现重叠
+            Y_mask = mask[test_index, ...]
+            Y_gt = label[test_index, ...]
+            # generate train data for meta classifier
+            YX_LSTM = np.asarray(trainer.predict(mode='train'))
+            YX_nearest = np.asarray(self.nearest_predict(mode='train'))
+            YX_train = np.concatenate([YX_LSTM, YX_nearest], axis=-1)
+            YY_LSTM = np.asarray(trainer.predict(mode='test'))
+            YY_nearest = np.asarray(self.nearest_predict(mode='test'))
+            YY_test = np.concatenate([YY_LSTM, YY_nearest], axis=-1)
+            Y_pred = self.meta_classifier(YX_train, label[train_index,...], YY_test)
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
             metric_2cls.add_prediction(map_func(Y_pred)[..., 1][Y_mask][:], map_func(Y_gt)[..., 1][Y_mask][:])

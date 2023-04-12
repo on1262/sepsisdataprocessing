@@ -405,6 +405,7 @@ class MIMICDataset(AbstractDataset):
         self.total_keys = self.static_keys + self.dynamic_keys
         self.icu_item = {str(key):val for key, val in self.mimiciv.icu_item.items()}
         self.hosp_item = {str(key):val for key, val in self.mimiciv.hosp_item.items()}
+        logger.info(f'Dynamic keys={len(self.dynamic_keys)}, static_keys={len(self.static_keys)}')
         # mode switch
         self.index = None # 当前模式(train/test)的index list, None表示使用全部数据
         self.train_index = None
@@ -851,7 +852,7 @@ class MIMICDataset(AbstractDataset):
             for line in write_lines:
                 fp.write(line + '\n')
         logger.info(f'Report generated at {out_path}')
-    
+
     def __getitem__(self, idx):
         if self.index is None:
             return {'data': self.data[idx, :, :], 'length': self.seqs_len[idx]}

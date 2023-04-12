@@ -8,7 +8,6 @@ import os
 from tqdm import tqdm
 import torchinfo
 
-
 class LSTMClsModel(nn.Module):
     '''带预测窗口的多分类判别模型'''
     def __init__(self, dev:str, in_channels:int, n_cls=4, hidden_size=128, dp=0) -> None:
@@ -71,6 +70,11 @@ class LSTMClsTrainer():
     
     def summary(self):
         torchinfo.summary(self.model)
+
+    def load_model(self, model_path):
+        logger.info('Load LSTM cls model from:' + model_path)
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+
 
     def _batch_forward(self, data):
         np_data = np.asarray(data['data'])
