@@ -400,7 +400,7 @@ class MultiClassMetric:
 
     def write_result(self, fp=sys.stdout):
         '''输出准确率等信息'''
-        print('='*10 + 'Metric 4 classes:'+ '='*10)
+        print('='*10 + 'Metric 4 classes:'+ '='*10, file=fp)
         self.calculate_cm()
         # 每个类的正确率
         accs = [self.cm[idx, idx] / np.sum(self.cm[:, idx]) for idx in range(self.n_cls)]
@@ -409,5 +409,5 @@ class MultiClassMetric:
         for idx, name in enumerate(self.class_names):
             print(f'{name} accuracy={accs[idx]}', file=fp)
         print('='*20, file=fp)
-        print(f'Mean accuracy={mean_acc}')
+        print(f'Mean accuracy={mean_acc}', file=fp)
     

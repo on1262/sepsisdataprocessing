@@ -6,7 +6,7 @@ from tools import logger as logger
 from .container import DataContainer
 from .utils import generate_labels
 
-class Catboost2ClsAnalyzer:
+class CatboostAnalyzer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
@@ -21,11 +21,6 @@ class Catboost2ClsAnalyzer:
         self.out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(self.out_dir, build=True)
 
-    def label_explore(self, label, mask):
-        with open(os.path.join(self.out_dir, 'result.txt'), 'w') as f:
-            f.write(f'2cls available labels: {np.sum(mask)}\n')
-            postive_rate = np.mean(label['Y'][mask])
-            f.write(f'Positive Label: {postive_rate}\n')
 
     def run(self):
         '''预测窗口内是否发生ARDS的分类器'''
@@ -41,15 +36,12 @@ class Catboost2ClsAnalyzer:
         kf = KFold(n_splits=self.container.n_fold, shuffle=True, random_state=self.container.seed)
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
-        metric_2cls = tools.DichotomyMetric()
+        metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
         generator = mlib.StaticLabelGenerator(
-            window=self.params['window'], ards_threshold=self.params['ards_threshold'],
-            target_idx=self.target_idx,  sepsis_time_idx=self.dataset.idx_dict['sepsis_time'],
-            post_sepsis_time=self.params['max_post_sepsis_hour'],
-            forbidden_idx=self.params['forbidden_idx'], limit_idx=self.params['limit_idx'])
+            window=self.params['window'], centers=self.params['centers'],
+            target_idx=self.target_idx, forbidden_idx=self.params['forbidden_idx'], limit_idx=self.params['limit_idx'])
         mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
-        self.label_explore(label, mask)
         fea_names = [self.dataset.get_fea_label(idx) for idx in generator.available_idx()]
         imp_logger = tools.SHAPFeatureImportance(fea_names=fea_names, model_type='gbdt')
         # step 4: train and predict
@@ -63,17 +55,16 @@ class Catboost2ClsAnalyzer:
             Y_gt = label['Y'][test_index][mask[test_index]]
             Y_pred = trainer.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
-            metric_2cls.add_prediction(Y_pred, Y_gt)
+            metric_4cls.add_prediction(Y_pred, Y_gt, mask[test_index])
             imp_logger.add_record(trainer.model, label['X'])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
-        imp_logger.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
+        # imp_logger.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
         single_imp_out = os.path.join(out_dir, 'single_shap')
         tools.reinit_dir(single_imp_out, build=True)
-        imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
+        # imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for Catboost cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
-        metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
+        metric_4cls.confusion_matrix(comment=self.model_name)
         with open(os.path.join(self.out_dir, 'result.txt'), 'a') as f:
-            f.write('Metric 2 classes:\n')
-            f.write(str(metric_2cls.generate_info()))
+            metric_4cls.write_result(f)

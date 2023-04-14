@@ -4,10 +4,8 @@ import os
 from tools import logger as logger
 from .container import DataContainer
 from .explore import FeatureExplorer
-from .method_4cls import LSTMOriginalAnalyzer, BaselineNearestClsAnalyzer, EnsembleClsAnalyzer
-from .method_reg import LSTMRegAnalyzer, BaselineNearestRegAnalyzer
-from .method_2cls import Catboost2ClsAnalyzer
-from .method_quantile import LSTMQuantileAnalyzer
+from .method_lstm import LSTMOriginalAnalyzer, BaselineNearestClsAnalyzer, EnsembleClsAnalyzer
+from .method_catboost import CatboostAnalyzer
 from datasets import AbstractDataset
 
 
@@ -22,11 +20,7 @@ class Analyzer:
         self.analyzer_dict = {
             'LSTM_4cls':LSTMOriginalAnalyzer,
             'nearest_4cls': BaselineNearestClsAnalyzer,
-            'LSTM_reg': LSTMRegAnalyzer,
-            'nearest_reg': BaselineNearestRegAnalyzer,
-            'catboost_4cls':Catboost2ClsAnalyzer,
-            'LSTM_quantile': LSTMQuantileAnalyzer,
-            'ensemble_4cls': EnsembleClsAnalyzer
+            'catboost_4cls':CatboostAnalyzer,
         }
         if params is not None:
             for key in params:

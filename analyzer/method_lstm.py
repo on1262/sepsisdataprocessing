@@ -6,7 +6,7 @@ from tqdm import tqdm
 from tools import logger as logger
 from sklearn.linear_model import LogisticRegression
 from .container import DataContainer
-from .utils import generate_labels, map_func
+from .utils import generate_labels, map_func, cal_label_weight
 from .explore import plot_cover_rate
 
 class LSTMOriginalAnalyzer:
@@ -247,20 +247,5 @@ def explore_result(ards_threshold, Y_pred, Y_gt, mask, out_dir, cmt):
     tools.plot_reg_correlation(
         X=delta, fea_names=['Prediction Abs Error'], Y=num_flips, target_name='Num flips', adapt=True, write_dir_path=out_dir, plot_dash=False, comment=cmt)
 
-def cal_label_weight(n_cls, mask, label):
-    '''
-    获取n_cls反比于数量的权重
-    label: (batch, seq_lens, n_cls)
-    mask: (batch, seq_lens)
-    return: (n_cls,)
-    '''
-    hard_label = np.argmax(label, axis=-1)
-    hard_label = hard_label[:][mask[:]]
-    weight = np.asarray([np.mean(hard_label == c) for c in range(n_cls)])
-    logger.info(f'4cls Label proportion: {weight}')
-    weight = 1 / weight
-    weight = weight / np.sum(weight)
-    logger.info(f'4cls weight: {weight}')
-    return weight
 
 
