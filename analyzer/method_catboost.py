@@ -45,7 +45,7 @@ class CatboostAnalyzer:
         fea_names = [self.dataset.get_fea_label(idx) for idx in generator.available_idx()]
         imp_logger = tools.SHAPFeatureImportance(fea_names=fea_names, model_type='gbdt')
         # step 4: train and predict
-        for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
+        for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
             valid_num = round(len(data_index)*0.15)
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
             self.dataset.register_split(train_index, valid_index, test_index)

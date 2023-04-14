@@ -15,13 +15,35 @@ class DynamicLabelGenerator():
     生成每个时间点在预测窗口内的四分类标签
     soft_label: 是否开启软标签
     '''
-    def __init__(self, soft_label=False, window=16, centers=list(), smoothing_band=50) -> None:
+    def __init__(self, soft_label=False, window=16, centers=list(), smoothing_band=50, limit_idx=[]) -> None:
         assert(len(centers) == 4)
         self.window = window # 向前预测多少个点内的ARDS
         self.centers = centers # 判断ARDS的界限
         self.band = smoothing_band # 平滑程度, 不能超过两个center之间的距离
         self.soft_label = soft_label # 是否开启软标签
+        self.forbidden_idx = []
+        self.limit_idx = limit_idx
+        # generate idx
+        self.used_idx = None
 
+    def available_idx(self, n_fea=None):
+        '''
+        生成可用的特征序号
+        '''
+        if self.used_idx is not None:
+            return self.used_idx
+        else:
+            assert(n_fea is not None)
+            self.used_idx = []
+            if len(self.limit_idx) == 0:
+                for idx in range(n_fea):
+                    if idx not in self.forbidden_idx:
+                        self.used_idx.append(idx)
+            else:
+                for idx in range(n_fea):
+                    if idx not in self.forbidden_idx and idx in self.limit_idx:
+                        self.used_idx.append(idx)
+            return self.used_idx
     
     def __call__(self, _data:np.ndarray, mask:np.ndarray) -> np.ndarray:
         '''
@@ -54,13 +76,13 @@ class DynamicLabelGenerator():
 
 class StaticLabelGenerator():
     '''生成一个大窗口内的最低ARDS四分类标签和训练数据'''
-    def __init__(self, window, centers, target_idx, forbidden_idx=None, limit_idx=None) -> None:
+    def __init__(self, window, centers, target_idx, forbidden_idx, limit_idx) -> None:
         '''
         window: 考虑多少时长内的ARDS(point)
         centers: 各类中心
         target_idx: PF_ratio位置
         forbidden_idx: 为了避免static model受到影响, 需要屏蔽一些特征
-        limit_idx: 如果为None, 则没有任何影响, 否则选择的特征只可能是其中的特征减去forbidden_idx的特征
+        limit_idx: 如果为[], 则没有任何影响, 否则选择的特征只可能是其中的特征减去forbidden_idx的特征
         '''
         self.window = window # 静态模型cover多少点数
         self.centers = centers
@@ -79,7 +101,7 @@ class StaticLabelGenerator():
         else:
             assert(n_fea is not None)
             self.used_idx = []
-            if self.limit_idx is None or len(self.limit_idx) == 0:
+            if len(self.limit_idx) == 0:
                 for idx in range(n_fea):
                     if idx not in self.forbidden_idx:
                         self.used_idx.append(idx)

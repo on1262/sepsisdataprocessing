@@ -361,9 +361,9 @@ class MultiClassMetric:
         pred_label = np.argmax(pred, axis=1)
         for idx in range(pred.shape[0]):
             self.cm[pred_label[idx]][gt_label[idx]] += 1
-        for x in range(self.n_cls):
-            for y in range(self.n_cls):
-                logger.debug(f'pred={x}, gt={y}: {self.cm[x][y]}')
+        # for x in range(self.n_cls):
+        #     for y in range(self.n_cls):
+        #         logger.debug(f'pred={x}, gt={y}: {self.cm[x][y]}')
 
             
 

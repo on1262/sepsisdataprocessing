@@ -4,7 +4,8 @@ import os
 from tools import logger as logger
 from .container import DataContainer
 from .explore import FeatureExplorer
-from .method_lstm import LSTMOriginalAnalyzer, BaselineNearestClsAnalyzer, EnsembleClsAnalyzer
+from .method_lstm_original import LSTMOriginalAnalyzer
+from .method_nearest import BaselineNearestClsAnalyzer
 from .method_catboost import CatboostAnalyzer
 from datasets import AbstractDataset
 
@@ -18,7 +19,7 @@ class Analyzer:
         self.container = DataContainer(dataset)
         self.explorer = FeatureExplorer(self.container)
         self.analyzer_dict = {
-            'LSTM_4cls':LSTMOriginalAnalyzer,
+            'LSTM_original':LSTMOriginalAnalyzer,
             'nearest_4cls': BaselineNearestClsAnalyzer,
             'catboost_4cls':CatboostAnalyzer,
         }

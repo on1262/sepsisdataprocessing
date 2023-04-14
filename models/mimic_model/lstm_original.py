@@ -50,7 +50,7 @@ class LSTMOriginalTrainer():
         self.criterion = OriginalClsLoss(len(self.params['centers']), weight=params['weight'])
         self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
         self.dataset = dataset
-        self.target_idx = dataset.target_idx
+        self.available_idx = params['available_idx']
         self.generator = DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         self.train_dataloader = DataLoader(dataset=self.dataset, batch_size=params['batch_size'], shuffle=True, collate_fn=Collect_Fn)
         self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=True, collate_fn=Collect_Fn)
@@ -73,13 +73,13 @@ class LSTMOriginalTrainer():
 
 
     def _batch_forward(self, data):
-        np_data = np.asarray(data['data'])
+        np_data = np.asarray(data['data'][:, self.available_idx, :])
         seq_lens = data['length']
         mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
         mask[:, -1] = False
         mask, labels = self.generator(np_data, mask)
         mask, labels = torch.as_tensor(mask, device=self.device), torch.as_tensor(labels, device=self.device)
-        x = data['data'].to(self.device)
+        x = data['data'][:, self.available_idx, :].to(self.device)
         pred = self.model(x)
         loss = self.criterion(pred, labels, torch.as_tensor(mask, device=self.device))
         return pred, loss
@@ -126,7 +126,7 @@ class LSTMOriginalTrainer():
         self.model.load_state_dict(torch.load(best_path, map_location=self.device))
         logger.info(f'Load best model from {best_path} valid loss={best_valid_loss}')
     
-    def predict(self, mode):
+    def predict(self, mode, warm_step=30):
         assert(mode in ['test', 'train', 'valid'])
         self.dataset.mode(mode)
         self.model = self.model.to(self.device).eval()
@@ -135,7 +135,12 @@ class LSTMOriginalTrainer():
             tq.set_description(f'Testing, data={mode}')
             with torch.no_grad():
                 for idx, data in enumerate(self.test_dataloader):
-                    pred, loss = self._batch_forward(data)
+                    if warm_step is not None:
+                        new_data = torch.concat([torch.expand_copy(data['data'][:, :, 0][..., None], (-1,-1,warm_step)), data['data']], dim=-1)
+                        pred, loss = self._batch_forward({'data':new_data, 'length':data['length']})
+                        pred = pred[:,warm_step:,:]
+                    else:
+                        pred, loss = self._batch_forward(data)
                     register_vals['pred'].append(pred.detach().clone().cpu())
                     register_vals['test_loss'] += loss.detach().cpu().item()
                     tq.set_postfix(loss=register_vals['test_loss'] / (idx+1))
