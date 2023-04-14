@@ -9,13 +9,13 @@ from .container import DataContainer
 from .utils import generate_labels, map_func
 from .explore import plot_cover_rate
 
-class LSTM4ClsAnalyzer:
+class LSTMOriginalAnalyzer:
     '''动态模型, 四分类预测'''
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
         self.container = container
-        self.model_name = 'LSTM_4cls'
+        self.model_name = 'LSTM_original'
         self.loss_logger = tools.LossLogger()
         # copy attribute from container
         self.target_idx = container.dataset.target_idx
@@ -51,7 +51,7 @@ class LSTM4ClsAnalyzer:
         metric_2cls = tools.DichotomyMetric()
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels & label explore
-        generator = mlib.Cls4LabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        generator = mlib.DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
         self.params['weight'] = cal_label_weight(len(self.params['centers']), mask, label)
         self.label_explore(label, mask)
@@ -60,7 +60,7 @@ class LSTM4ClsAnalyzer:
             valid_num = round(len(data_index)*0.15)
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
             self.dataset.register_split(train_index, valid_index, test_index)
-            trainer = mlib.LSTMClsTrainer(self.params, self.dataset)
+            trainer = mlib.LSTMOriginalTrainer(self.params, self.dataset)
             if idx == 0:
                 trainer.summary()
             trainer.train()
@@ -120,7 +120,7 @@ class BaselineNearestClsAnalyzer:
         metric_2cls = tools.DichotomyMetric()
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
-        generator = mlib.Cls4LabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        generator = mlib.DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.dataset.data, generator, out_dir)
         # step 4: train and predict
         for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
@@ -199,7 +199,7 @@ class EnsembleClsAnalyzer:
         metric_2cls = tools.DichotomyMetric()
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
-        generator = mlib.Cls4LabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        generator = mlib.DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.dataset.data, generator, out_dir)
         self.params['weight'] = cal_label_weight(len(self.params['centers']), mask, label)
         # step 4: train and predict
@@ -207,7 +207,7 @@ class EnsembleClsAnalyzer:
             valid_num = round(len(data_index)*0.15)
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
             self.dataset.register_split(train_index, valid_index, test_index)
-            trainer = mlib.LSTMClsTrainer(self.params, self.dataset)
+            trainer = mlib.LSTMOriginalTrainer(self.params, self.dataset)
             trainer.train() # 不能直接用结果, 因为每个k-fold会覆盖上一次出来的结果, 导致测试集和训练集出现重叠
             Y_mask = mask[test_index, ...]
             Y_gt = label[test_index, ...]

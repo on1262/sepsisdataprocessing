@@ -360,9 +360,6 @@ class MIMICIV:
                                 tp.write(sentence)
 
 
-
-
-
 class MIMICDataset(AbstractDataset):
     '''
     MIMIC-IV上层抽象, 从中间文件读取数据, 进行处理, 得到最终数据集

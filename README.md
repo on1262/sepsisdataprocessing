@@ -1,5 +1,7 @@
 # Sepsis induced ARDS
 
+main: 静态模型和动态模型独立, 包括lstm, quantile等, 作为备份
+combined_model: 先进模型
 ## 架构
 
 analyzer: 分析模块

@@ -11,7 +11,7 @@ class Catboost2ClsAnalyzer:
         self.params = params
         self.paths = params['paths']
         self.container = container
-        self.model_name = 'catboost_2cls'
+        self.model_name = 'catboost_4cls'
         self.loss_logger = tools.LossLogger()
         # copy attribute from container
         self.target_idx = container.dataset.target_idx
@@ -43,7 +43,7 @@ class Catboost2ClsAnalyzer:
         tools.reinit_dir(out_dir, build=True)
         metric_2cls = tools.DichotomyMetric()
         # step 3: generate labels
-        generator = mlib.Cls2LabelGenerator(
+        generator = mlib.StaticLabelGenerator(
             window=self.params['window'], ards_threshold=self.params['ards_threshold'],
             target_idx=self.target_idx,  sepsis_time_idx=self.dataset.idx_dict['sepsis_time'],
             post_sepsis_time=self.params['max_post_sepsis_hour'],
@@ -57,7 +57,7 @@ class Catboost2ClsAnalyzer:
             valid_num = round(len(data_index)*0.15)
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
             self.dataset.register_split(train_index, valid_index, test_index)
-            trainer = mlib.CatboostClsTrainer(self.params, self.dataset)
+            trainer = mlib.CatboostTrainer(self.params, self.dataset)
             trainer.train()
             self.loss_logger.add_loss(trainer.get_loss())
             Y_gt = label['Y'][test_index][mask[test_index]]
