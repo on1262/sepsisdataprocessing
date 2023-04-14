@@ -366,6 +366,7 @@ class MIMICIV:
 class MIMICDataset(AbstractDataset):
     '''
     MIMIC-IV上层抽象, 从中间文件读取数据, 进行处理, 得到最终数据集
+    (batch, n_fea, seq_len)
     '''
     __name = 'mimic-iv'
 

@@ -195,8 +195,14 @@ def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=Tr
     plt.close()
 
 
-def plot_hotspot(data:np.ndarray, fea_names:list):
-    '''生成相关矩阵'''
+def plot_correlation_matrix(data:np.ndarray, fea_names:list, save_path=None):
+    '''
+    生成相关矩阵
+    data: (sample, n_fea)
+    fea_names: (n_fea)
+    '''
+    assert(len(fea_names) == data.shape[1])
+    plt.figure(figsize=(15,15))
     mat = np.corrcoef(x=data, rowvar=False)
     f, ax = plt.subplots(figsize=(60, 60))
     mask = np.triu(np.ones_like(mat, dtype=bool))
@@ -206,8 +212,9 @@ def plot_hotspot(data:np.ndarray, fea_names:list):
     plt.xticks(rotation=90)
     plt.yticks(rotation=0)
     plt.title('Pearson Correlation Matrix', fontsize = 13)
-    plt.show()
+    plt.savefig(save_path)
     plt.close()
+    return mat
 
 def plot_confusion_matrix(cm:np.ndarray, labels:list, title='Confusion matrix', comment='', save_path='./out.png'):
     '''
