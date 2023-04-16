@@ -301,7 +301,7 @@ class RobustClassificationMetric:
         record_key = round(missrate * 1000) # 精度支持
         if self.records.get(record_key) is None:
             self.records[record_key] = MultiClassMetric(class_names=self.class_names, out_dir=None)
-        self.records[record_key].add_prediction(self, _prediction, _gt, _mask)
+        self.records[record_key].add_prediction(_prediction, _gt, _mask)
 
     def plot_curve(self):
         '''绘制缺失率和性能关系曲线'''
@@ -314,6 +314,7 @@ class RobustClassificationMetric:
         plt.annotate(auc_str, xy=[0.7, 0.05], fontsize=12)
         plt.title('Performance with missrate')
         plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.0])
         plt.xlabel("Missing rate")
         plt.ylabel("Metric")
         save_path = os.path.join(self.out_dir, 'missrate_performance.png')

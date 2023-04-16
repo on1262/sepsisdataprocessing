@@ -52,7 +52,7 @@ class CatboostTrainer():
         }
         return data
 
-    def train(self):
+    def train(self, addi_params:dict=None):
         tools.reinit_dir(self.cache_path, build=True) # 这是catboost输出loss的文件夹
         self.data_dict = self._extract_data()
         cls_weight = self.cal_label_weight(
@@ -71,6 +71,11 @@ class CatboostTrainer():
         train_Y = self.data_dict['train']['Y'][self.data_dict['train']['mask']]
         valid_X = self.data_dict['valid']['X'][self.data_dict['valid']['mask']]
         valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
+        if addi_params is not None:
+            if 'dropout' in addi_params.keys():
+                dropout_generator = DropoutLabelGenerator(missrate=addi_params['dropout'])
+                _, train_X = dropout_generator(train_X)
+                _, valid_X = dropout_generator(valid_X)
         pool_train = Pool(train_X, np.argmax(train_Y, axis=-1))
         pool_valid = Pool(valid_X, np.argmax(valid_Y, axis=-1))
         self.model.fit(pool_train, eval_set=pool_valid, use_best_model=True)
@@ -85,7 +90,7 @@ class CatboostTrainer():
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
                 dropout_generator = DropoutLabelGenerator(missrate=addi_params['dropout'])
-                test_X = dropout_generator(test_X)
+                _, test_X = dropout_generator(test_X)
         pool_test = Pool(data=test_X)
         return self.model.predict(pool_test, prediction_type='Probability')
 

@@ -4,8 +4,9 @@ from datasets import MIMICDataset
 analyzer_params = [
     #'feature_explore',
     #'nearest_4cls',
-    #'LSTM_original'
-    'catboost_4cls'
+    #'LSTM_original',
+    #'catboost_4cls',
+    'random_forest',
 ]
 
 if __name__ == '__main__':

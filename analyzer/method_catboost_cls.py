@@ -55,7 +55,10 @@ class CatboostAnalyzer:
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
             self.dataset.register_split(train_index, valid_index, test_index)
             trainer = mlib.CatboostTrainer(self.params, self.dataset)
-            trainer.train()
+            if self.robust and 'train_miss_rate' in self.params.keys():
+                trainer.train(addi_params={'dropout':self.params['train_miss_rate']}) # 训练时对训练集随机dropout
+            else:
+                trainer.train()
             self.loss_logger.add_loss(trainer.get_loss())
             Y_gt = label['Y'][test_index][mask[test_index]]
             Y_pred = trainer.predict(mode='test')

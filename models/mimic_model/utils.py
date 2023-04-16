@@ -148,8 +148,10 @@ class DropoutLabelGenerator:
         data_size = 1
         for s in data.shape:
             data_size *= s
-        k = round(self.missrate * data_size)
         mask = np.ones((data_size,), dtype=bool)
+        if self.missrate == 0:
+            return mask, data
+        k = round(self.missrate * data_size)
         mask[np.random.permutation(data_size)[:k]] = False # 随机选固定比例的点赋值为False
         mask = np.reshape(mask, data.shape)
         return mask, data * mask + self.value * np.logical_not(mask)

@@ -7,6 +7,7 @@ from .explore import FeatureExplorer
 from .method_lstm_original import LSTMOriginalAnalyzer
 from .method_nearest_cls import BaselineNearestClsAnalyzer
 from .method_catboost_cls import CatboostAnalyzer
+from .method_random_forest import RandomForestAnalyzer
 from datasets import AbstractDataset
 
 
@@ -22,6 +23,7 @@ class Analyzer:
             'LSTM_original':LSTMOriginalAnalyzer,
             'nearest_4cls': BaselineNearestClsAnalyzer,
             'catboost_4cls':CatboostAnalyzer,
+            'random_forest':RandomForestAnalyzer,
         }
         if params is not None:
             for key in params:
