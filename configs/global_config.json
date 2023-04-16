@@ -21,7 +21,8 @@
         "mimic-iv":{
             "paths": {
                 "out_dir":"outputs/mimic-iv",
-                "lstm_origin_cache": "outputs/mimic-iv/cache/lstm_origin",
+                "lstm_original_cache": "outputs/mimic-iv/cache/lstm_original",
+                "lstm_balanced_cache": "outputs/mimic-iv/cache/lstm_balanced",
                 "ensemble_cache": "outputs/mimic-iv/cache/ensemble",
                 "catboost_cls_cache": "outputs/mimic-iv/cache/catboost_cls",
                 "random_forest_cache": "outputs/mimic-iv/cache/random_forest",

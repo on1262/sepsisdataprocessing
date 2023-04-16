@@ -44,7 +44,7 @@ class LSTMOriginalTrainer():
         self.params = params
         self.paths = params['paths']
         self.device = torch.device(self.params['device'])
-        self.cache_path = self.paths['lstm_cls_cache']
+        self.cache_path = self.paths['lstm_original_cache']
         tools.reinit_dir(self.cache_path, build=True)
         self.model = LSTMOriginalModel(params['device'], params['in_channels'])
         self.criterion = OriginalClsLoss(len(self.params['centers']), weight=params['weight'])

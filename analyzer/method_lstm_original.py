@@ -96,22 +96,5 @@ class LSTMOriginalAnalyzer:
             metric_startstep.write_result(fp)
 
 
-def explore_result(ards_threshold, Y_pred, Y_gt, mask, out_dir, cmt):
-    '''
-    输出二分类误差和flips的统计关系, 观察误差大的样本是否存在特殊的分布
-    Y_pred, Y_gt: (batch, seq_lens), 值域只能是[0,1]
-    '''
-    delta = np.abs(Y_pred - Y_gt)
-    cover = (Y_gt > 0) * (Y_gt < ards_threshold) * mask
-    diffs = np.diff(cover.astype(int), axis=1)
-    # count the number of flips
-    num_flips = np.count_nonzero(diffs, axis=1)
-    num_flips = np.repeat(num_flips[:, None], Y_pred.shape[1], axis=1)
-    mask = mask[:]
-    num_flips = num_flips[:][mask]
-    delta = delta[:][mask][:, None]
-    tools.plot_reg_correlation(
-        X=delta, fea_names=['Prediction Abs Error'], Y=num_flips, target_name='Num flips', adapt=True, write_dir_path=out_dir, plot_dash=False, comment=cmt)
-
 
 

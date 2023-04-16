@@ -44,10 +44,11 @@ class LSTMBalancedTrainer():
         self.params = params
         self.paths = params['paths']
         self.device = torch.device(self.params['device'])
-        self.cache_path = self.paths['lstm_cls_cache']
+        self.cache_path = self.paths['lstm_balanced_cache']
         tools.reinit_dir(self.cache_path, build=True)
         self.model = LSTMBalancedModel(params['device'], params['in_channels'])
-        self.criterion = OriginalClsLoss(len(self.params['centers']), weight=params['weight'])
+        self.n_cls = len(self.params['centers'])
+        self.criterion = BalancedClsLoss(self.n_cls)
         self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
         self.dataset = dataset
         self.available_idx = params['available_idx']
@@ -72,7 +73,7 @@ class LSTMBalancedTrainer():
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
 
 
-    def _batch_forward(self, data):
+    def _batch_forward(self, data, return_accs=False):
         np_data = np.asarray(data['data'][:, self.available_idx, :])
         seq_lens = data['length']
         mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
@@ -82,7 +83,15 @@ class LSTMBalancedTrainer():
         x = data['data'][:, self.available_idx, :].to(self.device)
         pred = self.model(x)
         loss = self.criterion(pred, labels, torch.as_tensor(mask, device=self.device))
-        return pred, loss
+        if return_accs:
+            acc_dict = {}
+            label_gt = torch.argmax(labels, dim=-1)[:]
+            label_pred = torch.argmax(pred, dim=-1)[:]
+            for idx in range(self.n_cls):
+                acc_dict[idx] = [torch.sum(label_gt==idx).detach().cpu().item(), torch.sum((label_gt==idx)*(label_pred==idx)).detach().cpu().item()]
+            return pred, loss, acc_dict
+        else:
+            return pred, loss
 
     def train(self):
         cache_path = os.path.join(self.cache_path)
@@ -93,7 +102,7 @@ class LSTMBalancedTrainer():
         with tqdm(total=self.params['epochs']) as tq:
             tq.set_description(f'Training, Epoch')
             best_epoch = 0
-            best_valid_loss = np.inf
+            best_valid_metric = 0
             for epoch in range(self.params['epochs']):
                 loss_vals = {'train_loss':0, 'valid_loss':0}
                 # train phase
@@ -107,24 +116,34 @@ class LSTMBalancedTrainer():
                     loss_vals['train_loss'] += loss.detach().cpu().item() * pred.size(0)
                 loss_vals['train_loss'] /= len(self.dataset) # 避免最后一个batch导致计算误差
                 # validation phase
+                acc_dict = {} # class:[n_gt,n_success_pred]
                 self.dataset.mode('valid')
                 self.model.eval()
                 with torch.no_grad():
                     for data in self.valid_dataloader:
-                        pred, loss = self._batch_forward(data)
+                        pred, loss, a_dict = self._batch_forward(data, return_accs=True)
+                        for key in a_dict:
+                            if key not in acc_dict:
+                                acc_dict[key] = a_dict[key]
+                            else:
+                                acc_dict[key] = [acc_dict[key][0]+a_dict[key][0], acc_dict[key][1]+a_dict[key][1]]
                         loss_vals['valid_loss'] += loss.detach().cpu().item() * pred.size(0)
+                # update accs by valid data
+                accs = np.asarray([acc_dict[idx][1] / acc_dict[idx][0] for idx in range(self.n_cls)])
+                mean_acc = np.mean(accs)
+                self.criterion.update_accs(accs)
                 loss_vals['valid_loss'] /= len(self.dataset)
-                tq.set_postfix(valid_loss=loss_vals['valid_loss'], train_loss=loss_vals['train_loss'])
+                tq.set_postfix(v_loss=loss_vals['valid_loss'], t_loss=loss_vals['train_loss'], mean_acc=mean_acc)
                 tq.update(1)
-                if loss_vals['valid_loss'] < best_valid_loss:
-                    best_valid_loss = loss_vals['valid_loss']
+                if mean_acc >= best_valid_metric:
+                    best_valid_metric = mean_acc
                     best_epoch = epoch
                 self.register_vals['train_loss'].append(loss_vals['train_loss'])
                 self.register_vals['valid_loss'].append(loss_vals['valid_loss'])
                 torch.save(self.model.state_dict(), os.path.join(cache_path, f'{epoch}.pt'))
         best_path = os.path.join(cache_path, f'{best_epoch}.pt')
         self.model.load_state_dict(torch.load(best_path, map_location=self.device))
-        logger.info(f'Load best model from {best_path} valid loss={best_valid_loss}')
+        logger.info(f'Load best model from {best_path} valid loss={best_valid_metric}')
     
     def predict(self, mode, warm_step=30):
         assert(mode in ['test', 'train', 'valid'])
@@ -150,17 +169,33 @@ class LSTMBalancedTrainer():
 
 
 class BalancedClsLoss(nn.Module):
-    def __init__(self, n_cls:int, weight=None) -> None:
+    '''提供动态预测的分类loss'''
+    def __init__(self, n_cls:int, target_weight=None) -> None:
         '''
         forecast window: 向前预测的窗口
         '''
         super().__init__()
         self.n_cls = n_cls
-        if weight is None:
-            self.criterion = nn.CrossEntropyLoss(reduction='none') # input: (N,C,d1,...dk)
+        # input: (N,C,d1,...dk)
+        self.accs = np.zeros((4,)) # 准确率记录
+        self.weight = np.ones((4,)) # 目标准确率的权重修正
+        self.coeff = torch.ones((4,))
+    
+    def update_accs(self, new_accs):
+        '''更新准确率, 越频繁越好'''
+        self.accs = np.asarray(new_accs)
+        self.coeff = self.cal_coeff() # 更新coeff
+    
+    def cal_coeff(self):
+        '''按照当前准确率计算各分类loss权重'''
+        if np.max(self.accs) < 0.4: # 初始训练阶段不进行影响
+            return torch.ones((4,))
         else:
-            self.weight = torch.as_tensor(weight)
-            self.criterion = nn.CrossEntropyLoss(reduction='none', weight=self.weight)
+            target_accs = np.mean(self.accs) * (self.weight * self.n_cls / np.sum(self.weight)) # 当前性能对应的目标性能
+            delta = (self.accs - target_accs)
+            coeff = torch.nn.functional.sigmoid(-60*torch.as_tensor(delta)) # 只推进不满足target的部分
+        return coeff
+
 
     def forward(self, pred:torch.Tensor, labels:torch.Tensor, mask:torch.Tensor):
         '''
@@ -169,11 +204,13 @@ class BalancedClsLoss(nn.Module):
             labels可以是软标签
         '''
         assert(pred.size() == labels.size())
-        if len(mask.size()) + 1 == len(pred.size()):
+        if len(mask.size()) + 1 == len(pred.size()): # mask->(batch, seq_len, 1)
             mask = mask[..., None]
-        pred, labels = pred*mask, labels*mask
-        # 创建标签矩阵
-        # permute: ->(batch, n_cls, seq_len)
-        loss = self.criterion(pred.permute(0, 2, 1), labels.permute(0, 2, 1))
-        loss = torch.sum(loss) / torch.sum(mask)
+        # 计算四分类准确率
+        pred, labels = pred.permute(0, 2, 1), labels.permute(0, 2, 1) # permute: ->(batch, n_cls, seq_len)
+        loss = -torch.log(pred)*labels*mask.permute(0,2,1)
+        loss = torch.sum(loss, dim=-1) / torch.sum(mask, dim=1) # ->(batch, n_cls)
+        loss = torch.mean(loss, dim=0) # ->(n_cls,)
+        assert(loss.size(0) == self.n_cls)
+        loss = torch.sum(loss * self.coeff.to(loss.device))
         return loss

@@ -5,8 +5,9 @@ analyzer_params = [
     #'feature_explore',
     #'nearest_4cls',
     #'LSTM_original',
+    'LSTM_balanced',
     #'catboost_4cls',
-    'random_forest',
+    #'random_forest',
 ]
 
 if __name__ == '__main__':

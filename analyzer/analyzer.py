@@ -5,6 +5,7 @@ from tools import logger as logger
 from .container import DataContainer
 from .explore import FeatureExplorer
 from .method_lstm_original import LSTMOriginalAnalyzer
+from .method_lstm_balanced import LSTMBalancedAnalyzer
 from .method_nearest_cls import BaselineNearestClsAnalyzer
 from .method_catboost_cls import CatboostAnalyzer
 from .method_random_forest import RandomForestAnalyzer
@@ -21,6 +22,7 @@ class Analyzer:
         self.explorer = FeatureExplorer(self.container)
         self.analyzer_dict = {
             'LSTM_original':LSTMOriginalAnalyzer,
+            "LSTM_balanced":LSTMBalancedAnalyzer,
             'nearest_4cls': BaselineNearestClsAnalyzer,
             'catboost_4cls':CatboostAnalyzer,
             'random_forest':RandomForestAnalyzer,

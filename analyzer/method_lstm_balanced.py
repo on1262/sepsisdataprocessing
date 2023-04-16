@@ -3,12 +3,11 @@ from sklearn.model_selection import KFold
 import tools
 import os
 from tools import logger as logger
-from sklearn.linear_model import LogisticRegression
 from .container import DataContainer
 from .utils import generate_labels, map_func, cal_label_weight
 from .explore import plot_cover_rate
 
-class LSTMOriginalAnalyzer:
+class LSTMBalancedAnalyzer:
     '''
     动态模型, 四分类预测
     '''
@@ -16,7 +15,7 @@ class LSTMOriginalAnalyzer:
         self.params = params
         self.paths = params['paths']
         self.container = container
-        self.model_name = 'LSTM_original'
+        self.model_name = 'LSTM_balanced'
         self.loss_logger = tools.LossLogger()
         # copy attribute from container
         self.target_idx = container.dataset.target_idx
@@ -69,7 +68,7 @@ class LSTMOriginalAnalyzer:
             train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
             self.dataset.register_split(train_index, valid_index, test_index)
             self.params['weight'] = cal_label_weight(len(self.params['centers']), mask[train_index,...], label[train_index,...])
-            trainer = mlib.LSTMOriginalTrainer(self.params, self.dataset)
+            trainer = mlib.LSTMBalancedTrainer(self.params, self.dataset)
             if idx == 0:
                 trainer.summary()
             trainer.train()
@@ -83,7 +82,7 @@ class LSTMOriginalAnalyzer:
             # metric_2cls.add_prediction(map_func(Y_pred)[..., 1][Y_mask][:], map_func(Y_gt)[..., 1][Y_mask][:])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
-        self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
+        self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM balanced cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
         metric_4cls.confusion_matrix(comment=self.model_name)
         metric_startstep.confusion_matrix(comment='Start step ' + self.model_name)
@@ -95,23 +94,6 @@ class LSTMOriginalAnalyzer:
             print('Startstep performance:', file=fp)
             metric_startstep.write_result(fp)
 
-
-def explore_result(ards_threshold, Y_pred, Y_gt, mask, out_dir, cmt):
-    '''
-    输出二分类误差和flips的统计关系, 观察误差大的样本是否存在特殊的分布
-    Y_pred, Y_gt: (batch, seq_lens), 值域只能是[0,1]
-    '''
-    delta = np.abs(Y_pred - Y_gt)
-    cover = (Y_gt > 0) * (Y_gt < ards_threshold) * mask
-    diffs = np.diff(cover.astype(int), axis=1)
-    # count the number of flips
-    num_flips = np.count_nonzero(diffs, axis=1)
-    num_flips = np.repeat(num_flips[:, None], Y_pred.shape[1], axis=1)
-    mask = mask[:]
-    num_flips = num_flips[:][mask]
-    delta = delta[:][mask][:, None]
-    tools.plot_reg_correlation(
-        X=delta, fea_names=['Prediction Abs Error'], Y=num_flips, target_name='Num flips', adapt=True, write_dir_path=out_dir, plot_dash=False, comment=cmt)
 
 
 
