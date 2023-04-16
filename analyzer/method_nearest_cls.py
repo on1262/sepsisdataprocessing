@@ -29,6 +29,7 @@ class BaselineNearestClsAnalyzer:
         pred = np.zeros((len(self.dataset), self.dataset.data.shape[-1], len(self.centers)))
         for idx, data in tqdm(enumerate(self.dataset), desc='testing', total=len(self.dataset)):
             np_data = data['data']
+            np_data = np_data + (-10)*(np_data < 150) - 10
             pred[idx, :, :] = tools.label_smoothing(self.centers, np_data[self.target_idx, :], band=50)
         return pred
 
@@ -41,7 +42,7 @@ class BaselineNearestClsAnalyzer:
         kf = KFold(n_splits=self.container.n_fold, shuffle=True, random_state=self.container.seed)
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
-        metric_2cls = tools.DichotomyMetric()
+        #metric_2cls = tools.DichotomyMetric()
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
         generator = mlib.DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
@@ -56,10 +57,10 @@ class BaselineNearestClsAnalyzer:
             Y_pred = self.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
-            metric_2cls.add_prediction(map_func(Y_pred)[..., 1][Y_mask][:], map_func(Y_gt)[..., 1][Y_mask][:])
+            #metric_2cls.add_prediction(map_func(Y_pred)[..., 1][Y_mask][:], map_func(Y_gt)[..., 1][Y_mask][:])
             self.dataset.mode('all') # 恢复原本状态
         metric_4cls.confusion_matrix(comment=self.model_name)
-        metric_4cls.write_result()
-        metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
-        print('Metric 2 classes:')
-        print(metric_2cls.generate_info())
+        #metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
+        with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
+            print('Overall performance:', file=fp)
+            metric_4cls.write_result(fp)

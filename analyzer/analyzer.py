@@ -5,8 +5,8 @@ from tools import logger as logger
 from .container import DataContainer
 from .explore import FeatureExplorer
 from .method_lstm_original import LSTMOriginalAnalyzer
-from .method_nearest import BaselineNearestClsAnalyzer
-from .method_catboost import CatboostAnalyzer
+from .method_nearest_cls import BaselineNearestClsAnalyzer
+from .method_catboost_cls import CatboostAnalyzer
 from datasets import AbstractDataset
 
 

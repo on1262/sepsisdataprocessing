@@ -5,11 +5,12 @@ from tools import logger as logger
 import os
 from tqdm import tqdm
 import pandas as pd
-from .utils import StaticLabelGenerator, DropoutLabelGenerator
+from .utils import StaticLabelGenerator
 from catboost import CatBoostClassifier, Pool
 
 
-class CatboostTrainer():
+class CatboostBalancedTrainer():
+    '''应用其他手段提高'''
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
         self.paths = params['paths']
@@ -22,7 +23,6 @@ class CatboostTrainer():
             target_idx=self.target_idx, forbidden_idx=self.params['forbidden_idx'],
             limit_idx=self.params['limit_idx']
         )
-        # self.robust = self.params['robust']
         self.model = None
         self.data_dict = None
 
@@ -75,17 +75,9 @@ class CatboostTrainer():
         pool_valid = Pool(valid_X, np.argmax(valid_Y, axis=-1))
         self.model.fit(pool_train, eval_set=pool_valid, use_best_model=True)
         
-    def predict(self, mode, addi_params:dict=None):
-        '''
-        addi_params: dict | None 如果输入为dict, 则会监测是否存在key
-            key=dropout:val=missrate, 开启testX的随机置为-1
-        '''
+    def predict(self, mode):
         assert(self.model is not None)
         test_X = self.data_dict[mode]['X'][self.data_dict[mode]['mask']]
-        if addi_params is not None:
-            if 'dropout' in addi_params.keys():
-                dropout_generator = DropoutLabelGenerator(missrate=addi_params['dropout'])
-                test_X = dropout_generator(test_X)
         pool_test = Pool(data=test_X)
         return self.model.predict(pool_test, prediction_type='Probability')
 

@@ -201,141 +201,6 @@ class DichotomyMetric:
                 result['best_acc_thres'] = self.combined_points['thres'][idx]
         return result
 
-
-class RegressionMetric:
-    '''回归任务评价指标, 内部存储为1d'''
-    def __init__(self, target_name:str, out_dir:str) -> None:
-        self.target_name = target_name
-        self.records = {'pred':[], 'gt':[]}
-        self.out_dir = out_dir
-        self.is_calculated = False
-
-    def get_record(self) -> dict:
-        return {key:val.copy() for key, val in self.records.items()}
-
-    def update_record(self):
-        if self.is_calculated:
-            return
-        else:
-            self.records['pred'] = np.concatenate(self.records['pred'], axis=0)
-            self.records['gt'] = np.concatenate(self.records['gt'], axis=0)
-            self.is_calculated = True
-
-    def add_prediction(self, _pred:np.ndarray, _gt:np.ndarray, _mask:np.ndarray):
-        '''
-            添加预测结果和真实值
-            _pred, _gt, _mask 相同shape
-        '''
-        assert(_pred.shape == _gt.shape and _mask.shape == _gt.shape)
-
-        pred = _pred[_mask][:]
-        gt = _gt[_mask][:]
-        self.records['pred'].append(pred)
-        self.records['gt'].append(gt)
-
-
-    def plot(self):
-        self.plot_residual(out_dir=self.out_dir)
-        self.plot_corr(out_dir=self.out_dir)
-
-    def write_result(self, method_name:str, log_path:str):
-        self.update_record()
-        pred = self.records['pred']
-        gt = self.records['gt']
-        rmse = np.sqrt(np.mean((pred-gt)**2))
-        mae = np.abs(pred - gt).mean()
-        bias = (pred - gt).mean()
-        with open(log_path, 'w', encoding='utf-8') as f:
-            f.write('='*10 + f'Method: {method_name}' + '='*10 + '\n')
-            f.write(f'Root Mean Squared Error(RMSE)={rmse}'+ '\t') # 误差的均方根值
-            f.write(f'Mean Absolute Error(MAE)={mae}'+ '\t') # 误差的平均值
-            f.write(f'Prediction bias={bias}'+ '\n')
-
-    def plot_residual(self, out_dir):
-        '''绘制残差分布'''
-        self.update_record()
-        res = self.records['pred'] - self.records['gt']
-        plot_single_dist(
-            data=res, data_name='Residual (pred-gt)', save_path=os.path.join(out_dir, 'residual.png'), discrete=False, adapt=True)
-
-    def plot_corr(self, out_dir:str, comment:str=''):
-        '''绘制预测值和真实值的关联度'''
-        self.update_record()
-        os.makedirs(out_dir, exist_ok=True)
-        x = self.records['gt'][:, None]
-        plot_reg_correlation(
-            X=x, fea_names=['ALL_gt'], Y=self.records['pred'], \
-            target_name='ALL_Prediction', adapt=True, write_dir_path=out_dir, comment=comment)
-
-class QuantileRegressionMetric:
-    '''回归任务评价指标, 支持分位点预测, 内部存储为1d'''
-    def __init__(self, target_name:str, out_dir:str, taus:list) -> None:
-        '''
-        taus: [0.25, 0.5, 0.75] 表示分位点, 0.5必须在中间
-
-        '''
-        self.target_name = target_name
-        self.records = {'pred':[], 'gt':[]}
-        self.out_dir = out_dir
-        self.is_calculated = False
-        self.taus = taus
-        self.n_quantile = len(taus)
-        self.center_idx = round((self.n_quantile - 1)/2)
-        assert(np.abs(taus[self.center_idx] - 0.5) <1e-3)
-
-    def get_record(self) -> dict:
-        return {key:val.copy() for key, val in self.records.items()}
-
-    def update_record(self):
-        if self.is_calculated:
-            return
-        else:
-            self.records['pred'] = np.concatenate(self.records['pred'], axis=0)
-            self.records['gt'] = np.concatenate(self.records['gt'], axis=0)
-            self.is_calculated = True
-
-    def add_prediction(self, _pred:np.ndarray, _gt:np.ndarray, _mask:np.ndarray):
-        '''
-            添加预测结果和真实值
-            _gt, _mask 相同shape
-            _pred为(..., n_quantile)多出一个quantile维度
-        '''
-        assert(_pred.shape[:-1] == _gt.shape and _mask.shape == _gt.shape and _pred.shape[-1] == self.n_quantile)
-        _samples = 1
-        for s in list(_gt.shape):
-            _samples *= s
-        pred = np.reshape(_pred, (_samples,self.n_quantile))
-        gt = _gt[_mask][:]
-        mask = np.reshape(_mask, (_samples,))
-        pred = pred[mask, :]
-        self.records['pred'].append(pred)
-        self.records['gt'].append(gt)
-
-
-    def plot(self):
-        self.plot_corr(out_dir=self.out_dir)
-
-    def write_result(self, method_name:str, log_path:str):
-        self.update_record()
-        pred = self.records['pred'][:, self.center_idx]
-        gt = self.records['gt']
-        rmse = np.sqrt(np.mean((pred-gt)**2))
-        mae = np.abs(pred - gt).mean()
-        bias = (pred - gt).mean()
-        with open(log_path, 'w', encoding='utf-8') as f:
-            f.write('='*10 + f'Method: {method_name}' + '='*10 + '\n')
-            f.write(f'Root Mean Squared Error(RMSE)={rmse}'+ '\t') # 误差的均方根值
-            f.write(f'Mean Absolute Error(MAE)={mae}'+ '\t') # 误差的平均值
-            f.write(f'Prediction bias={bias}'+ '\n')
-
-    def plot_corr(self, out_dir:str, comment:str=''):
-        '''绘制预测值和真实值的关联度'''
-        self.update_record()
-        os.makedirs(out_dir, exist_ok=True)
-        plot_correlation_with_quantile(
-            X_pred=self.records['pred'].T, x_name='Prediction', Y_gt=self.records['gt'], target_name=self.target_name,
-            quantile=self.taus, equal_lim=True, plot_dash=True, write_dir_path=self.out_dir)
-
 class MultiClassMetric:
     '''
     多分类指标, 主要是输出混淆矩阵
@@ -363,9 +228,7 @@ class MultiClassMetric:
             self.cm[pred_label[idx]][gt_label[idx]] += 1
         # for x in range(self.n_cls):
         #     for y in range(self.n_cls):
-        #         logger.debug(f'pred={x}, gt={y}: {self.cm[x][y]}')
-
-            
+        #         logger.debug(f'pred={x}, gt={y}: {self.cm[x][y]}') 
 
     def add_prediction(self, _prediction:np.ndarray, _gt:np.ndarray, _mask:np.ndarray):
         '''
@@ -397,7 +260,14 @@ class MultiClassMetric:
         cm_norm = self.cm / np.sum(self.cm, axis=0)[None, ...]
         plot_confusion_matrix(cm_norm, labels=self.class_names, 
             title='Confusion matrix(norm)', save_path=os.path.join(self.out_dir, 'confusion_matrix(norm).png'))
-
+    def mean_acc(self):
+        self.calculate_cm()
+        # 每个类的正确率
+        accs = [self.cm[idx, idx] / np.sum(self.cm[:, idx]) for idx in range(self.n_cls)]
+        # 平均正确率, 每个类的权重是相等的
+        mean_acc = np.mean(accs)
+        return mean_acc
+    
     def write_result(self, fp=sys.stdout):
         '''输出准确率等信息'''
         print('='*10 + 'Metric 4 classes:'+ '='*10, file=fp)
@@ -405,9 +275,51 @@ class MultiClassMetric:
         # 每个类的正确率
         accs = [self.cm[idx, idx] / np.sum(self.cm[:, idx]) for idx in range(self.n_cls)]
         # 平均正确率, 每个类的权重是相等的
-        mean_acc = np.mean(accs)
+        mean_acc = self.mean_acc()
         for idx, name in enumerate(self.class_names):
             print(f'{name} accuracy={accs[idx]}', file=fp)
         print('='*20, file=fp)
         print(f'Mean accuracy={mean_acc}', file=fp)
     
+class RobustClassificationMetric:
+    '''
+    记录一个模型在样本不同缺失率下的性能曲线, 支持K-fold
+    性能曲线计算方法为MultiClassMetric
+    '''
+    def __init__(self, class_names, out_dir:str) -> None:
+        self.out_dir = out_dir
+        self.class_names = class_names
+        self.records = {}
+
+    def add_prediction(self, missrate,  _prediction:np.ndarray, _gt:np.ndarray, _mask:np.ndarray):
+        '''
+        添加若干条记录, mask=True代表有效值
+        prediction: (..., n_cls)
+        gt: (..., n_cls) 可以是one-hot也可以是smooth label
+        mask: (...) 必须和前两者保持一致
+        '''
+        record_key = round(missrate * 1000) # 精度支持
+        if self.records.get(record_key) is None:
+            self.records[record_key] = MultiClassMetric(class_names=self.class_names, out_dir=None)
+        self.records[record_key].add_prediction(self, _prediction, _gt, _mask)
+
+    def plot_curve(self):
+        '''绘制缺失率和性能关系曲线'''
+        sorted_keys = sorted(list(self.records.keys()))
+        missrates = np.asarray([key/1000 for key in sorted_keys])
+        metrics = np.asarray([self.records[key].mean_acc() for key in sorted_keys])
+        # draw mean curve
+        plt.plot(missrates, metrics, 'b+-')
+        auc_str = f'AUC={sk_auc(missrates, metrics):.2f}'
+        plt.annotate(auc_str, xy=[0.7, 0.05], fontsize=12)
+        plt.title('Performance with missrate')
+        plt.xlim([0.0, 1.0])
+        plt.xlabel("Missing rate")
+        plt.ylabel("Metric")
+        save_path = os.path.join(self.out_dir, 'missrate_performance.png')
+        plt.savefig(save_path)
+        plt.close()
+        
+
+
+

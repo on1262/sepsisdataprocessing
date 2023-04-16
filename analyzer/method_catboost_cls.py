@@ -19,6 +19,7 @@ class CatboostAnalyzer:
         self.data = self.dataset.data
         # initialize
         self.out_dir = os.path.join(self.paths['out_dir'], self.model_name)
+        self.robust = params['robust']
         tools.reinit_dir(self.out_dir, build=True)
 
 
@@ -37,6 +38,10 @@ class CatboostAnalyzer:
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
+        if self.robust:
+            metric_robust = tools.RobustClassificationMetric(class_names=self.params['class_names'], out_dir=out_dir)
+            def dropout_func(missrate):
+                    return np.asarray(trainer.predict(mode='test', addi_params={'dropout':missrate}))
         # step 3: generate labels
         generator = mlib.StaticLabelGenerator(
             window=self.params['window'], centers=self.params['centers'],
@@ -57,12 +62,18 @@ class CatboostAnalyzer:
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, mask[test_index])
             imp_logger.add_record(trainer.model, label['X'])
+            if self.robust:
+                for missrate in np.linspace(0, 1, 11):
+                    R_pred = dropout_func(missrate)
+                    metric_robust.add_prediction(missrate, R_pred, Y_gt, mask[test_index])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
         # imp_logger.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
         single_imp_out = os.path.join(out_dir, 'single_shap')
         tools.reinit_dir(single_imp_out, build=True)
         # imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
+        if self.robust:
+            metric_robust.plot_curve()
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for Catboost cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
         metric_4cls.confusion_matrix(comment=self.model_name)
