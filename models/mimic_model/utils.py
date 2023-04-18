@@ -65,7 +65,7 @@ class DynamicLabelGenerator():
             else:
                 for c_idx in range(len(self.centers)):
                     if c_idx == 0:
-                        label[:, idx, c_idx] = (mat_min <= 0.5*(self.centers[c_idx]+self.centers[c_idx+1]))
+                        label[:, idx, c_idx] = (mat_min <= 0.5*(self.centers[0]+self.centers[1]))
                     elif c_idx == len(self.centers)-1:
                         label[:, idx, c_idx] = (mat_min > 0.5*(self.centers[c_idx-1]+self.centers[c_idx]))
                     else:

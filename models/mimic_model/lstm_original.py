@@ -17,7 +17,6 @@ class LSTMOriginalModel(nn.Module):
         self.norm = nn.BatchNorm1d(num_features=in_channels)
         self.ebd = nn.Linear(in_features=in_channels, out_features=in_channels)
         self.den = nn.Linear(in_features=hidden_size, out_features=n_cls)
-        self.sf = nn.Softmax(dim=-1)
         self.lstm = nn.LSTM(input_size=in_channels, hidden_size=hidden_size, batch_first=True, dropout=dp, device=self.device)
         self.c_0 = nn.Parameter(torch.zeros((1, 1, hidden_size), device=self.device), requires_grad=True)
         self.h_0 = nn.Parameter(torch.zeros((1, 1, hidden_size), device=self.device), requires_grad=True)
@@ -35,7 +34,7 @@ class LSTMOriginalModel(nn.Module):
         # x: (batch, time, feature) out带有tanh
         x, _ = self.lstm(x, (self.h_0.expand(-1, x.size(0), -1).contiguous(), self.c_0.expand(-1, x.size(0), -1).contiguous()))
         # x: (batch, time, hidden_size)
-        x = self.sf(self.den(x))
+        x = self.den(x) # Cross entropy 不需要提前做softmax
         return x # (batch, time, n_cls)
 
 
@@ -146,7 +145,7 @@ class LSTMOriginalTrainer():
                     tq.set_postfix(loss=register_vals['test_loss'] / (idx+1))
                     tq.update(1)
         pred = torch.concat(register_vals['pred'], dim=0)
-        return pred
+        return torch.nn.functional.softmax(pred, dim=-1)
 
 
 

@@ -73,7 +73,7 @@ class LSTMBalancedTrainer():
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
 
 
-    def _batch_forward(self, data, return_accs=False):
+    def _batch_forward(self, data, return_logits=False):
         np_data = np.asarray(data['data'][:, self.available_idx, :])
         seq_lens = data['length']
         mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
@@ -83,13 +83,12 @@ class LSTMBalancedTrainer():
         x = data['data'][:, self.available_idx, :].to(self.device)
         pred = self.model(x)
         loss = self.criterion(pred, labels, torch.as_tensor(mask, device=self.device))
-        if return_accs:
-            acc_dict = {}
-            label_gt = torch.argmax(labels, dim=-1)[:]
-            label_pred = torch.argmax(pred, dim=-1)[:]
+        if return_logits:
+            logits_dict = {}
+            label_gt = torch.argmax(labels, dim=-1)
             for idx in range(self.n_cls):
-                acc_dict[idx] = [torch.sum(label_gt==idx).detach().cpu().item(), torch.sum((label_gt==idx)*(label_pred==idx)).detach().cpu().item()]
-            return pred, loss, acc_dict
+                logits_dict[idx] = [torch.sum(label_gt==idx).detach().cpu().item(), torch.sum((label_gt==idx)*pred[...,idx]).detach().cpu().item()]
+            return pred, loss, logits_dict
         else:
             return pred, loss
 
@@ -106,22 +105,31 @@ class LSTMBalancedTrainer():
             for epoch in range(self.params['epochs']):
                 loss_vals = {'train_loss':0, 'valid_loss':0}
                 # train phase
+                acc_dict = {} # class:[n_gt,n_success_pred]
                 self.dataset.mode('train')
                 self.model.train()
                 for data in self.train_dataloader:
-                    pred, loss = self._batch_forward(data)
+                    pred, loss, a_dict = self._batch_forward(data, return_logits=True)
+                    for key in a_dict:
+                        if key not in acc_dict:
+                            acc_dict[key] = a_dict[key]
+                        else:
+                            acc_dict[key] = [acc_dict[key][0]+a_dict[key][0], acc_dict[key][1]+a_dict[key][1]]
                     self.opt.zero_grad()
                     loss.backward()
                     self.opt.step()
                     loss_vals['train_loss'] += loss.detach().cpu().item() * pred.size(0)
                 loss_vals['train_loss'] /= len(self.dataset) # 避免最后一个batch导致计算误差
+                accs = np.asarray([acc_dict[idx][1] / acc_dict[idx][0] for idx in range(self.n_cls)])
+                self.criterion.update_accs(accs)
+                tr_acc = ','.join([f'{acc:.3f}' for acc in accs])
                 # validation phase
                 acc_dict = {} # class:[n_gt,n_success_pred]
                 self.dataset.mode('valid')
                 self.model.eval()
                 with torch.no_grad():
                     for data in self.valid_dataloader:
-                        pred, loss, a_dict = self._batch_forward(data, return_accs=True)
+                        pred, loss, a_dict = self._batch_forward(data, return_logits=True)
                         for key in a_dict:
                             if key not in acc_dict:
                                 acc_dict[key] = a_dict[key]
@@ -131,9 +139,10 @@ class LSTMBalancedTrainer():
                 # update accs by valid data
                 accs = np.asarray([acc_dict[idx][1] / acc_dict[idx][0] for idx in range(self.n_cls)])
                 mean_acc = np.mean(accs)
-                self.criterion.update_accs(accs)
+                # val_acc = ','.join([f'{acc:.3f}' for acc in accs])
+                coeff = ','.join([f'{c:.3f}' for c in self.criterion.get_coeff()])
                 loss_vals['valid_loss'] /= len(self.dataset)
-                tq.set_postfix(v_loss=loss_vals['valid_loss'], t_loss=loss_vals['train_loss'], mean_acc=mean_acc)
+                tq.set_postfix(v_loss=loss_vals['valid_loss'], t_loss=loss_vals['train_loss'], acc=mean_acc, tr_acc=tr_acc, coeff=coeff)
                 tq.update(1)
                 if mean_acc >= best_valid_metric:
                     best_valid_metric = mean_acc
@@ -177,40 +186,39 @@ class BalancedClsLoss(nn.Module):
         super().__init__()
         self.n_cls = n_cls
         # input: (N,C,d1,...dk)
-        self.accs = np.zeros((4,)) # 准确率记录
+        self.logits = np.zeros((4,)) # 准确率记录
         self.weight = np.ones((4,)) # 目标准确率的权重修正
-        self.coeff = torch.ones((4,))
+        self.coeff = torch.ones((4,))/4
     
     def update_accs(self, new_accs):
         '''更新准确率, 越频繁越好'''
-        self.accs = np.asarray(new_accs)
+        self.logits = np.asarray(new_accs)
         self.coeff = self.cal_coeff() # 更新coeff
     
     def cal_coeff(self):
         '''按照当前准确率计算各分类loss权重'''
-        if np.max(self.accs) < 0.4: # 初始训练阶段不进行影响
-            return torch.ones((4,))
-        else:
-            target_accs = np.mean(self.accs) * (self.weight * self.n_cls / np.sum(self.weight)) # 当前性能对应的目标性能
-            delta = (self.accs - target_accs)
-            coeff = torch.nn.functional.sigmoid(-60*torch.as_tensor(delta)) # 只推进不满足target的部分
+        target_logits = np.mean(self.logits) * (self.weight * self.n_cls / np.sum(self.weight)) # 当前性能对应的目标性能
+        delta = (self.logits - target_logits)
+        coeff = torch.sigmoid(-10*torch.as_tensor(delta)) # 只推进不满足target的部分
+        coeff = coeff / torch.sum(coeff)
         return coeff
 
-
+    def get_coeff(self):
+        return np.asarray(self.coeff)
+    
     def forward(self, pred:torch.Tensor, labels:torch.Tensor, mask:torch.Tensor):
         '''
             pred, labels: (batch, seq_len, n_cls)
             mask: (batch, seq_len)
-            labels可以是软标签
+            labels可以是软标签, 但不建议使用(因为交叉熵的原因)
         '''
         assert(pred.size() == labels.size())
-        if len(mask.size()) + 1 == len(pred.size()): # mask->(batch, seq_len, 1)
-            mask = mask[..., None]
-        # 计算四分类准确率
+        if len(mask.size()) + 1 == len(pred.size()): 
+            mask = mask[..., None] # mask->(batch, seq_len, 1)
         pred, labels = pred.permute(0, 2, 1), labels.permute(0, 2, 1) # permute: ->(batch, n_cls, seq_len)
-        loss = -torch.log(pred)*labels*mask.permute(0,2,1)
-        loss = torch.sum(loss, dim=-1) / torch.sum(mask, dim=1) # ->(batch, n_cls)
-        loss = torch.mean(loss, dim=0) # ->(n_cls,)
-        assert(loss.size(0) == self.n_cls)
-        loss = torch.sum(loss * self.coeff.to(loss.device))
+        # 只有label中置为1的样本分类对结果有贡献
+        loss = (-torch.log(pred))*(pred < 0.6)*labels*(mask.permute(0,2,1)) # ->(batch, n_cls, seq_len)
+        loss = torch.sum(torch.sum(loss, dim=2), dim=0) / torch.sum(mask) # -> (n_cls,) average
+        coeff = self.coeff.to(loss.device) # ->(n_cls,)
+        loss = torch.sum(loss * coeff)
         return loss
