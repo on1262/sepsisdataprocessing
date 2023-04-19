@@ -5,25 +5,26 @@ from tools import logger as logger
 import os
 from tqdm import tqdm
 import pandas as pd
-from .utils import StaticLabelGenerator
+from .utils import StaticLabelGenerator, DropoutLabelGenerator
+from itertools import combinations
 from catboost import CatBoostClassifier, Pool
 
 
-class CatboostBalancedTrainer():
-    '''应用其他手段提高'''
+class CatboostForestTrainer():
+    '''集成GBDT森林, 提高模型鲁棒性'''
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
         self.paths = params['paths']
-        self.cache_path = self.paths['catboost_cls_cache']
-        tools.reinit_dir(self.cache_path, build=True)
         self.dataset = dataset
         self.target_idx = dataset.target_idx
+        self.n_trees = params['n_trees']
+        self.n_fea = len(params['centers'])
         self.generator = StaticLabelGenerator(
             window=self.params['window'], centers=self.params['centers'],
             target_idx=self.target_idx, forbidden_idx=self.params['forbidden_idx'],
             limit_idx=self.params['limit_idx']
         )
-        self.model = None
+        self.models = None
         self.data_dict = None
 
     def _extract_data(self):
@@ -43,22 +44,30 @@ class CatboostBalancedTrainer():
         self.dataset.mode('all')
         return result
 
-    def get_loss(self):
-        vaild_df = pd.read_csv(os.path.join(self.cache_path, 'test_error.tsv'), sep='\t')
-        train_df = pd.read_csv(os.path.join(self.cache_path, 'learn_error.tsv'), sep='\t')
-        data = {
-            'train': np.asarray(train_df[self.params['loss_function']])[:],
-            'valid': np.asarray(vaild_df[self.params['loss_function']])[:]
-        }
-        return data
-
     def train(self):
-        tools.reinit_dir(self.cache_path, build=True) # 这是catboost输出loss的文件夹
+        # prepare data and class weight
         self.data_dict = self._extract_data()
         cls_weight = self.cal_label_weight(
             n_cls=len(self.params['centers']), mask=self.data_dict['train']['mask'], label=self.data_dict['train']['Y'])
+        train_X = self.data_dict['train']['X'][self.data_dict['train']['mask']]
+        train_Y = self.data_dict['train']['Y'][self.data_dict['train']['mask']]
+        valid_X = self.data_dict['valid']['X'][self.data_dict['valid']['mask']]
+        valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
+        # 生成重要特征的序列
+        combination_list = []
+        imp_idx = self.params['importance_idx']
+        other_idx = list(set(self.generator.available_idx(self.n_fea)) - set(imp_idx))
+        for n in range(len(imp_idx)):
+            combination_list += (list(combinations(imp_idx, n+1))) # 添加重要特征1->n的全组合
+        for idx in range(len(combination_list)):
+            combination_list[idx] = sorted(list(combination_list[idx]) + other_idx)
+        # 生成其余特征的序列
+        other_list = []
+        for n in range(round(len(other_idx)*0.6), len(other_idx), 1):
+            other_list += list(combinations(other_idx, n+1))
+        # 随机挑选序列
+        
         self.model = CatBoostClassifier(
-            train_dir=self.cache_path, # 读取数据
             iterations=self.params['iterations'],
             depth=self.params['depth'],
             loss_function=self.params['loss_function'],
@@ -67,13 +76,18 @@ class CatboostBalancedTrainer():
             class_weights=cls_weight,
             use_best_model=True
         )
-        train_X = self.data_dict['train']['X'][self.data_dict['train']['mask']]
-        train_Y = self.data_dict['train']['Y'][self.data_dict['train']['mask']]
-        valid_X = self.data_dict['valid']['X'][self.data_dict['valid']['mask']]
-        valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
-        pool_train = Pool(train_X, np.argmax(train_Y, axis=-1))
-        pool_valid = Pool(valid_X, np.argmax(valid_Y, axis=-1))
-        self.model.fit(pool_train, eval_set=pool_valid, use_best_model=True)
+        
+        
+        
+        
+
+        # pool_train = Pool(train_X, np.argmax(train_Y, axis=-1))
+        # pool_valid = Pool(valid_X, np.argmax(valid_Y, axis=-1))
+        # if 'dropout' in self.params.keys():
+        #     dropout_generator = DropoutLabelGenerator(missrate=self.params['dropout'])
+        #     _, train_X = dropout_generator(train_X)
+        #     _, valid_X = dropout_generator(valid_X)
+        # self.model.fit(pool_train, eval_set=pool_valid, use_best_model=True)
         
     def predict(self, mode):
         assert(self.model is not None)
