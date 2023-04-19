@@ -31,7 +31,7 @@ class CatboostForestAnalyzer:
         self.params['in_channels'] = self.dataset.data.shape[1]
         forbidden_idx = {self.dataset.idx_dict[name] for name in self.params['forbidden_feas']}
         limit_idx = {self.dataset.idx_dict[name] for name in self.params['feature_limit']}
-        self.params['importance_idx'] = [self.dataset.idx_dict[name] for name in self.params['importance_idx']] # 降序排列的重要特征
+        self.params['importance_idx'] = [self.dataset.idx_dict[name] for name in self.params['importance_feas']] # 降序排列的重要特征
         self.params['forbidden_idx'] = forbidden_idx
         self.params['limit_idx'] = limit_idx
         # step 2: init variables
@@ -41,7 +41,7 @@ class CatboostForestAnalyzer:
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         metric_robust = tools.RobustClassificationMetric(class_names=self.params['class_names'], out_dir=out_dir)
         def dropout_func(missrate):
-                return np.asarray(trainer.predict(mode='test', addi_params={'dropout':missrate}))
+            return np.asarray(trainer.predict(mode='test', missrate=missrate))
         # step 3: generate labels
         generator = mlib.StaticLabelGenerator(
             window=self.params['window'], centers=self.params['centers'],
@@ -56,16 +56,14 @@ class CatboostForestAnalyzer:
             self.dataset.register_split(train_index, valid_index, test_index)
             trainer = mlib.CatboostForestTrainer(self.params, self.dataset)
             trainer.train()
-            self.loss_logger.add_loss(trainer.get_loss())
             Y_gt = label['Y'][test_index][mask[test_index]]
             Y_pred = trainer.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, mask[test_index])
             #imp_logger.add_record(trainer.model, label['X'])
-            if self.robust:
-                for missrate in np.linspace(0, 1, 11):
-                    R_pred = dropout_func(missrate)
-                    metric_robust.add_prediction(missrate, R_pred, Y_gt, mask[test_index])
+            for missrate in np.linspace(0, 1, 11):
+                R_pred = dropout_func(missrate)
+                metric_robust.add_prediction(missrate, R_pred, Y_gt, mask[test_index])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
         # imp_logger.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
@@ -73,7 +71,6 @@ class CatboostForestAnalyzer:
         # tools.reinit_dir(single_imp_out, build=True)
         # imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
         metric_robust.plot_curve()
-        self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for Catboost cls Model', out_path=os.path.join(out_dir, 'loss.png'))
         metric_4cls.confusion_matrix(comment=self.model_name)
         with open(os.path.join(self.out_dir, 'result.txt'), 'a') as f:
             metric_4cls.write_result(f)

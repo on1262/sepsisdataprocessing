@@ -208,8 +208,9 @@ class LSTMBalancedTrainer():
                     tq.set_postfix(loss=register_vals['test_loss'] / (idx+1))
                     tq.update(1)
         pred = torch.concat(register_vals['pred'], dim=0)
-        pred = self.rebalance_trainer.predict(pred).cpu()
-        return pred
+        # TODO 将这一行修改回去
+        # pred = self.rebalance_trainer.predict(pred).cpu()
+        return pred.cpu()
 
 
 class BalancedClsLoss(nn.Module):

@@ -8,6 +8,7 @@ analyzer_params = [
     #'LSTM_original',
     #'catboost_4cls',
     #'random_forest',
+    #'catboost_forest',
 ]
 
 if __name__ == '__main__':

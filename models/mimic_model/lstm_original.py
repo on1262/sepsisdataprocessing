@@ -148,8 +148,6 @@ class LSTMOriginalTrainer():
         return torch.nn.functional.softmax(pred, dim=-1)
 
 
-
-
 class OriginalClsLoss(nn.Module):
     def __init__(self, n_cls:int, weight=None) -> None:
         '''

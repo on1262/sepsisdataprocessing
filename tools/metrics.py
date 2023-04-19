@@ -310,7 +310,7 @@ class RobustClassificationMetric:
         metrics = np.asarray([self.records[key].mean_acc() for key in sorted_keys])
         # draw mean curve
         plt.plot(missrates, metrics, 'b+-')
-        auc_str = f'AUC={sk_auc(missrates, metrics):.2f}'
+        auc_str = f'AUC={sk_auc(missrates, metrics):.3f}'
         plt.annotate(auc_str, xy=[0.7, 0.05], fontsize=12)
         plt.title('Performance with missrate')
         plt.xlim([0.0, 1.0])

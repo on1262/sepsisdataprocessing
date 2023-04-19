@@ -9,6 +9,7 @@ from .method_lstm_balanced import LSTMBalancedAnalyzer
 from .method_nearest_cls import BaselineNearestClsAnalyzer
 from .method_catboost_cls import CatboostAnalyzer
 from .method_random_forest import RandomForestAnalyzer
+from .method_catboost_forest import CatboostForestAnalyzer
 from datasets import AbstractDataset
 
 
@@ -26,6 +27,7 @@ class Analyzer:
             'nearest_4cls': BaselineNearestClsAnalyzer,
             'catboost_4cls':CatboostAnalyzer,
             'random_forest':RandomForestAnalyzer,
+            'catboost_forest':CatboostForestAnalyzer
         }
         if params is not None:
             for key in params:
