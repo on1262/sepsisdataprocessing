@@ -7,7 +7,7 @@ from torch.utils.data.dataloader import DataLoader
 import os
 from tqdm import tqdm
 from .utils import Collect_Fn, DynamicLabelGenerator
-from .rebalance_model import RebalanceModel, RebalanceTrainer
+from .rebalance_model import RebalanceTrainer
 import torchinfo
 
 class LSTMBalancedModel(nn.Module):
@@ -208,9 +208,8 @@ class LSTMBalancedTrainer():
                     tq.set_postfix(loss=register_vals['test_loss'] / (idx+1))
                     tq.update(1)
         pred = torch.concat(register_vals['pred'], dim=0)
-        # TODO 将这一行修改回去
-        # pred = self.rebalance_trainer.predict(pred).cpu()
-        return pred.cpu()
+        pred = self.rebalance_trainer.predict(pred).cpu()
+        return pred
 
 
 class BalancedClsLoss(nn.Module):

@@ -73,6 +73,14 @@ class RebalanceTrainer:
             out_x = self.model(test_x, None, None)
         return out_x
 
+class soft_ones(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, i):
+        return i / (i.detach())
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output
 
 class RebalanceModel(nn.Module):
     '''对训练好的model输出logits进行再优化, 最大化平均acc'''
@@ -80,6 +88,7 @@ class RebalanceModel(nn.Module):
         super().__init__()
         self.coeff = nn.Parameter(torch.ones((n_cls,)), requires_grad=True)
         self.bias = nn.Parameter(torch.zeros((n_cls,)), requires_grad=True)
+        self.so = soft_ones()
         self.n_cls = n_cls
 
     def forward(self, x:torch.Tensor, label:torch.Tensor, mask:torch.Tensor):
@@ -96,7 +105,7 @@ class RebalanceModel(nn.Module):
             mask = 1
         else:
             mask = mask[..., None]
-        invalid_x = label*x*(1/x.detach())*(x<x_max)*mask # 这个计算是完全准确的
+        invalid_x = label*self.so.apply(x)*(x<x_max)*mask # 这个计算是完全准确的
         soft_accs = 1 - (torch.sum(torch.sum(invalid_x, dim=0), dim=0) / torch.sum(torch.sum(label*mask, dim=0), dim=0)) # softaccs大于0
         acc_loss = torch.mean(soft_accs) # loss需要使得mean_acc尽可能大
         loss = acc_loss # 降低loss会使得acc_loss升高, balance_loss降低
@@ -116,15 +125,16 @@ if __name__ == '__main__':
     data[150:,:,2] = 0.5
     label[0:1,:,3] = 1 # 0.5%
     data[0:1,:,3] = 0.6 + 0.05*torch.randn((1,20)) # 25%
-    label = label.to('cuda:1')
-    data = data.to('cuda:1')
+    device = torch.device('cuda:0')
+    label = label.to(device)
+    data = data.to(device)
     label_gt = torch.argmax(label,dim=-1)
-    model = RebalanceModel(n_cls=4).to('cuda:1')
+    model = RebalanceModel(n_cls=4).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=2e-4)
     epochs = 5000
     for epoch in range(epochs):
         opt.zero_grad()
-        x, soft_accs, loss = model(data,label)
+        x, soft_accs, loss = model(data,label, None)
         pred = torch.argmax(x, dim=-1)
         real_acc = [torch.sum((label_gt==idx)*(pred==idx)).detach().cpu().item()/torch.sum(label_gt==idx).detach().cpu().item() for idx in range(4)]
         if (epoch+1) % (epochs//10) == 0 or epoch == epochs-1 or epoch == 0:
