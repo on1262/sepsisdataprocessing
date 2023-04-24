@@ -50,10 +50,7 @@ class CatboostForestAnalyzer:
         # fea_names = [self.dataset.get_fea_label(idx) for idx in generator.available_idx()]
         #imp_logger = tools.SHAPFeatureImportance(fea_names=fea_names, model_type='gbdt')
         # step 4: train and predict
-        for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
-            valid_num = round(len(data_index)*0.15)
-            train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
-            self.dataset.register_split(train_index, valid_index, test_index)
+        for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()): 
             trainer = mlib.CatboostForestTrainer(self.params, self.dataset)
             trainer.train()
             Y_gt = label['Y'][test_index][mask[test_index]]

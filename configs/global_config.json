@@ -12,6 +12,26 @@
             }
         }
     },
+    "metric":{
+        "miss_rate":{
+            "220277":0.999,
+            "223835":0.692,
+            "224689":0.612,
+            "224690":0.610,
+            "224696":0.539,
+            "223834":0.834,
+            "220224":0.659,
+            "220227":0.386,
+            "220235":0.659,
+            "223830":0.661,
+            "225698":0.659,
+            "224639":0.660,
+            "respiration":0.659,
+            "sofa_score":0.659,
+            "age":0.0,
+            "PF_ratio":0.659
+        }
+    },
     "analyzer":{
         "data_container":{
             "ards_threshold":300,
@@ -23,8 +43,9 @@
                 "out_dir":"outputs/mimic-iv",
                 "lstm_original_cache": "outputs/mimic-iv/cache/lstm_original",
                 "lstm_balanced_cache": "outputs/mimic-iv/cache/lstm_balanced",
+                "lstm_cascade_cache": "outputs/mimic-iv/cache/lstm_balanced",
                 "rebalance_cache_path": "outputs/mimic-iv/cache/rebalance",
-                "ensemble_cache": "outputs/mimic-iv/cache/ensemble",
+                "catboost_forest_cache": "outputs/mimic-iv/cache/catboost_forest",
                 "catboost_cls_cache": "outputs/mimic-iv/cache/catboost_cls",
                 "random_forest_cache": "outputs/mimic-iv/cache/random_forest",
                 "conf_cache_path": "configs/mimic-iv/config_cache.json",

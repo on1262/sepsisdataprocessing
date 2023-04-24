@@ -47,7 +47,6 @@ class LSTMBalancedAnalyzer:
         self.params['forbidden_idx'] = forbidden_idx
         self.params['limit_idx'] = limit_idx
         # step 2: init variables
-        kf = KFold(n_splits=self.container.n_fold, shuffle=True, random_state=self.container.seed)
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
         os.makedirs(os.path.join(out_dir, 'startstep'), exist_ok=True)

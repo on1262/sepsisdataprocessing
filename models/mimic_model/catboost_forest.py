@@ -128,7 +128,7 @@ class CatboostForestTrainer():
             use_best_model=True
         ) for _ in range(len(combination_list))]
         # 开始训练
-        dropout_generator = DropoutLabelGenerator(missrate=self.params['dropout'])
+        dropout_generator = DropoutLabelGenerator(dropout=self.params['dropout'])
         for idx, model in enumerate(self.models):
             logger.info(f'Catboost forest: Train{idx}/{len(self.models)} models')
             _, new_train_X = dropout_generator(train_X.copy())
@@ -150,7 +150,7 @@ class CatboostForestTrainer():
             pool_test = Pool(data=test_X)
             return self.find_nearest_model(np.ones((self.n_fea,))).predict(pool_test, prediction_type='Probability')
         else:
-            dropout_generator = DropoutLabelGenerator(missrate=missrate)
+            dropout_generator = DropoutLabelGenerator(dropout=missrate)
             test_X = self.data_dict[mode]['X'][self.data_dict[mode]['mask']] # (batch, n_fea)
             mask, new_test_X = dropout_generator(test_X.copy())
             result = np.zeros((new_test_X.shape[0], 4))

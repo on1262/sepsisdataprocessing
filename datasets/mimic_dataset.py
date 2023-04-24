@@ -139,6 +139,7 @@ class MIMICIV:
         self.subjects = {} # subject_id:Subject
         self.preprocess()
         # post process
+        self.miss_rate = self.global_miss_rate()
         self.remove_invalid_data(rules=self.loc_conf['dataset']['remove_rule'])
         logger.info('MIMICIV inited')
 
@@ -281,6 +282,24 @@ class MIMICIV:
             pickle.dump(self.subjects, fp)
         logger.info('Dump subjects: Done')
         self.procedure_flag = 'phase3'
+
+    def global_miss_rate(self) -> dict:
+        '''
+        返回dict(key:value)其中key是str(id), value是该特征对应的列缺失率
+        '''
+        miss_dict = {}
+        count = 0
+        for s_id in self.subjects:
+            if not self.subjects[s_id].empty():
+                count += 1
+                adm = self.subjects[s_id].admissions[0]
+                for key in adm.keys():
+                    if key not in miss_dict:
+                        miss_dict[key] = 1
+                    else:
+                        miss_dict[key] += 1
+        miss_dict = {key:val/count for key, val in miss_dict.items()}
+        return miss_dict
 
     def remove_invalid_data(self, rules=None):
         '''当rules=None时, 只清除空的subject和admission. 当rules不为None时, 会检查target_id是否都满足采集要求'''
@@ -474,6 +493,7 @@ class MIMICDataset():
         # init
         self.static_feas, self.dynamic_ids = None, None # not use these attributes
         self.target_idx = self.data_table.shape[1] - 1
+        self.icu_item = self.mimiciv.icu_item
         self.idx_dict = dict( # idx_dict: fea_key->idx
             {str(key):val for val, key in enumerate(self.static_keys)}, \
                 **{str(key):val+len(self.static_keys) for val, key in enumerate(self.dynamic_keys)})
@@ -560,23 +580,6 @@ class MIMICDataset():
             norm_dict[key] = {'mean':mean, 'std':std}
         return norm_dict
 
-    def global_miss_rate(self) -> dict:
-        '''
-        该方法在preprocess之后调用
-        给出基于table_origin的全特征缺失率表
-        返回dict(key:value)其中key是str(id), value是该特征对应的列缺失率
-        '''
-        p_origin_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '6_table_origin.pkl')
-        miss_rate = None
-        with open(p_origin_table, 'rb') as fp:
-            origin_table,_, _,_ = pickle.load(fp)
-        for idx, table in enumerate(origin_table):
-            if idx == 0:
-                miss_rate = np.mean(table == -1, dim=1)
-            else:
-                miss_rate += np.mean(table == -1, dim=1)
-        miss_rate /= len(origin_table)
-        return {key:miss_rate[self.idx_dict[key]] for key in self.idx_dict.keys()}
         
 
     def preprocess_table(self, from_pkl=True, t_step=0.5):
@@ -675,7 +678,6 @@ class MIMICDataset():
 
     def load_version(self, version_name):
         '''更新dataset版本'''
-        # 检查是否以及装入
         if self.version_name == version_name:
             return
         else:
@@ -688,6 +690,7 @@ class MIMICDataset():
         self.static_keys = version_dict['static_keys']
         self.dynamic_keys = version_dict['dynamic_keys']
         self.total_keys = self.static_keys + self.dynamic_keys
+        self.seqs_len = version_dict['seqs_len']
         self.data = version_dict['data']
         self.idx_dict = version_dict['idx_dict']
         self.kf_list = version_dict['kf']
@@ -720,11 +723,12 @@ class MIMICDataset():
                 if idx not in forbidden_idx:
                     avail_idx.append(idx)
             avail_idx = sorted(avail_idx)
-            # 原本的缺失用均值填充
-            for key, idx in self.idx_dict.items():
-                for s_idx in range(version_table.shape[0]):
-                    arr = version_table[s_idx, idx, :self.seqs_len[s_idx]]
-                    version_table[s_idx, idx, :self.seqs_len[s_idx]] = np.where(np.abs(arr + 1) < 1e-4, arr, self.norm_dict[key]['mean'])
+            if version_params[version_name]['fill_missvalue']:
+                # 原本的缺失用均值填充
+                for key, idx in self.idx_dict.items():
+                    for s_idx in range(version_table.shape[0]):
+                        arr = version_table[s_idx, idx, :self.seqs_len[s_idx]]
+                        version_table[s_idx, idx, :self.seqs_len[s_idx]] = np.where(np.abs(arr + 1) < 1e-4, arr, self.norm_dict[key]['mean'])
             # 更新特征
             version_table = version_table[:, avail_idx, :]
             derived_idx_dict = {}
@@ -814,8 +818,11 @@ class MIMICDataset():
             self._hit_table = {key:val / adm_count for key,val in hit_table.items()}
         return self._hit_table.copy()
     
-    def make_report(self):
+    def make_report(self, version_name, params:dict):
         '''进行数据集的信息统计'''
+        # switch version
+        self.load_version(version_name)
+        self.mode('all')
         out_path = os.path.join(self.gbl_conf['paths']['out_dir'], 'dataset_report.txt')
         dist_dir = os.path.join(self.gbl_conf['paths']['out_dir'], 'report_dist')
         dir_names = ['points', 'duration', 'frequency', 'value', 'from_sepsis', 'static_value']
@@ -824,84 +831,91 @@ class MIMICDataset():
             os.makedirs(os.path.join(dist_dir, name))
         logger.info('MIMIC-IV: generating dataset report')
         write_lines = []
-        # basic statistics
-        write_lines.append('='*10 + 'basic' + '='*10)
-        write_lines.append(f'subjects:{len(self.subjects)}')
-        adm_nums = np.mean([len(s.admissions) for s in self.subjects.values()])
-        write_lines.append(f'average admission number per subject:{adm_nums:.2f}')
-        avg_adm_time = []
-        for s in self.subjects.values():
-            for adm in s.admissions:
-                avg_adm_time.append(adm.duration())
-        write_lines.append(f'average admission time(hour): {np.mean(avg_adm_time):.2f}')
-        # dynamic feature explore
-        for id in self.dynamic_keys:
-            fea_name = self.get_fea_label(id)
-            save_name = tools.remove_slash(str(fea_name))
-            write_lines.append('='*10 + f'{fea_name}({id})' + '='*10)
-            arr_points = []
-            arr_duration = []
-            arr_frequency = []
-            arr_avg_value = []
-            arr_from_sepsis_time = []
-            for s in tqdm(self.subjects.values(), desc=f'id={id}'):
-                for adm in s.admissions:
-                    if id in adm.keys():
-                        dur = adm[id][-1,1] - adm[id][0,1]
-                        if dur < 0.1:
-                            continue
-                        sepsis_time = s.nearest_static('sepsis_time', adm[id][0, 1])
-                        t_sep = adm[id][0, 1] + adm.admittime - sepsis_time
-                        if np.abs(t_sep) < 72:
-                            arr_from_sepsis_time.append(t_sep)
-                        arr_points.append(adm[id].shape[0])
-                        arr_duration.append(dur)
-                        arr_frequency.append(arr_points[-1] / arr_duration[-1])
-                        arr_avg_value.append(adm[id][:,0].mean())
-                        assert(arr_duration[-1] > 0)
-            arr_points, arr_duration, arr_frequency, arr_avg_value = np.asarray(arr_points), np.asarray(arr_duration), np.asarray(arr_frequency), np.asarray(arr_avg_value)
-            arr_from_sepsis_time = np.asarray(arr_from_sepsis_time)
-            if np.size(arr_points) != 0:
-                write_lines.append(f'average points per admission: {arr_points.mean():.3f}')
-            if np.size(arr_duration) != 0:
-                write_lines.append(f'average duration(hour) per admission: {arr_duration.mean():.3f}')
-            if np.size(arr_frequency) != 0:
-                write_lines.append(f'average frequency(point/hour) per admission: {arr_frequency.mean():.3f}')
-            if np.size(arr_avg_value) != 0:
-                write_lines.append(f'average avg value per admission: {arr_avg_value.mean():.3f}')
-            # plot distribution
-            titles = ['points', 'duration', 'frequency', 'value', 'from_sepsis']
-            arrs = [arr_points, arr_duration, arr_frequency, arr_avg_value, arr_from_sepsis_time]
-            for title, arr in tqdm(zip(titles, arrs),'plot'):
-                if np.size(arr) != 0:
-                    tools.plot_single_dist(
-                        data=arr, data_name=f'{title}: {fea_name}', 
-                        save_path=os.path.join(dist_dir, title, save_name + '.png'), discrete=False, adapt=True)
-        # static feature explore
-        for id in tqdm(self.static_keys, 'generate static feature report'):
-            fea_name = self.get_fea_label(id)
-            save_name = tools.remove_slash(str(fea_name))
-            write_lines.append('='*10 + f'{fea_name}({id})' + '='*10)
-            idx = self.idx_dict[str(id)]
-            static_data = self.data[:, idx, 0]
-            write_lines.append(f'mean: {static_data.mean():.3f}')
-            write_lines.append(f'std: {static_data.std():.3f}')
-            write_lines.append(f'max: {np.max(static_data):.3f}')
-            write_lines.append(f'min: {np.min(static_data):.3f}')
-            tools.plot_single_dist(
-                data=static_data, data_name=f'{fea_name}', 
-                save_path=os.path.join(dist_dir, 'static_value', save_name + '.png'), discrete=False, adapt=True)
-
-        # write hit table
-        hit_table = self.hit_table()
-        key_list = sorted(hit_table.keys(), key= lambda key:hit_table[key], reverse=True)
-        write_lines.append('='*10 + 'Feature hit table(>0.5)' + '='*10)
-        for key in key_list:
-            fea_name = self.icu_item[key][0]
-            value = hit_table[key]
-            if value < 0.5:
-                continue
-            write_lines.append(f"{value:.2f}\t({key}){fea_name} ")
+        if params['basic']:
+            # basic statistics
+            write_lines.append('='*10 + 'basic' + '='*10)
+            write_lines.append(f'Version: {version_name}')
+            write_lines.append(f'Static keys: {len(self.static_keys)}')
+            write_lines.append(f'Dynamic keys: {len(self.dynamic_keys)}')
+            write_lines.append(f'subjects:{len(self)}')
+            write_lines.append(f'Static feature: {[self.get_fea_label(id) for id in self.static_keys]}')
+            write_lines.append(f'Dynamic feature: {[self.get_fea_label(id) for id in self.dynamic_keys]}')
+        if params['dynamic_dist']:
+            # dynamic feature explore
+            for id in self.dynamic_keys:
+                save_name = tools.remove_slash(str(fea_name))
+                write_lines.append('='*10 + f'{fea_name}({id})' + '='*10)
+                arr_points = []
+                arr_duration = []
+                arr_frequency = []
+                arr_avg_value = []
+                arr_from_sepsis_time = []
+                for s in tqdm(self.subjects.values(), desc=f'id={id}'):
+                    for adm in s.admissions:
+                        if id in adm.keys():
+                            dur = adm[id][-1,1] - adm[id][0,1]
+                            if dur < 0.1:
+                                continue
+                            sepsis_time = s.nearest_static('sepsis_time', adm[id][0, 1])
+                            t_sep = adm[id][0, 1] + adm.admittime - sepsis_time
+                            if np.abs(t_sep) < 72:
+                                arr_from_sepsis_time.append(t_sep)
+                            arr_points.append(adm[id].shape[0])
+                            arr_duration.append(dur)
+                            arr_frequency.append(arr_points[-1] / arr_duration[-1])
+                            arr_avg_value.append(adm[id][:,0].mean())
+                            assert(arr_duration[-1] > 0)
+                arr_points, arr_duration, arr_frequency, arr_avg_value = np.asarray(arr_points), np.asarray(arr_duration), np.asarray   (arr_frequency), np.asarray(arr_avg_value)
+                arr_from_sepsis_time = np.asarray(arr_from_sepsis_time)
+                if np.size(arr_points) != 0:
+                    write_lines.append(f'average points per admission: {arr_points.mean():.3f}')
+                if np.size(arr_duration) != 0:
+                    write_lines.append(f'average duration(hour) per admission: {arr_duration.mean():.3f}')
+                if np.size(arr_frequency) != 0:
+                    write_lines.append(f'average frequency(point/hour) per admission: {arr_frequency.mean():.3f}')
+                if np.size(arr_avg_value) != 0:
+                    write_lines.append(f'average avg value per admission: {arr_avg_value.mean():.3f}')
+                # plot distribution
+                titles = ['points', 'duration', 'frequency', 'value', 'from_sepsis']
+                arrs = [arr_points, arr_duration, arr_frequency, arr_avg_value, arr_from_sepsis_time]
+                for title, arr in tqdm(zip(titles, arrs),'plot'):
+                    if np.size(arr) != 0:
+                        tools.plot_single_dist(
+                            data=arr, data_name=f'{title}: {fea_name}', 
+                            save_path=os.path.join(dist_dir, title, save_name + '.png'), discrete=False, adapt=True)
+        if params['static_dist']:
+            # static feature explore
+            for id in tqdm(self.static_keys, 'generate static feature report'):
+                fea_name = self.get_fea_label(id)
+                save_name = tools.remove_slash(str(fea_name))
+                write_lines.append('='*10 + f'{fea_name}({id})' + '='*10)
+                idx = self.idx_dict[str(id)]
+                static_data = self.data[:, idx, 0]
+                write_lines.append(f'mean: {static_data.mean():.3f}')
+                write_lines.append(f'std: {static_data.std():.3f}')
+                write_lines.append(f'max: {np.max(static_data):.3f}')
+                write_lines.append(f'min: {np.min(static_data):.3f}')
+                tools.plot_single_dist(
+                    data=static_data, data_name=f'{fea_name}', 
+                    save_path=os.path.join(dist_dir, 'static_value', save_name + '.png'), discrete=False, adapt=True)
+        if params['hit_table']:
+            # write hit table
+            hit_table = self.hit_table()
+            key_list = sorted(hit_table.keys(), key= lambda key:hit_table[key], reverse=True)
+            write_lines.append('='*10 + 'Feature hit table(>0.5)' + '='*10)
+            for key in key_list:
+                fea_name = self.icu_item[key][0]
+                value = hit_table[key]
+                if value < 0.5:
+                    continue
+                write_lines.append(f"{value:.2f}\t({key}){fea_name} ")
+        if params['miss_rate']:
+            # write global miss rate
+            write_lines.append('='*10 + 'Global miss rate' + '='*10)
+            gbl_msr = self.mimiciv.miss_rate.copy()
+            for key in gbl_msr:
+                if key in self.total_keys:
+                    write_lines.append(f'{gbl_msr[key]:.3f} \t ({key}){self.get_fea_label(key)}')
         # write report
         with open(out_path, 'w', encoding='utf-8') as fp:
             for line in write_lines:
@@ -982,12 +996,20 @@ def load_sepsis_patients(csv_path:str) -> dict:
     logger.info(f'Load {len(sepsis_dict.keys())} sepsis patients based on sepsis3.csv')
     return sepsis_dict
 
-
+def make_report(dataset:MIMICDataset):
+    params = {
+        'basic':True,
+        'dynamic_dist':False,
+        'static_dist':False,
+        'hit_table':True,
+        'miss_rate':True,
+    }
+    version_name = 'lite_explore'
+    dataset.make_report(version_name, params)
 
 if __name__ == '__main__':
     dataset = MIMICDataset()
-    dataset.load_version('lite')
-    logger.debug('Dataset Initialization Done')
-    
-    # dataset.make_report()
+    dataset.load_version('lite_explore')
+    # make report
+    make_report(dataset)
     

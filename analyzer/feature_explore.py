@@ -43,10 +43,11 @@ class FeatureExplorer:
         corr_mat = tools.plot_correlation_matrix(self.container.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation _matrix'))
         correlations = []
         for idx in range(corr_mat.shape[1]):
-            correlations.append([corr_mat[-1, idx], labels[idx]])
+            correlations.append([corr_mat[-1, idx], labels[idx]]) # list[(correlation coeff, label)]
         correlations = sorted(correlations, key=lambda x:np.abs(x[0]), reverse=True)
-        for idx in range(corr_mat.shape[1]):
-            logger.info(f'Correlation with target: {correlations[idx][0]} \t{correlations[idx][1]}')
+        with open(os.path.join(out_dir, 'correlation.txt'), 'w') as fp:
+            for idx in range(corr_mat.shape[1]):
+                fp.write(f'Correlation with target: {correlations[idx][0]} \t{correlations[idx][1]}\n')
         
     def miss_mat(self, out_dir):
         '''计算行列缺失分布并输出'''

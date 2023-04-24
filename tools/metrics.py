@@ -4,7 +4,6 @@ import os, sys
 from scipy.interpolate import interp1d
 from sklearn.metrics import auc as sk_auc
 from .colorful_logging import logger
-from .generic import reinit_dir, remove_slash
 from .plot import plot_confusion_matrix
 
 

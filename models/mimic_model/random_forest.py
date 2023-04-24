@@ -60,7 +60,7 @@ class RandomForestTrainer():
         valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                dropout_generator = DropoutLabelGenerator(missrate=addi_params['dropout'])
+                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'])
                 _, train_X = dropout_generator(train_X)
                 _, valid_X = dropout_generator(valid_X)
         tX = np.concatenate([train_X, valid_X], axis=0)
@@ -76,7 +76,7 @@ class RandomForestTrainer():
         test_X = self.data_dict[mode]['X'][self.data_dict[mode]['mask']]
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                dropout_generator = DropoutLabelGenerator(missrate=addi_params['dropout'])
+                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'])
                 _, test_X = dropout_generator(test_X)
         return self.model.predict_proba(test_X)
 

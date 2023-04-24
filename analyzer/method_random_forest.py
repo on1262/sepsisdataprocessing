@@ -33,7 +33,6 @@ class RandomForestAnalyzer:
         self.params['forbidden_idx'] = forbidden_idx
         self.params['limit_idx'] = limit_idx
         # step 2: init variables
-        kf = KFold(n_splits=self.container.n_fold, shuffle=True, random_state=self.container.seed)
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
@@ -47,12 +46,9 @@ class RandomForestAnalyzer:
             target_idx=self.target_idx, forbidden_idx=self.params['forbidden_idx'], limit_idx=self.params['limit_idx'])
         mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
         fea_names = [self.dataset.get_fea_label(idx) for idx in generator.available_idx()]
-        imp_logger = tools.SHAPFeatureImportance(fea_names=fea_names, model_type='gbdt')
+        imp_logger = tools.TreeFeatureImportance(fea_names=fea_names)
         # step 4: train and predict
-        for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
-            valid_num = round(len(data_index)*0.15)
-            train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
-            self.dataset.register_split(train_index, valid_index, test_index)
+        for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()): 
             trainer = mlib.RandomForestTrainer(self.params, self.dataset)
             if self.robust and 'train_miss_rate' in self.params.keys():
                 trainer.train(addi_params={'dropout':self.params['train_miss_rate']}) # 训练时对训练集随机dropout

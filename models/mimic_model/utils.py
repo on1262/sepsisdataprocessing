@@ -139,22 +139,31 @@ class StaticLabelGenerator():
 
 class DropoutLabelGenerator:
     '''按照给定的缺失率, 将输入的数据进行-1填充'''
-    def __init__(self, missrate=0) -> None:
-        self.missrate = missrate
-        self.value = -1
+    def __init__(self, dropout, miss_table, value=-1) -> None:
+        self.dropout = dropout
+        self.value = value
+        self.miss_table = np.asarray(miss_table)
+        # norm
+        self.miss_table = self.dropout * (self.miss_table / np.max(self.miss_table))
     
     def __call__(self, data:np.ndarray) -> np.ndarray:
-        '''随机将data内的数据点变为-1, 返回mask和data'''
-        data_size = 1
-        for s in data.shape:
-            data_size *= s
-        mask = np.ones((data_size,), dtype=bool)
-        if self.missrate == 0:
-            mask = np.reshape(mask, data.shape)
+        '''
+        按照给定的缺失权重处理各个特征, 将data内的数据点变为-1, 返回mask和data
+        data: (batch, n_fea) or (batch, n_fea, seq_len)
+        '''
+        dim = len(data.shape)
+        if dim == 2:
+            data = data[:, :, np.newaxis] # ->(batch, n_fea, seq_len)
+        else:
+            assert(dim == 3)
+        mask = np.ones(data.shape, dtype=bool)
+        if self.dropout == 0:
             return mask, data
-        k = round(self.missrate * data_size)
-        mask[np.random.permutation(data_size)[:k]] = False # 随机选固定比例的点赋值为False
-        mask = np.reshape(mask, data.shape)
+        for idx in len(data.shape[1]):
+            mat = np.ones((mask.shape[0]*mask.shape[2],), dtype=bool)
+            k = round(min(1, self.miss_table[idx])*mask.shape[0]*mask.shape[2])
+            mat[np.random.permutation(mask.shape[0]*mask.shape[2])[:k]] = False
+            mask[:, idx, :] = np.reshape(mat, (mask.shape[0],mask.shape[2]))
         return mask, data * mask + self.value * np.logical_not(mask)
 
 

@@ -48,11 +48,9 @@ class LSTMOriginalAnalyzer:
         self.params['forbidden_idx'] = forbidden_idx
         self.params['limit_idx'] = limit_idx
         # step 2: init variables
-        kf = KFold(n_splits=self.container.n_fold, shuffle=True, random_state=self.container.seed)
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
         os.makedirs(os.path.join(out_dir, 'startstep'), exist_ok=True)
-        # metric_2cls = tools.DichotomyMetric()
         metric_startstep = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'startstep')) # 起始时刻性能
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir) # 所有步平均性能
         # step 3: generate labels & label explore
@@ -78,14 +76,12 @@ class LSTMOriginalAnalyzer:
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
             metric_startstep.add_prediction(Y_pred[:, 0, :], Y_gt[:, 0, :], Y_mask[:,0])
-            # metric_2cls.add_prediction(map_func(Y_pred)[..., 1][Y_mask][:], map_func(Y_gt)[..., 1][Y_mask][:])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
         metric_4cls.confusion_matrix(comment=self.model_name)
         metric_startstep.confusion_matrix(comment='Start step ' + self.model_name)
-        # metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
         with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
             print('Overall performance:', file=fp)
             metric_4cls.write_result(fp)

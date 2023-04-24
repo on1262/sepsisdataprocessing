@@ -67,7 +67,6 @@ class LSTMBalancedTrainer():
             logger.info(f'Load pretrained model from {load_path}')
             self.model = self.model.to(self.device)
             self.criterion = self.criterion.to(self.device)
-
     
     def get_loss(self):
         data = {

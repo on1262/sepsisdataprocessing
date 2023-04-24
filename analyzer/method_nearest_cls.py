@@ -39,7 +39,6 @@ class BaselineNearestClsAnalyzer:
         # step 1: append additional params
         self.params['in_channels'] = self.dataset.data.shape[1]
         # step 2: init variables
-        kf = KFold(n_splits=self.container.n_fold, shuffle=True, random_state=self.container.seed)
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
         #metric_2cls = tools.DichotomyMetric()
@@ -48,10 +47,7 @@ class BaselineNearestClsAnalyzer:
         generator = mlib.DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.dataset.data, generator, out_dir)
         # step 4: train and predict
-        for _, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
-            valid_num = round(len(data_index)*0.15)
-            train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
-            self.dataset.register_split(train_index, valid_index, test_index)
+        for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()): 
             Y_mask = mask[test_index, ...]
             Y_gt = label[test_index, ...]
             Y_pred = self.predict(mode='test')

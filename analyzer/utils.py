@@ -16,7 +16,6 @@ def generate_labels(dataset, data, generator, out_dir):
         logger.info('Generating label')
         mask = tools.make_mask((data.shape[0], data.shape[2]), dataset.seqs_len) # -> (batch, seq_lens)
         mask, label = generator(data, mask)
-        # TODO 加入存储cache
     return mask, label
 
 def detect_adm_data(id:str, subjects:dict):
