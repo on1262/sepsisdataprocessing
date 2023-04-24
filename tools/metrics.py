@@ -5,7 +5,7 @@ from scipy.interpolate import interp1d
 from sklearn.metrics import auc as sk_auc
 from .colorful_logging import logger
 from .generic import reinit_dir, remove_slash
-from .plot import draw_band, plot_single_dist, plot_correlation_with_quantile, plot_reg_correlation, plot_confusion_matrix
+from .plot import plot_confusion_matrix
 
 
 
@@ -174,8 +174,8 @@ class DichotomyMetric:
                 arrowprops=dict(arrowstyle="->", color='tab:blue',alpha=0.7))
 
         # draw std band
-        draw_band(ax=plt.gca(), x=self.combined_points['fpr'], y=self.combined_points['tpr'], \
-            err=self.tpr_std, facecolor=f"C0", edgecolor="none", alpha=.2)
+        # draw_band(ax=plt.gca(), x=self.combined_points['fpr'], y=self.combined_points['tpr'], \
+        #     err=self.tpr_std, facecolor=f"C0", edgecolor="none", alpha=.2)
         auc_str = f'AUC={aucs[0]:.3f}' if len(aucs) == 1 else f'AUC={np.asarray(aucs).mean():.3f} (std {np.asarray(aucs).std():.3f})'
 
         plt.annotate(auc_str, xy=[0.7, 0.05], fontsize=12)

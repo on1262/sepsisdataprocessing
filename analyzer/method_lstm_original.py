@@ -6,7 +6,7 @@ from tools import logger as logger
 from sklearn.linear_model import LogisticRegression
 from .container import DataContainer
 from .utils import generate_labels, map_func, cal_label_weight
-from .explore import plot_cover_rate
+from .feature_explore import plot_cover_rate
 
 class LSTMOriginalAnalyzer:
     '''
@@ -64,10 +64,8 @@ class LSTMOriginalAnalyzer:
         mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
         self.label_explore(label, mask)
         # step 4: train and predict
-        for idx, (data_index, test_index) in enumerate(kf.split(X=self.dataset)): 
-            valid_num = round(len(data_index)*0.15)
-            train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
-            self.dataset.register_split(train_index, valid_index, test_index)
+        for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()):
+            self.params['kf_index'] = idx
             self.params['weight'] = cal_label_weight(len(self.params['centers']), mask[train_index,...], label[train_index,...])
             trainer = mlib.LSTMOriginalTrainer(self.params, self.dataset)
             if idx == 0:

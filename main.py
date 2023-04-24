@@ -7,10 +7,11 @@ analyzer_params = [
     #'LSTM_balanced',
     #'LSTM_original',
     #'catboost_4cls',
-    'random_forest',
+    #'random_forest',
     #'catboost_forest',
 ]
 
 if __name__ == '__main__':
     dataset = MIMICDataset()
-    analyzer = Analyzer(analyzer_params, dataset)
+    if len(analyzer_params) > 0:
+        analyzer = Analyzer(analyzer_params, dataset)

@@ -105,16 +105,10 @@ class LossLogger:
             train_data = data['train'] if not log_loss else np.log10(data['train'])
             train_mean = np.mean(train_data, axis=0)
             plt.plot(epochs, train_mean, color='C0', label='train loss')
-            if std_flag:
-                train_std = np.std(train_data, axis=0)
-                draw_band(plt.gca(), x=epochs, y=train_mean, err=train_std, facecolor=f"C0", edgecolor="none", alpha=.2)
         if 'valid' in data.keys():
             valid_data = data['valid'] if not log_loss else np.log10(data['valid'])
             valid_mean = np.mean(valid_data, axis=0)
             plt.plot(epochs, valid_mean, color="C1", label='valid loss')
-            if std_flag:
-                valid_std = np.std(valid_data, axis=0)
-                draw_band(plt.gca(), x=epochs, y=valid_mean, err=valid_std, facecolor=f"C1", edgecolor="none",  alpha=.2)
         plt.title(title)
         plt.xlabel('Epoch')
         if log_loss:
@@ -306,83 +300,6 @@ def plot_reg_correlation(X:np.ndarray, fea_names:Iterable, Y:np.ndarray,
             )
         plt.close()
 
-def plot_correlation_with_quantile(
-    X_pred:np.ndarray, x_name:str, Y_gt:np.ndarray, target_name: str, quantile:list, equal_lim=False, plot_dash=True, write_dir_path=None, comment:str=''
-):
-    '''
-    生成预测值和真实值的散点图, 并用颜色表明分位数的范围, 从而表现出模型认为该预测是否可靠
-    默认不生成回归线, 但是会生成一条Y=X线
-    X_pred: (quantile, batch)
-    Y_gt: (batch,) or (batch, 1)
-    '''
-    if write_dir_path is not None:
-        os.makedirs(write_dir_path, exist_ok=True)
-    assert(len(Y_gt.shape) <= 2)
-    if len(Y_gt.shape) == 1:
-        Y_gt = Y_gt.reshape(Y_gt.shape[0], 1)
-    assert(len(X_pred.shape) == 2)
-    X_pred, Y_gt =  X_pred.astype(np.float32), Y_gt.astype(np.float32)
-    valid = ((1 - np.isnan(X_pred[0,...])) * (1 - np.isnan(Y_gt[:,0]))).astype(bool) # 两者都是true才行
-    X_pred, Y_gt = X_pred[:, valid], Y_gt[valid,:]
-    
-    median_idx = round((X_pred.shape[0] - 1) / 2)
-    ymin, ymax = Y_gt.min(), Y_gt.max()
-    xmin, xmax = X_pred[median_idx,:].min(), X_pred[median_idx,:].max()
-    d_min = min(ymin, xmin)
-    d_max = max(xmax, ymax)
-    # generate dataframe
-    data_arr = np.ndarray((2+median_idx, X_pred.shape[1]), dtype=float)
-    data_arr[0, :] = Y_gt[:,0]
-    data_arr[1,:] = X_pred[median_idx, :]
-    columns = ['gt','pred']
-    for idx in range(1, median_idx+1): # median=2, 1,2->(2-1, 2+1), (2-2,2+2)
-        data_arr[idx+1,:] = X_pred[median_idx+idx,:] - X_pred[median_idx-idx,:]
-        columns.append(f'alpha={quantile[median_idx-idx]:.2f}-{quantile[median_idx+idx]:.2f}')
-    df = pd.DataFrame(data=data_arr.T, columns=columns, index=None)
-    for idx in range(2, len(columns)):
-        logger.debug(f'Plot correlation with quantile: {x_name}, alpha=[{columns[idx]}]]')
-        plt.figure(figsize = (14,12)) # W,H
-        norm = HueColorNormlize(df[columns[idx]].to_numpy())
-        c_map = sns.color_palette("coolwarm", as_cmap=True)
-        sns.scatterplot(data=df, x="pred", y="gt", hue_norm=norm,
-            hue=columns[idx], palette=c_map,
-            alpha=0.5, linewidth=0, size=1)
-        sm = plt.cm.ScalarMappable(cmap=c_map, norm=norm)
-        sm.set_array([]) # magic
-        # sm.set_clim(vmin=norm.vmin, vmax=norm.vmax)
-        # Remove the legend and add a colorbar
-        plt.gca().get_legend().remove()
-        plt.gca().figure.colorbar(sm, ticks=norm.get_ticks())
-        # plot line y=x
-        if plot_dash:
-            plt.plot(np.asarray([d_min, d_max]),np.asarray([d_min, d_max]), 
-                linestyle='dashed', color='C7', label='Y=X')
-        plt.title(f'{x_name} vs {target_name} quantile={columns[idx]} cmt=[{comment}]', fontsize = 12)
-        # if restrict_area and Y.shape[0] > 20:
-        #     # 去除20个极值, 使得显示效果更好
-        #     Y_sorted = np.sort(Y[x_valid[:, idx], 0], axis=0)
-        #     X_sorted = np.sort(X[x_valid[:, idx], idx], axis=0)
-        #     Y_span = Y_sorted[-10] - Y_sorted[10]
-        #     X_span = X_sorted[-10] - X_sorted[10]
-        #     plt.ylim(bottom=Y_sorted[10]-Y_span*0.05, top=Y_sorted[-10]+Y_span*0.05)
-        #     plt.xlim(left=X_sorted[10]-X_span*0.05, right=X_sorted[-10]+X_span*0.05)
-        # else:
-        if equal_lim: # 强制x和y的范围一致
-            plt.ylim(bottom=d_min, top=d_max)
-            plt.xlim(left=d_min, right=d_max)
-        else:
-            plt.ylim(bottom=ymin, top=ymax)
-            plt.xlim(left=xmin, right=xmax)
-        plt.xlabel(x_name)
-        plt.ylabel(target_name)
-        if write_dir_path is None:
-            plt.show()
-        else:
-            plt.savefig(
-                os.path.join(write_dir_path, remove_slash(rf'{x_name}vs{target_name}@{columns[idx]}{comment}.png'))
-            )
-        plt.close()
-
 
 def plot_shap_scatter(fea_name:str, shap:np.ndarray, values:np.ndarray, x_lim=(0, -1), write_dir_path=None):
     '''
@@ -485,52 +402,3 @@ def plot_category_dist(data:pd.DataFrame, type_dict:dict, output_dir=None):
             plt.title(f'Category items distribution of {name}')
             plt.savefig(os.path.join(output_dir, f'{name}_dist.png'))
             plt.close()
-
-def test_fea_importance(model, X_test, fea_name):
-    import shap
-    explainer = shap.Explainer(model)
-    shap_values = explainer(X_test)
-    shap_importance = shap_values.abs.mean(0).values
-    sorted_idx = shap_importance.argsort()
-    shap_vals = shap_importance[sorted_idx]
-    sorted_names = np.asarray(fea_name)[sorted_idx]
-    # plot_fea_importance(shap_vals, sorted_names, save_path)
-    return shap_values.values, shap_vals, sorted_names
-
-def plot_fea_importance(shap_vals, sorted_names, save_path=None):
-
-    plt.figure(figsize=(12, 12))
-    plt.barh(range(len(shap_vals)), shap_vals, align='center')
-    plt.yticks(range(len(shap_vals)), np.array(sorted_names))
-    plt.title('SHAP Importance')
-    if save_path:
-        plt.savefig(save_path)
-    else:
-        plt.show()
-    plt.close()
-
-def draw_band(ax, x, y, err, **kwargs):
-    '''绘制标准差条块'''
-    if not isinstance(x, np.ndarray):
-        x = np.asarray(x)
-    if not isinstance(y, np.ndarray):
-        y = np.asarray(y)
-    # Calculate normals via centered finite differences (except the first point
-    # which uses a forward difference and the last point which uses a backward
-    # difference).
-    dx = np.concatenate([[x[1] - x[0]], x[2:] - x[:-2], [x[-1] - x[-2]]])
-    dy = np.concatenate([[y[1] - y[0]], y[2:] - y[:-2], [y[-1] - y[-2]]])
-    l = np.hypot(dx, dy)
-    nx = dy / l
-    ny = -dx / l
-    # end points of errors
-    xp = x + nx * err
-    yp = y + ny * err
-    xn = x - nx * err
-    yn = y - ny * err
-    vertices = np.block([[xp, xn[::-1]],
-                         [yp, yn[::-1]]]).T
-    codes = np.full(len(vertices), Path.LINETO)
-    codes[0] = Path.MOVETO
-    path = Path(vertices, codes)
-    ax.add_patch(PathPatch(path, **kwargs))

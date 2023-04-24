@@ -7,7 +7,7 @@ import pandas as pd
 from tools import GLOBAL_CONF_LOADER
 from tools import logger
 from tqdm import tqdm
-from datasets.abstract_dataset import AbstractDataset
+from sklearn.model_selection import KFold
 
 
 class Admission:
@@ -300,8 +300,8 @@ class MIMICIV:
                             start_time = max(adm[pao2_id][0,1], adm[fio2_id][0,1])
                             end_time = min(adm[pao2_id][-1,1], adm[fio2_id][-1,1])
                             dur = end_time - start_time
-                            if dur > max(rules['min_duration'],0) and dur < rules['max_duration']:
-                                points = min(np.sum((adm[pao2_id][:,1] >= start_time) * (adm[pao2_id][:,1] <= end_time)), \
+                            if dur > max(rules['min_duration'], 0) and dur < rules['max_duration']:
+                                points = max(np.sum((adm[pao2_id][:,1] >= start_time) * (adm[pao2_id][:,1] <= end_time)), \
                                     np.sum((adm[fio2_id][:,1] >= start_time) * (adm[fio2_id][:,1] <= end_time)))
                                 if points >= rules['min_points'] and dur/points <= rules['max_avg_interval']:
                                     flag *= 1
@@ -328,42 +328,12 @@ class MIMICIV:
             self.subjects.pop(s_id)
         logger.info(f'del_invalid_subjects: Deleted {len(pop_list)}/{len(pop_list)+len(self.subjects)} subjects')
 
-    def generate_subdataset(self, p_origin, p_save, sids:set):
-        '''
-        抽取首列符合subject id的所有项, 用于debug
-        p_origin: 源文件path, 可以是目录(会读里面所有源文件)/path list/path, 要求文件首列是subject id
-        p_save: 新文件path
-        sids: 待选subject id (int)
-        '''
-        titled = False
-        logger.info('Generating sub dataset')
-        assert(os.path.exists(p_origin))
-        if os.path.isdir(p_origin):
-            file_list = [os.path.join(p_origin, name) for name in sorted(os.listdir(p_origin))]
-        elif os.path.isfile(p_origin):
-            file_list = [p_origin]
-        elif isinstance(p_origin, list):
-            file_list = p_origin
-        else:
-            assert(0)
-        with open(p_save, 'w', encoding='utf-8') as tp:
-            for p_file in tqdm(file_list, desc='icu-events'):
-                with open(p_file, mode='r', encoding='utf-8') as fp:
-                    s_list = fp.readlines() # contain \n
-                    for idx, sentence in enumerate(s_list):
-                        if idx == 0 and not titled:
-                            tp.write(sentence)
-                            titled = True
-                        if idx > 0 and len(sentence) > 10:
-                            id = int(sentence.split(',')[0])
-                            if id in sids:
-                                tp.write(sentence)
 
-
-class MIMICDataset(AbstractDataset):
+class MIMICDataset():
     '''
     MIMIC-IV上层抽象, 从中间文件读取数据, 进行处理, 得到最终数据集
     (batch, n_fea, seq_len)
+    有效接口: norm_dict(key可能是多余的), idx_dict, static_keys, dynamic_keys, total_keys
     '''
     __name = 'mimic-iv'
 
@@ -382,33 +352,29 @@ class MIMICDataset(AbstractDataset):
         # hit table
         self._hit_table = None
         # preload data
+        self.data_table = None # to derive other versions
         self.data = None # ndarray(samples, n_fea, ticks)
         self.norm_dict = None # key=str(name/id) value={'mean':mean, 'std':std}
         self.static_keys = None # list(str)
         self.dynamic_keys = None # list(str)
         self.seqs_len = None # list(available_len)
-
-        self.preprocess()
-        self.mimiciv.subjects = self.subjects # update
-        logger.info(f'Dataset length={self.data.shape[0]} admissions')
-        self.target_idx = self.data.shape[1] - 1
-        self.idx_dict = dict( # idx_dict: fea_name->idx
-            {str(key):val for val, key in enumerate(self.static_keys)}, \
-                **{str(key):val+len(self.static_keys) for val, key in enumerate(self.dynamic_keys)})
-        
-        # 这里设置str是为了使得特征名可以作为dict的keyword索引
-        self.norm_dict = {str(key):val for key, val in self.norm_dict.items()}
-        self.static_keys = [str(key) for key in self.static_keys]
-        self.dynamic_keys = [str(key) for key in self.dynamic_keys]
-        self.total_keys = self.static_keys + self.dynamic_keys
-        self.icu_item = {str(key):val for key, val in self.mimiciv.icu_item.items()}
-        self.hosp_item = {str(key):val for key, val in self.mimiciv.hosp_item.items()}
-        logger.info(f'Dynamic keys={len(self.dynamic_keys)}, static_keys={len(self.static_keys)}')
+        self.idx_dict = None
+        self.target_idx = None
         # mode switch
-        self.index = None # 当前模式(train/test)的index list, None表示使用全部数据
+        self.now_mode = None # 'train'/'valid'/'test'/'all'
+        self.kf_list = None # list([train_index, valid_index, test_index])
+        self.kf_index = None # int
+        self.data_index = None # 当前模式下的索引
         self.train_index = None
         self.valid_index = None
         self.test_index = None
+        # version switch
+        self.version_name = None
+
+        self.preprocess()
+        self.mimiciv.subjects = self.subjects # update
+        
+        logger.info(f'Dynamic keys={len(self.dynamic_keys)}, static_keys={len(self.static_keys)}')
 
     def get_fea_label(self, key_or_idx):
         '''输入key/idx得到关于特征的简短描述, 从icu_item中提取'''
@@ -422,24 +388,21 @@ class MIMICDataset(AbstractDataset):
             logger.warning(f'No fea label for: {name} return name')
             return name
 
-    def register_split(self, train_index, valid_index, test_index):
-        self.train_index = train_index
-        self.valid_index = valid_index
-        self.test_index = test_index
+    # def register_split(self, train_index, valid_index, test_index):
+    #     self.train_index = train_index
+    #     self.valid_index = valid_index
+    #     self.test_index = test_index
 
     def mode(self, mode=['train', 'valid', 'test', 'all']):
         '''切换dataset的模式, train/valid/test需要在register_split方法调用后才能使用'''
         if mode == 'train':
-            self.index = self.train_index
-            assert(self.index is not None)
+            self.data_index = self.kf_list[self.kf_index]['train']
         elif mode =='valid':
-            self.index = self.valid_index
-            assert(self.index is not None)
+            self.data_index = self.kf_list[self.kf_index]['valid']
         elif mode =='test':
-            self.index = self.test_index
-            assert(self.index is not None)
+            self.data_index = self.kf_list[self.kf_index]['test']
         elif mode == 'all':
-            self.index = None
+            self.data_index = None
         else:
             assert(0)
 
@@ -474,15 +437,14 @@ class MIMICDataset(AbstractDataset):
                 result.append(key)
         return result
 
-
     def preprocess(self, from_pkl=True):
         p_numeric_subject = os.path.join(self.gbl_conf['paths']['cache_dir'], '4_numeric_subject.pkl')
         p_norm_dict = os.path.join(self.gbl_conf['paths']['cache_dir'], '5_norm_dict.pkl')
         # preprocessing
         self.static_feas = set()
         self.target_label = self.loc_conf['dataset']['target_label']
-        self.dyamic_ids = self._available_dyn_id()
-        logger.info(f'Detected {len(self.dyamic_ids)} available dynamic features')
+        self.dynamic_ids = self._available_dyn_id()
+        logger.info(f'Detected {len(self.dynamic_ids)} available dynamic features')
 
         if from_pkl and os.path.exists(p_numeric_subject):
             with open(p_numeric_subject, 'rb') as fp:
@@ -509,7 +471,15 @@ class MIMICDataset(AbstractDataset):
                 pickle.dump(self.norm_dict, fp)
             logger.info(f'Norm dict dumped at {p_norm_dict}')
         self.preprocess_table(from_pkl=from_pkl)
-        
+        # init
+        self.static_feas, self.dynamic_ids = None, None # not use these attributes
+        self.target_idx = self.data_table.shape[1] - 1
+        self.idx_dict = dict( # idx_dict: fea_key->idx
+            {str(key):val for val, key in enumerate(self.static_keys)}, \
+                **{str(key):val+len(self.static_keys) for val, key in enumerate(self.dynamic_keys)})
+        # preprocess version
+        self.proprocess_version()
+
     def preprocess_to_num(self):
         '''
         将所有特征转化为数值型, 并且对于异常值进行处理
@@ -590,21 +560,43 @@ class MIMICDataset(AbstractDataset):
             norm_dict[key] = {'mean':mean, 'std':std}
         return norm_dict
 
-    def preprocess_table(self, from_pkl=True, t_step=0.5):
-        '''对每个subject生成时间轴对齐的表, tick(hour)是生成的表的间隔'''
+    def global_miss_rate(self) -> dict:
+        '''
+        该方法在preprocess之后调用
+        给出基于table_origin的全特征缺失率表
+        返回dict(key:value)其中key是str(id), value是该特征对应的列缺失率
+        '''
         p_origin_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '6_table_origin.pkl')
-        p_normed_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '7_table_norm.pkl')
-        p_final_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '8_table_final.pkl')
+        miss_rate = None
+        with open(p_origin_table, 'rb') as fp:
+            origin_table,_, _,_ = pickle.load(fp)
+        for idx, table in enumerate(origin_table):
+            if idx == 0:
+                miss_rate = np.mean(table == -1, dim=1)
+            else:
+                miss_rate += np.mean(table == -1, dim=1)
+        miss_rate /= len(origin_table)
+        return {key:miss_rate[self.idx_dict[key]] for key in self.idx_dict.keys()}
+        
+
+    def preprocess_table(self, from_pkl=True, t_step=0.5):
+        '''
+        对每个subject生成时间轴对齐的表, tick(hour)是生成的表的间隔
+        origin_table:  list(ndarray(n_fea, lens)) 其中lens不对齐, 缺失值为-1
+        '''
+        p_origin_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '6_table_origin.pkl')
+        # p_normed_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '7_table_norm.pkl')
+        p_final_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '7_table_final.pkl')
         # step1: 插值并生成表格
         if from_pkl and os.path.exists(p_origin_table):
             with open(p_origin_table, 'rb') as fp:
-                self.data, self.norm_dict, self.static_keys, self.dynamic_keys = pickle.load(fp)
+                self.data_table, self.norm_dict, self.static_keys, self.dynamic_keys = pickle.load(fp)
             logger.info(f'load original aligned table from {p_origin_table}')
         else:
-            data = []
+            data_table = []
             align_id = self.loc_conf['dataset']['align_target_id'] # 用来确认对齐的基准时间
             static_keys = list(self.static_feas)
-            dynamic_keys = self.dyamic_ids + self._additional_feas
+            dynamic_keys = self.dynamic_ids + self._additional_feas
             # 基准id和对应的index
             pao2_id, fio2_id =  "220224", "223835"
             index_dict = {'pao2':dynamic_keys.index("220224"), 'fio2':dynamic_keys.index("223835"), 
@@ -625,7 +617,6 @@ class MIMICDataset(AbstractDataset):
                         continue
                     else:
                         t_start = max(sepsis_time, t_start)
-                    
                     ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
                     # 生成表本身, 缺失值为-1
                     table = -np.ones((len(static_keys) + len(dynamic_keys), ticks.shape[0]), dtype=np.float32)
@@ -648,70 +639,136 @@ class MIMICDataset(AbstractDataset):
                     self._feature_engineering(table, index_dict, self._additional_feas) # 特征工程
                     for idx, key in enumerate(reversed(self._additional_feas)): # 记录附加信息
                         additional_vals[key].append(table[-(idx+1), :])
-                    data.append(table)
+                    data_table.append(table)
+            # 计算特征工程新增特征的norm_dict
             additional_vals = {key:np.concatenate(val, axis=0) for key, val in additional_vals.items()}
             additional_vals = {key:{'mean':val.mean(), 'std':val.std()} for key,val in additional_vals.items()}
             for key in additional_vals:
                 self.norm_dict[key] = additional_vals[key]
-            self.data = data
+            self.data_table = data_table
             self.static_keys = static_keys
             self.dynamic_keys = dynamic_keys
             with open(p_origin_table, 'wb') as fp:
-                pickle.dump([self.data, self.norm_dict, static_keys, dynamic_keys], fp)
+                pickle.dump([self.data_table, self.norm_dict, static_keys, dynamic_keys], fp)
             logger.info(f'data table dumped at {p_origin_table}')
-            
-        # step2: 补充缺失值
-        if from_pkl and os.path.exists(p_normed_table):
-            with open(p_normed_table, 'rb') as fp:
-                self.data = pickle.load(fp)
-            logger.info(f'load normalized aligned table from {p_normed_table}')
-        else:
-            # 缺失值采用均值填充
-            for s_id in tqdm(range(len(self.data)), desc='normalize'):
-                for idx, key in enumerate(self.static_keys):
-                    if np.abs(self.data[s_id][idx, 0] + 1) < 1e-4:
-                        self.data[s_id][idx, :] = self.norm_dict[str(key)]['mean']
-                
-                for idx, key in enumerate(self.dynamic_keys):
-                    arr_idx = idx + len(self.static_keys)
-                    if np.abs(self.data[s_id][arr_idx, 0] + 1) < 1e-4:
-                        self.data[s_id][arr_idx, :] = self.norm_dict[str(key)]['mean']
-                
-            with open(p_normed_table, 'wb') as fp:
-                pickle.dump(self.data, fp)
-            logger.info(f'data table dumped at {p_normed_table}')
-        # step3: 时间轴长度对齐, 生成seqs_len, 进行某些特征的最后处理
+        
+        # step2: 时间轴长度对齐, 生成seqs_len, 进行某些特征的最后处理
         if from_pkl and os.path.exists(p_final_table):
             with open(p_final_table, 'rb') as fp:
-                seqs_len, self.static_keys, self.data = pickle.load(fp)
+                seqs_len, self.static_keys, self.data_table = pickle.load(fp)
                 self.seqs_len = seqs_len
             logger.info(f'load length aligned table from {p_final_table}')
         else:
-            seqs_len = [d.shape[1] for d in self.data]
+            seqs_len = [d.shape[1] for d in self.data_table]
             self.seqs_len = seqs_len
             max_len = max(seqs_len)
             n_fea = len(self.static_keys) + len(self.dynamic_keys)
-            for t_idx in tqdm(range(len(self.data)), desc='length alignment'):
+            for t_idx in tqdm(range(len(self.data_table)), desc='length alignment'):
                 if seqs_len[t_idx] == max_len:
                     continue
                 new_table = -np.ones((n_fea, max_len - seqs_len[t_idx]))
-                self.data[t_idx] = np.concatenate([self.data[t_idx], new_table], axis=1)
-            self.data = np.stack(self.data, axis=0) # (n_sample, n_fea, seqs_len)
-            # 合并weight/height的重复特征
-            rest_feas = list(range(self.data.shape[1]))
-            pop_list = []
-            for key in ['Weight', 'Height', 'Blood Pressure', 'BMI']:
-                if key in self.static_keys:
-                    idx = max([0 if self.static_keys[idx] != key else idx for idx in range(len(self.static_keys))])
-                    pop_list.append(idx)
-            pop_list = sorted(pop_list, reverse=True) # 从大到小
-            for idx in pop_list:
-                self.static_keys.pop(idx)
-                rest_feas.pop(idx)
-            self.data = self.data[:,  rest_feas, :]
+                self.data_table[t_idx] = np.concatenate([self.data_table[t_idx], new_table], axis=1)
+            self.data_table = np.stack(self.data_table, axis=0) # (n_sample, n_fea, seqs_len)
             with open(p_final_table, 'wb') as fp:
-                pickle.dump((seqs_len, self.static_keys, self.data), fp)
+                pickle.dump((seqs_len, self.static_keys, self.data_table), fp)
             logger.info(f'length aligned table dumped at {p_final_table}')
+
+    def load_version(self, version_name):
+        '''更新dataset版本'''
+        # 检查是否以及装入
+        if self.version_name == version_name:
+            return
+        else:
+            self.version_name = version_name
+        
+        p_version = os.path.join(self.gbl_conf['paths']['cache_dir'], f'8_version_{version_name}.pkl')
+        assert(os.path.exists(p_version))
+        with open(p_version, 'rb') as fp:
+            version_dict = pickle.load(fp)
+        self.static_keys = version_dict['static_keys']
+        self.dynamic_keys = version_dict['dynamic_keys']
+        self.total_keys = self.static_keys + self.dynamic_keys
+        self.data = version_dict['data']
+        self.idx_dict = version_dict['idx_dict']
+        self.kf_list = version_dict['kf']
+
+    def proprocess_version(self):
+        '''
+        生成不同版本的数据集, 不同版本的数据集的样本数量/特征数量都可能不同
+        '''
+        assert(self.idx_dict is not None)
+        p_final_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '7_table_final.pkl')
+        with open(p_final_table, 'rb') as fp:
+            seqs_len, self.static_keys, self.data_table = pickle.load(fp)
+        version_params = self.loc_conf['dataset']['version']
+        for version_name in version_params.keys():
+            logger.info(f'Preprocessing version: {version_name}')
+            # 检查是否存在pkl
+            p_version = os.path.join(self.gbl_conf['paths']['cache_dir'], f'8_version_{version_name}.pkl')
+            if os.path.exists(p_version):
+                logger.info(f'Skip preprocess existed version: {version_name}')
+                continue
+            version_table = self.data_table.copy()
+            # 筛选可用特征
+            if len(version_params[version_name]['feature_limit']) > 0:
+                limit_idx = [self.idx_dict[key] for key in version_params[version_name]['feature_limit']]
+            else:
+                limit_idx = list(self.idx_dict.values())
+            avail_idx = []
+            forbidden_idx = set([self.idx_dict[key] for key in version_params[version_name]['forbidden_feas']])
+            for idx in limit_idx:
+                if idx not in forbidden_idx:
+                    avail_idx.append(idx)
+            avail_idx = sorted(avail_idx)
+            # 原本的缺失用均值填充
+            for key, idx in self.idx_dict.items():
+                for s_idx in range(version_table.shape[0]):
+                    arr = version_table[s_idx, idx, :self.seqs_len[s_idx]]
+                    version_table[s_idx, idx, :self.seqs_len[s_idx]] = np.where(np.abs(arr + 1) < 1e-4, arr, self.norm_dict[key]['mean'])
+            # 更新特征
+            version_table = version_table[:, avail_idx, :]
+            derived_idx_dict = {}
+            idx_converter = {idx:new_idx for new_idx, idx in enumerate(avail_idx)}
+            avail_keys = {}
+            for key, idx in self.idx_dict.items():
+                avail_keys[idx] = key
+                if idx in avail_idx:
+                    derived_idx_dict[key] = idx_converter[idx]
+            avail_keys = [avail_keys[idx] for idx in avail_idx]
+            derived_static_keys = avail_keys[:np.sum(np.asarray(avail_idx) < len(self.static_keys))]
+            derived_dynamic_keys = avail_keys[np.sum(np.asarray(avail_idx) < len(self.static_keys)):]
+            derived_seqs_len = seqs_len
+            # 设置k-fold
+            kf = KFold(n_splits=GLOBAL_CONF_LOADER['analyzer']['data_container']['n_fold'], \
+                shuffle=True, random_state=GLOBAL_CONF_LOADER['analyzer']['data_container']['seed'])
+            kf_list = []
+            for data_index, test_index in kf.split(X=list(range(version_table.shape[0]))): 
+                # encode: train, valid, test
+                valid_num = round(len(data_index)*0.15)
+                train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
+                kf_list.append({'train':train_index, 'valid':valid_index, 'test':test_index})
+            version_dict = {
+                'static_keys':derived_static_keys,
+                'dynamic_keys':derived_dynamic_keys,
+                'seqs_len':derived_seqs_len,
+                'idx_dict':derived_idx_dict,
+                'data': version_table,
+                'kf': kf_list,
+            }
+            with open(p_version, 'wb') as fp:
+                pickle.dump(version_dict, fp)
+    
+    def enumerate_kf(self):
+        return KFoldIterator(self, k=len(self.kf_list))
+
+    def set_kf_index(self, kf_index):
+        '''设置dataset对应K-fold的一折'''
+        self.kf_index = kf_index
+        self.train_index = self.kf_list[kf_index]['train']
+        self.valid_index = self.kf_list[kf_index]['valid']
+        self.test_index = self.kf_list[kf_index]['test']
+        # self.mode('all')
+        return self.train_index.copy(), self.valid_index.copy(), self.test_index.copy()
 
     def _feature_engineering(self, table:np.ndarray, index_dict:dict, addi_feas:list):
         '''
@@ -852,21 +909,34 @@ class MIMICDataset(AbstractDataset):
         logger.info(f'Report generated at {out_path}')
 
     def __getitem__(self, idx):
-        if self.index is None:
+        assert(self.version_name is not None)
+        if self.data_index is None:
             return {'data': self.data[idx, :, :], 'length': self.seqs_len[idx]}
         else:
-            return {'data': self.data[self.index[idx], :, :], 'length': self.seqs_len[self.index[idx]]}
+            return {'data': self.data[self.data_index[idx], :, :], 'length': self.seqs_len[self.data_index[idx]]}
 
     def __len__(self):
-        if self.index is None:
+        if self.data_index is None:
             return self.data.shape[0]
         else:
-            return len(self.index)
+            return len(self.data_index)
 
-# TODO 改为和dataset无关的方法
-# def generate_subset(p_save):
-#     p_origin = os.path.join(dataset.mimiciv.mimic_dir, 'icu', 'outputevents.csv')
-#     dataset.mimiciv.generate_subdataset(p_origin=p_origin, p_save=p_save, sids={10161042, 10014610, 10122371})
+class KFoldIterator:
+    def __init__(self, dataset:MIMICDataset, k):
+        self.current = -1
+        self.k = k
+        self.dataset = dataset
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.current += 1
+        if self.current < self.k:
+            return self.dataset.set_kf_index(self.current)
+        else:
+            raise StopIteration
+
 
 def reduce_peak(x: np.ndarray):
     '''
@@ -916,5 +986,8 @@ def load_sepsis_patients(csv_path:str) -> dict:
 
 if __name__ == '__main__':
     dataset = MIMICDataset()
+    dataset.load_version('lite')
+    logger.debug('Dataset Initialization Done')
+    
     # dataset.make_report()
     

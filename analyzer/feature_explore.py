@@ -37,7 +37,17 @@ class FeatureExplorer:
         tools.plot_single_dist(np.asarray(counts), f"ARDS Count", os.path.join(out_dir, "ards_count.png"), adapt=True)
         logger.info(f"ARDS patients count={ards_count}")
 
-
+    def correlation(self, out_dir):
+        # plot correlation matrix
+        labels = [self.container.dataset.get_fea_label(id) for id in self.container.dataset.total_keys]
+        corr_mat = tools.plot_correlation_matrix(self.container.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation _matrix'))
+        correlations = []
+        for idx in range(corr_mat.shape[1]):
+            correlations.append([corr_mat[-1, idx], labels[idx]])
+        correlations = sorted(correlations, key=lambda x:np.abs(x[0]), reverse=True)
+        for idx in range(corr_mat.shape[1]):
+            logger.info(f'Correlation with target: {correlations[idx][0]} \t{correlations[idx][1]}')
+        
     def miss_mat(self, out_dir):
         '''计算行列缺失分布并输出'''
         na_table = np.zeros((len(self.dataset.subjects), len(self.dataset.dynamic_keys)), dtype=bool)

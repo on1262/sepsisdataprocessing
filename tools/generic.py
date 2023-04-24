@@ -621,4 +621,15 @@ def label_smoothing(centers:list, nums:np.ndarray, band=50):
     return smoothed_labels
 
 
+def find_latest(path_dir):
+    '''寻找不含子文件的文件夹中最新文件的full path'''
+    # get a list of all files in the directory
+    all_files = os.listdir(path_dir)
+    # get the most recently modified file
+    latest_file = max(all_files, key=os.path.getmtime)
+    # get the full path of the latest file
+    latest_file_path = os.path.join(path_dir, latest_file)
+    return latest_file_path
+
+
 set_chinese_font()

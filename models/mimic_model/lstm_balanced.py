@@ -59,8 +59,15 @@ class LSTMBalancedTrainer():
         self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=True, collate_fn=Collect_Fn)
         self.test_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
         self.register_vals = {'train_loss':[], 'valid_loss':[]}
-        # status
+        # pre-train status
         self.trained = False
+        if self.params['pretrained'] == True:
+            self.trained = True
+            load_path = self.load_model(self, None, load_latest=True)
+            logger.info(f'Load pretrained model from {load_path}')
+            self.model = self.model.to(self.device)
+            self.criterion = self.criterion.to(self.device)
+
     
     def get_loss(self):
         data = {
@@ -72,9 +79,27 @@ class LSTMBalancedTrainer():
     def summary(self):
         torchinfo.summary(self.model)
 
-    def load_model(self, model_path):
-        logger.info('Load LSTM cls model from:' + model_path)
-        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+    def reinit_cache(self, index):
+        cache_path = os.path.join(self.cache_path, str(index))
+        tools.reinit_dir(cache_path, build=True)
+    
+    def load_model(self, epoch, load_latest=False):
+        '''
+        读取模型state_dict
+        如果load_latest=True, epoch将被无视
+        返回full path
+        '''
+        model_dir = os.path.join(self.cache_path, str(self.params['kf_index']))
+        if load_latest:
+            model_path = tools.find_latest(model_dir)
+            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        else:
+            model_path = os.path.join(model_dir, f'{epoch}.pt')
+            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        return model_path
+
+    def save_model(self, epoch):
+        torch.save(self.model.state_dict(), os.path.join(self.cache_path, str(self.params['kf_index']), f'{epoch}.pt'))
 
 
     def _batch_forward(self, data, return_set=set()):
@@ -110,10 +135,11 @@ class LSTMBalancedTrainer():
         return result
 
     def train(self):
-        assert(self.trained == False)
+        if self.trained:
+            self.train_rebalanced()
+            return
         self.trained = True # 不能训练多次
-        cache_path = os.path.join(self.cache_path)
-        tools.reinit_dir(cache_path, build=True)
+        self.reinit_cache(self.params['kf_index'])
         self.model = self.model.to(self.device)
         self.criterion = self.criterion.to(self.device)
         with tqdm(total=self.params['epochs']) as tq:
@@ -167,10 +193,12 @@ class LSTMBalancedTrainer():
                     best_epoch = epoch
                 self.register_vals['train_loss'].append(loss_vals['train_loss'])
                 self.register_vals['valid_loss'].append(loss_vals['valid_loss'])
-                torch.save(self.model.state_dict(), os.path.join(cache_path, f'{epoch}.pt'))
-        best_path = os.path.join(cache_path, f'{best_epoch}.pt')
-        self.model.load_state_dict(torch.load(best_path, map_location=self.device))
+                self.save_model(epoch)
+        best_path = self.load_model(best_epoch)
         logger.info(f'Load best model from {best_path} valid acc={best_valid_metric}')
+        self.train_rebalanced()
+    
+    def train_rebalanced(self):
         # train rebalanced model
         self.dataset.mode('train')
         self.model.eval()
