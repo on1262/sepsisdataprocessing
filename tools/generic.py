@@ -45,59 +45,14 @@ def set_sk_random_seed(seed:int=100):
 def remove_slash(name:str):
     return name.replace('/','%')
 
-'''
-输入文件名, 返回文件的MD5字符串
-'''
+
 def cal_file_md5(filename:str) -> str:
+    '''输入文件名, 返回文件的MD5字符串'''
     with open(filename, 'rb') as fp:
         data = fp.read()
     file_md5= hashlib.md5(data).hexdigest()
     return file_md5
 
-
-# 获取超过thres的非na比例的数据
-def select_na(data:pd.DataFrame, col_thres=0.5, row_thres=0.7, fea_manager:FeatureManager=None):
-    if fea_manager is None:
-        # del column na
-        valid_cols = msno.nullity_filter(data, filter='top', p=col_thres).columns
-        data = data[valid_cols]
-        # del row na
-        na_mat = data.isna().to_numpy(dtype=np.int32)
-        valid_mat = 1 - np.mean(na_mat, axis=1)
-        data = data.iloc[valid_mat > row_thres]
-    else:
-        dyn_check_names = [] # 动态特征只check第一天
-        static_check_names = fea_manager.get_names(sta=True)
-        dyn_feas = fea_manager.get_names(dyn=True)
-        for fea_name in dyn_feas:
-            name = fea_manager.get_expanded_fea(fea_name)[0][1]
-            dyn_check_names.append(name)
-        data_check = data.loc[:, dyn_check_names + static_check_names]
-        valid_cols = set(msno.nullity_filter(data_check, filter='top', p=col_thres).columns)
-        col_expanded = set() # 需要把之后的特征加在第一天特征的后面(如果第一天有效)
-        for idx, name in enumerate(dyn_check_names):
-            if name in valid_cols:
-                col_expanded.update([vol[1] for vol in fea_manager.get_expanded_fea(dyn_feas[idx])])
-            else:
-                fea_manager.remove_fea(dyn_feas[idx]) # remove dynamic features
-        for col in valid_cols:
-            if col not in col_expanded:
-                col_expanded.add(col)
-        dropped_cols = 0
-        static_check_names = set(static_check_names)
-        for col in data.columns:
-            if col not in col_expanded:
-                if col in static_check_names:
-                    fea_manager.remove_fea(col) # remove static featur
-                logger.warning(f"select na: feature {col} dropped")
-                dropped_cols += 1
-        logger.info(f"select na: drop {dropped_cols} features")
-        data = data[list(col_expanded)]
-        na_mat = data_check.isna().to_numpy(dtype=np.int32)
-        valid_mat = 1 - np.mean(na_mat, axis=1)
-        logger.info(f"select na: drop {len(data) - (valid_mat > row_thres).sum()}/{len(data)} na rows")
-        data = data.iloc[valid_mat > row_thres]
-    return data
 
 def assert_no_na(dataset:pd.DataFrame):
     try:
@@ -205,15 +160,16 @@ def label_smoothing(centers:list, nums:np.ndarray, band=50):
     return smoothed_labels
 
 
-def find_latest(path_dir):
+def find_best(path_dir, prefix='best'):
     '''寻找不含子文件的文件夹中最新文件的full path'''
     # get a list of all files in the directory
     all_files = os.listdir(path_dir)
-    # get the most recently modified file
-    latest_file = max(all_files, key=os.path.getmtime)
-    # get the full path of the latest file
-    latest_file_path = os.path.join(path_dir, latest_file)
-    return latest_file_path
-
+    for file in all_files:
+        if str(file).startswith(prefix):
+            # get the full path of the latest file
+            best_file_path = os.path.join(path_dir, file)
+            return best_file_path
+    assert(0)
+    return None
 
 set_chinese_font()

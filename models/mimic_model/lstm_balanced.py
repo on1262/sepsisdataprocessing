@@ -90,7 +90,7 @@ class LSTMBalancedTrainer():
         '''
         model_dir = os.path.join(self.cache_path, str(self.params['kf_index']))
         if load_latest:
-            model_path = tools.find_latest(model_dir)
+            model_path = tools.find_best(model_dir)
             self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         else:
             model_path = os.path.join(model_dir, f'{epoch}.pt')

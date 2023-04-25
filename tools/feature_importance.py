@@ -2,6 +2,9 @@ import shap
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import torch
+import numpy as np
+import random
 
 
 class TreeFeatureImportance():
@@ -49,17 +52,29 @@ class TreeFeatureImportance():
             plt.close()
 
 
-class IntegratedFeatureImportance():
+class DeepFeatureImportance():
     '''基于intergrated-gradients对深度学习网络计算重要性'''
-    def __init__(self, fea_names) -> None:
+    def __init__(self, device, fea_names) -> None:
         self.fea_names = fea_names
+        self.device = torch.device(device)
         # register
         self.records = []
 
-    def add_record(self, model, valid_X):
-        explainer = shap.Explainer(model)
-        shap_values = explainer(valid_X)
+    def add_record(self, model:torch.nn.Module, valid_X:np.ndarray):
+        '''要求forward_func输入为(batch, seq_len, n_fea)'''
+        max_k = min(500, valid_X.shape[0]//2)
+        valid_X = torch.as_tensor(valid_X, dtype=torch.float32).to(self.device)
+        model = model.eval().to(self.device)
+        background = valid_X[:max_k,...]
+        valid = valid_X[max_k:,...]
+        model.set_explainer_mode(True)
+        model = model.train()
+        explainer = shap.DeepExplainer(model=model, data=background)
+        shap_values = explainer.shap_values(valid)
+        model.set_explainer_mode(False)
+        model = model.eval()
         self.records.append((shap_values.base_values, shap_values.data, shap_values.values)) # (sample, n_fea)
+        
 
     def update_record(self):
         if isinstance(self.records, list):

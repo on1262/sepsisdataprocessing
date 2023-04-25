@@ -5,7 +5,7 @@ analyzer_params = [
     #'feature_explore',
     #'nearest_4cls',
     #'LSTM_balanced',
-    #'LSTM_original',
+    'LSTM_original',
     #'catboost_4cls',
     #'random_forest',
     #'catboost_forest',

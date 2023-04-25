@@ -376,6 +376,7 @@ class MIMICDataset():
         self.norm_dict = None # key=str(name/id) value={'mean':mean, 'std':std}
         self.static_keys = None # list(str)
         self.dynamic_keys = None # list(str)
+        self.total_keys = None
         self.seqs_len = None # list(available_len)
         self.idx_dict = None
         self.target_idx = None
@@ -722,15 +723,14 @@ class MIMICDataset():
             for idx in limit_idx:
                 if idx not in forbidden_idx:
                     avail_idx.append(idx)
-            avail_idx = sorted(avail_idx)
             if version_params[version_name]['fill_missvalue']:
                 # 原本的缺失用均值填充
                 for key, idx in self.idx_dict.items():
                     for s_idx in range(version_table.shape[0]):
-                        arr = version_table[s_idx, idx, :self.seqs_len[s_idx]]
-                        version_table[s_idx, idx, :self.seqs_len[s_idx]] = np.where(np.abs(arr + 1) < 1e-4, arr, self.norm_dict[key]['mean'])
+                        arr = version_table[s_idx, idx, :seqs_len[s_idx]]
+                        version_table[s_idx, idx, :seqs_len[s_idx]] = np.where(np.abs(arr + 1) > 1e-4, arr, self.norm_dict[key]['mean'])
             # 更新特征
-            version_table = version_table[:, avail_idx, :]
+            version_table = version_table[:, avail_idx, :] # 这里不sort是为了保证PF ratio处于最后一位
             derived_idx_dict = {}
             idx_converter = {idx:new_idx for new_idx, idx in enumerate(avail_idx)}
             avail_keys = {}
@@ -738,6 +738,7 @@ class MIMICDataset():
                 avail_keys[idx] = key
                 if idx in avail_idx:
                     derived_idx_dict[key] = idx_converter[idx]
+            assert(derived_idx_dict['PF_ratio'] == len(avail_idx)-1)
             avail_keys = [avail_keys[idx] for idx in avail_idx]
             derived_static_keys = avail_keys[:np.sum(np.asarray(avail_idx) < len(self.static_keys))]
             derived_dynamic_keys = avail_keys[np.sum(np.asarray(avail_idx) < len(self.static_keys)):]

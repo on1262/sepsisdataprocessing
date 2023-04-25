@@ -43,7 +43,7 @@
                 "out_dir":"outputs/mimic-iv",
                 "lstm_original_cache": "outputs/mimic-iv/cache/lstm_original",
                 "lstm_balanced_cache": "outputs/mimic-iv/cache/lstm_balanced",
-                "lstm_cascade_cache": "outputs/mimic-iv/cache/lstm_balanced",
+                "lstm_cascade_cache": "outputs/mimic-iv/cache/lstm_cascade",
                 "rebalance_cache_path": "outputs/mimic-iv/cache/rebalance",
                 "catboost_forest_cache": "outputs/mimic-iv/cache/catboost_forest",
                 "catboost_cls_cache": "outputs/mimic-iv/cache/catboost_cls",

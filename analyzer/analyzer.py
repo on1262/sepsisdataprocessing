@@ -40,6 +40,8 @@ class Analyzer:
     def run_sub_analyzer(self, analyzer_name):
         logger.info(f'Run Analyzer: {analyzer_name}')
         params = self.container.get_model_params(analyzer_name)
+        if 'dataset_version' in params:
+            self.container.dataset.load_version(params['dataset_version'])
         sub_analyzer = self.analyzer_dict[analyzer_name](params, self.container)
         sub_analyzer.run()
         # utils.create_final_result()

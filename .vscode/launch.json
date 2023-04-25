@@ -20,5 +20,13 @@
             "console": "integratedTerminal",
             "justMyCode": true
         },
+        {
+            "name": "Dataset",
+            "type": "python",
+            "request": "launch",
+            "program": "${cwd}/datasets/mimic_dataset.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
     ]
 }

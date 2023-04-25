@@ -11,17 +11,20 @@ import torchinfo
 
 class LSTMOriginalModel(nn.Module):
     '''带预测窗口的多分类判别模型'''
-    def __init__(self, dev:str, in_channels:int, n_cls=4, hidden_size=128, dp=0) -> None:
+    def __init__(self, in_channels:int, n_cls=4, hidden_size=128, dp=0) -> None:
         super().__init__()
-        self.device = torch.device(dev)
         self.norm = nn.BatchNorm1d(num_features=in_channels)
         self.ebd = nn.Linear(in_features=in_channels, out_features=in_channels)
         self.den = nn.Linear(in_features=hidden_size, out_features=n_cls)
         self.sf = nn.Softmax(dim=-1)
-        self.lstm = nn.LSTM(input_size=in_channels, hidden_size=hidden_size, batch_first=True, dropout=dp, device=self.device)
-        self.c_0 = nn.Parameter(torch.zeros((1, 1, hidden_size), device=self.device), requires_grad=True)
-        self.h_0 = nn.Parameter(torch.zeros((1, 1, hidden_size), device=self.device), requires_grad=True)
+        self.lstm = nn.LSTM(input_size=in_channels, hidden_size=hidden_size, batch_first=True, dropout=dp)
+        self.c_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
+        self.h_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
+        self.explainer_mode = False
 
+    def set_explainer_mode(self, value):
+        self.explainer_mode = value
+    
     def forward(self, x:torch.Tensor):
         '''
         给出某个时间点对未来一个窗口内是否发生ARDS的概率
@@ -36,7 +39,10 @@ class LSTMOriginalModel(nn.Module):
         x, _ = self.lstm(x, (self.h_0.expand(-1, x.size(0), -1).contiguous(), self.c_0.expand(-1, x.size(0), -1).contiguous()))
         # x: (batch, time, hidden_size)
         x = self.sf(self.den(x))
-        return x # (batch, time, n_cls)
+        if self.explainer_mode:
+            return torch.mean(x, dim=-1) # (batch, time)
+        else:
+            return x # (batch, time, n_cls)
 
 
 class LSTMOriginalTrainer():
@@ -44,9 +50,8 @@ class LSTMOriginalTrainer():
         self.params = params
         self.paths = params['paths']
         self.device = torch.device(self.params['device'])
-        self.cache_path = self.paths['lstm_balanced_cache']
-        tools.reinit_dir(self.cache_path, build=True)
-        self.model = LSTMOriginalModel(params['device'], params['in_channels'])
+        self.cache_path = self.paths['lstm_original_cache']
+        self.model = LSTMOriginalModel(params['in_channels'])
         # self.rebalance_trainer = RebalanceTrainer(self.params)
         self.n_cls = len(self.params['centers'])
         self.criterion = OriginalClsLoss(self.n_cls, params['weight'])
@@ -55,18 +60,17 @@ class LSTMOriginalTrainer():
         self.available_idx = params['available_idx']
         self.generator = DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         self.train_dataloader = DataLoader(dataset=self.dataset, batch_size=params['batch_size'], shuffle=True, collate_fn=Collect_Fn)
-        self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=True, collate_fn=Collect_Fn)
+        self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
         self.test_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
         self.register_vals = {'train_loss':[], 'valid_loss':[]}
         # pre-train status
         self.trained = False
         if self.params['pretrained'] == True:
             self.trained = True
-            load_path = self.load_model(self, None, load_latest=True)
+            load_path = self.load_model(None, load_best=True)
             logger.info(f'Load pretrained model from {load_path}')
             self.model = self.model.to(self.device)
             self.criterion = self.criterion.to(self.device)
-
 
     def get_loss(self):
         data = {
@@ -82,23 +86,23 @@ class LSTMOriginalTrainer():
         cache_path = os.path.join(self.cache_path, str(index))
         tools.reinit_dir(cache_path, build=True)
     
-    def load_model(self, epoch, load_latest=False):
+    def load_model(self, epoch, load_best=False):
         '''
         读取模型state_dict
         如果load_latest=True, epoch将被无视
         返回full path
         '''
         model_dir = os.path.join(self.cache_path, str(self.params['kf_index']))
-        if load_latest:
-            model_path = tools.find_latest(model_dir)
-            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        if load_best:
+            model_path = tools.find_best(model_dir)
+            self.model = torch.load(model_path, map_location=self.device)
         else:
             model_path = os.path.join(model_dir, f'{epoch}.pt')
-            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+            self.model = torch.load(model_path, map_location=self.device)
         return model_path
 
-    def save_model(self, epoch):
-        torch.save(self.model.state_dict(), os.path.join(self.cache_path, str(self.params['kf_index']), f'{epoch}.pt'))
+    def save_model(self, name):
+        torch.save(self.model, os.path.join(self.cache_path, str(self.params['kf_index']), f'{name}.pt'))
 
     def _batch_forward(self, data, return_set=set()):
         for p in return_set:
@@ -188,11 +192,11 @@ class LSTMOriginalTrainer():
                 if mean_acc >= best_valid_metric:
                     best_valid_metric = mean_acc
                     best_epoch = epoch
+                    self.save_model(f'best')
                 self.register_vals['train_loss'].append(loss_vals['train_loss'])
                 self.register_vals['valid_loss'].append(loss_vals['valid_loss'])
-                self.save_model(epoch)
-        best_path = self.load_model(best_epoch)
-        logger.info(f'Load best model from {best_path} valid acc={best_valid_metric}')
+        best_path = self.load_model(None, load_best=True)
+        logger.info(f'Load best model from {best_path} valid acc={best_valid_metric} epoch={best_epoch}')
     
     def predict(self, mode, warm_step=30):
         assert(self.trained == True)
@@ -222,9 +226,7 @@ class LSTMOriginalTrainer():
 class OriginalClsLoss(nn.Module):
     '''提供动态预测的分类loss'''
     def __init__(self, n_cls:int, target_weight=None) -> None:
-        '''
-        forecast window: 向前预测的窗口
-        '''
+        '''forecast window: 向前预测的窗口'''
         super().__init__()
         self.n_cls = n_cls
         # input: (N,C,d1,...dk)

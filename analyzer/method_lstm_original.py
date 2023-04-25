@@ -3,10 +3,10 @@ from sklearn.model_selection import KFold
 import tools
 import os
 from tools import logger as logger
-from sklearn.linear_model import LogisticRegression
 from .container import DataContainer
 from .utils import generate_labels, map_func, cal_label_weight
 from .feature_explore import plot_cover_rate
+import models.mimic_model as mlib
 
 class LSTMOriginalAnalyzer:
     '''
@@ -40,8 +40,6 @@ class LSTMOriginalAnalyzer:
 
     def run(self):
         '''预测窗口内是否发生ARDS的分类器'''
-        if self.dataset.name() == 'mimic-iv':
-            import models.mimic_model as mlib
         # step 1: append additional params
         limit_idx = {self.dataset.idx_dict[name] for name in self.params['feature_limit']}
         forbidden_idx = {self.dataset.idx_dict[name] for name in self.params['forbidden_feas']}
@@ -53,6 +51,7 @@ class LSTMOriginalAnalyzer:
         os.makedirs(os.path.join(out_dir, 'startstep'), exist_ok=True)
         metric_startstep = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'startstep')) # 起始时刻性能
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir) # 所有步平均性能
+        metric_imp = tools.DeepFeatureImportance(device=self.params['device'], fea_names=[self.dataset.get_fea_label(key) for key in self.dataset.total_keys])
         # step 3: generate labels & label explore
         generator = mlib.DynamicLabelGenerator(soft_label=False, window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'], limit_idx=self.params['limit_idx'])
         available_idx = generator.available_idx(n_fea=self.data.shape[1])
@@ -76,12 +75,18 @@ class LSTMOriginalAnalyzer:
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
             metric_startstep.add_prediction(Y_pred[:, 0, :], Y_gt[:, 0, :], Y_mask[:,0])
+            metric_imp.add_record(trainer.model, self.data[valid_index,...])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
+        # shap values
+        metric_imp.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
+        # loss logger
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
+        # confusion matrix
         metric_4cls.confusion_matrix(comment=self.model_name)
         metric_startstep.confusion_matrix(comment='Start step ' + self.model_name)
+        # save result
         with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
             print('Overall performance:', file=fp)
             metric_4cls.write_result(fp)
