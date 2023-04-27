@@ -28,9 +28,8 @@ class LSTMLayer(nn.Module):
     def forward(self, input, state):
         # type: (Tensor, Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
         # input: (batch, n_fea, seq_len)
-
         inputs = input.transpose(0,1).unbind(0)
-        outputs = torch.jit.annotate(List[Tensor], []) #  (batch, hidden)
+        outputs = []
         for i in range(len(inputs)):
             out, state = self.cell_forward(inputs[i], state)
             outputs += [out]

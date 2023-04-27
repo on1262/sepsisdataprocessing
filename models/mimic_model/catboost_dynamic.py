@@ -5,22 +5,22 @@ from tools import logger as logger
 import os
 from tqdm import tqdm
 import pandas as pd
-from .utils import StaticLabelGenerator, DropoutLabelGenerator
-from sklearn.ensemble import RandomForestClassifier
+from .utils import SliceLabelGenerator, DropoutLabelGenerator
+from catboost import CatBoostClassifier, Pool
 
 
-class RandomForestTrainer():
+class CatboostDynamicTrainer():
+    '''用Catboost进行动态预测'''
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
         self.paths = params['paths']
-        self.cache_path = self.paths['random_forest_cache']
+        self.cache_path = self.paths['catboost_dyn_cache']
         tools.reinit_dir(self.cache_path, build=True)
         self.dataset = dataset
         self.target_idx = dataset.target_idx
-        self.generator = StaticLabelGenerator(
-            window=self.params['window'], centers=self.params['centers'],
-            target_idx=self.target_idx, forbidden_idx=self.params['forbidden_idx'],
-            limit_idx=self.params['limit_idx']
+        self.generator = SliceLabelGenerator(
+            slice_len=self.params['slice_len'],
+            soft_label=False, window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'], limit_idx=self.params['limit_idx']
         )
         # self.robust = self.params['robust']
         self.model = None
@@ -43,16 +43,29 @@ class RandomForestTrainer():
         self.dataset.mode('all')
         return result
 
+    def get_loss(self):
+        vaild_df = pd.read_csv(os.path.join(self.cache_path, 'test_error.tsv'), sep='\t')
+        train_df = pd.read_csv(os.path.join(self.cache_path, 'learn_error.tsv'), sep='\t')
+        data = {
+            'train': np.asarray(train_df[self.params['loss_function']])[:],
+            'valid': np.asarray(vaild_df[self.params['loss_function']])[:]
+        }
+        return data
 
     def train(self, addi_params:dict=None):
         tools.reinit_dir(self.cache_path, build=True) # 这是catboost输出loss的文件夹
         self.data_dict = self._extract_data()
-        #cls_weight = self.cal_label_weight(
-        #    n_cls=len(self.params['centers']), mask=self.data_dict['train']['mask'], label=self.data_dict['train']['Y'])
-        self.model = RandomForestClassifier(
-            class_weight='balanced',
-            max_depth=self.params['max_depth'],
-            n_jobs=-1
+        cls_weight = self.cal_label_weight(
+            n_cls=len(self.params['centers']), mask=self.data_dict['train']['mask'], label=self.data_dict['train']['Y'])
+        self.model = CatBoostClassifier(
+            train_dir=self.cache_path, # 读取数据
+            iterations=self.params['iterations'],
+            depth=self.params['depth'],
+            loss_function=self.params['loss_function'],
+            learning_rate=self.params['learning_rate'],
+            verbose=0,
+            class_weights=cls_weight,
+            use_best_model=True
         )
         train_X = self.data_dict['train']['X'][self.data_dict['train']['mask']]
         train_Y = self.data_dict['train']['Y'][self.data_dict['train']['mask']]
@@ -63,10 +76,10 @@ class RandomForestTrainer():
                 dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=tools.generate_miss_table(self.dataset.idx_dict))
                 _, train_X = dropout_generator(train_X)
                 _, valid_X = dropout_generator(valid_X)
-        tX = np.concatenate([train_X, valid_X], axis=0)
-        tY = np.concatenate([np.argmax(train_Y, axis=-1), np.argmax(valid_Y, axis=-1)], axis=0)
-        self.model.fit(tX, tY)
-        
+        pool_train = Pool(train_X, np.argmax(train_Y, axis=-1))
+        pool_valid = Pool(valid_X, np.argmax(valid_Y, axis=-1))
+        self.model.fit(pool_train, eval_set=pool_valid, use_best_model=True)
+    
     def predict(self, mode, addi_params:dict=None):
         '''
         addi_params: dict | None 如果输入为dict, 则会监测是否存在key
@@ -78,7 +91,8 @@ class RandomForestTrainer():
             if 'dropout' in addi_params.keys():
                 dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=tools.generate_miss_table(self.dataset.idx_dict))
                 _, test_X = dropout_generator(test_X)
-        return self.model.predict_proba(test_X)
+        pool_test = Pool(data=test_X)
+        return self.model.predict(pool_test, prediction_type='Probability')
 
     def cal_label_weight(self, n_cls, mask, label):
         '''

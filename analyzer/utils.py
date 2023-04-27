@@ -4,6 +4,7 @@ import numpy as np
 import tools
 import os
 
+
 def generate_labels(dataset, data, generator, out_dir):
     '''生成标签的通用代码'''
     dataset.mode('all')

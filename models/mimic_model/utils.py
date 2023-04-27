@@ -73,6 +73,37 @@ class DynamicLabelGenerator():
                             np.logical_and(mat_min > 0.5*(self.centers[c_idx-1]+self.centers[c_idx]), mat_min <= 0.5*(self.centers[c_idx+1]+self.centers[c_idx]))
         return mask, (label * mask[..., None])
 
+class SliceLabelGenerator:
+    '''将动态模型生成结果去掉沿时间的拆分'''
+    def __init__(self, slice_len, **kwargs):
+        '''
+        slice_len: 每个样本沿时间轴截取的点数, 
+        **kwargs: 给dynamic generator的参数
+        '''
+        self.dyn_generator = DynamicLabelGenerator(**kwargs)
+        self.slice_len = slice_len
+
+    def __call__(self, _data:np.ndarray, _mask:np.ndarray) -> tuple:
+        data, mask = _data.copy(), _mask.copy()
+        mask, label = self.dyn_generator(data, mask) # (batch, n_fea, seq_len)
+        data, mask, label = self.make_slice(data), self.make_slice(mask), self.make_slice(label)
+        return mask, {'X': data, 'Y': label}
+
+    def make_slice(self, x):
+        '''(batch, n_fea, seq_len)->(batch*slice_len, n_fea)'''
+        x = np.transpose(x[:,:, :self.slice_len], (0, 2, 1)) # (batch, seq_len, n_fea)
+        x = x.reshape((x.shape[0]*x.shape[1], x.shape[2])) # 这样reshape不会破坏最后一维, 还原后等于原来的矩阵
+        return x
+
+    def restore_from_slice(self, x):
+        '''make_slice的反向操作, 保证顺序不会更改'''
+        if isinstance(x, list):
+            return tuple([self.restore_from_slice(data) for data in x])
+        else:
+            batch = x.shape[0] // self.slice_len
+            x = x.reshape((batch, self.slice_len, x.shape[1])) # 这样reshape不会破坏最后一维, 还原后等于原来的矩阵
+            return x
+        
 
 class StaticLabelGenerator():
     '''生成一个大窗口内的最低ARDS四分类标签和训练数据'''
@@ -137,6 +168,8 @@ class StaticLabelGenerator():
                     np.logical_and(mat_min > 0.5*(self.centers[c_idx-1]+self.centers[c_idx]), mat_min <= 0.5*(self.centers[c_idx+1]+self.centers[c_idx]))
         return mask[:, 0], {'X': data[:, self.available_idx(n_fea), 0], 'Y': label}
 
+
+
 class DropoutLabelGenerator:
     '''按照给定的缺失率, 将输入的数据进行-1填充'''
     def __init__(self, dropout, miss_table, value=-1) -> None:
@@ -166,6 +199,3 @@ class DropoutLabelGenerator:
             mask[:, idx, :] = np.reshape(mat, (mask.shape[0],mask.shape[2]))
         return mask, data * mask + self.value * np.logical_not(mask)
 
-
-
-        

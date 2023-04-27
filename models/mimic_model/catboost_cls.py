@@ -73,13 +73,13 @@ class CatboostTrainer():
         valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'])
+                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'],miss_table=tools.generate_miss_table(self.dataset.idx_dict))
                 _, train_X = dropout_generator(train_X)
                 _, valid_X = dropout_generator(valid_X)
         pool_train = Pool(train_X, np.argmax(train_Y, axis=-1))
         pool_valid = Pool(valid_X, np.argmax(valid_Y, axis=-1))
         self.model.fit(pool_train, eval_set=pool_valid, use_best_model=True)
-        
+    
     def predict(self, mode, addi_params:dict=None):
         '''
         addi_params: dict | None 如果输入为dict, 则会监测是否存在key
@@ -89,7 +89,7 @@ class CatboostTrainer():
         test_X = self.data_dict[mode]['X'][self.data_dict[mode]['mask']]
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'])
+                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=tools.generate_miss_table(self.dataset.idx_dict))
                 _, test_X = dropout_generator(test_X)
         pool_test = Pool(data=test_X)
         return self.model.predict(pool_test, prediction_type='Probability')

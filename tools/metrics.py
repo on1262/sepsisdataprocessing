@@ -5,6 +5,7 @@ from scipy.interpolate import interp1d
 from sklearn.metrics import auc as sk_auc
 from .colorful_logging import logger
 from .plot import plot_confusion_matrix
+from tools import GLOBAL_CONF_LOADER
 
 
 
@@ -320,6 +321,8 @@ class RobustClassificationMetric:
         plt.savefig(save_path)
         plt.close()
         
-
-
-
+def generate_miss_table(idx_dict):
+    miss_dict = GLOBAL_CONF_LOADER['metric']['miss_rate']
+    result = [(idx, miss_dict[id]) for idx, id in idx_dict.items()]
+    result = sorted(result, key=lambda x:x[0])
+    return np.asarray([r[1] for r in result])
