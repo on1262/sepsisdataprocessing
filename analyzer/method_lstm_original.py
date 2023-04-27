@@ -75,11 +75,13 @@ class LSTMOriginalAnalyzer:
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
             metric_startstep.add_prediction(Y_pred[:, 0, :], Y_gt[:, 0, :], Y_mask[:,0])
-            metric_imp.add_record(trainer.model, self.data[valid_index,...])
+            # create wrapper
+            metric_imp.add_record(trainer.create_wrapper(self.params['shap_time_thres']), self.data[valid_index,...], self.params['shap_time_thres'])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
         # shap values
         metric_imp.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
+        metric_imp.plot_hotspot(os.path.join(out_dir, 'shap_hotspot.png'))
         # loss logger
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))

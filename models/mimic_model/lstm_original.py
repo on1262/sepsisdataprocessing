@@ -8,19 +8,27 @@ import os
 from tqdm import tqdm
 from .utils import Collect_Fn, DynamicLabelGenerator
 import torchinfo
+from .custom_lstm import LSTMLayer
 
+
+    
 class LSTMOriginalModel(nn.Module):
     '''带预测窗口的多分类判别模型'''
-    def __init__(self, in_channels:int, n_cls=4, hidden_size=128, dp=0) -> None:
+    def __init__(self, in_channels:int, n_cls=4, hidden_size=128) -> None:
         super().__init__()
+        self.in_channels = in_channels
+        self.n_cls = n_cls
+        self.hidden_size = hidden_size
+
         self.norm = nn.BatchNorm1d(num_features=in_channels)
         self.ebd = nn.Linear(in_features=in_channels, out_features=in_channels)
         self.den = nn.Linear(in_features=hidden_size, out_features=n_cls)
         self.sf = nn.Softmax(dim=-1)
-        self.lstm = nn.LSTM(input_size=in_channels, hidden_size=hidden_size, batch_first=True, dropout=dp)
+        self.lstm = nn.LSTM(input_size=in_channels, hidden_size=hidden_size, batch_first=True)
         self.c_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
         self.h_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
         self.explainer_mode = False
+        self.explainer_time_thres = 0
 
     def set_explainer_mode(self, value):
         self.explainer_mode = value
@@ -29,21 +37,40 @@ class LSTMOriginalModel(nn.Module):
         '''
         给出某个时间点对未来一个窗口内是否发生ARDS的概率
         x: (batch, feature, time)
-        mask: (batch, time)
         '''
         # mask: (batch, time)
         x = self.norm(x)
         # x: (batch, feature, time)
         x = self.ebd(x.transpose(1,2))
         # x: (batch, time, feature) out带有tanh
-        x, _ = self.lstm(x, (self.h_0.expand(-1, x.size(0), -1).contiguous(), self.c_0.expand(-1, x.size(0), -1).contiguous()))
+        h_0, c_0 = self.h_0.expand(-1, x.size(0), -1).contiguous(), self.c_0.expand(-1, x.size(0), -1).contiguous()
+        x, _ = self.lstm(x, (h_0, c_0))
         # x: (batch, time, hidden_size)
-        x = self.sf(self.den(x))
+        x = self.den(x)
         if self.explainer_mode:
-            return torch.mean(x, dim=-1) # (batch, time)
+            return x[:,self.explainer_time_thres,3] # (batch,) 计算给定时刻的梯度贡献
         else:
-            return x # (batch, time, n_cls)
+            return self.sf(x) # (batch, time, n_cls)
 
+class LSTMOriginalExplainerWrapper(nn.Module):
+    '''替换原生LSTM层, 用于可解释性分析'''
+    def __init__(self, model:LSTMOriginalModel, explainer_time_thres) -> None:
+        super().__init__()
+        self.model = model
+        custom_lstm = LSTMLayer()
+        # initalize LSTM weights
+        custom_lstm.weight_ih = model.lstm.weight_ih_l0
+        custom_lstm.weight_hh = model.lstm.weight_hh_l0
+        custom_lstm.bias_ih = model.lstm.bias_ih_l0
+        custom_lstm.bias_hh = model.lstm.bias_hh_l0
+        self.model.lstm = custom_lstm
+        self.model.set_explainer_mode(True)
+        self.model.explainer_time_thres = explainer_time_thres
+
+    def forward(self, x:torch.Tensor):
+        data = torch.split(x, 100, dim=0)
+        return torch.concat([self.model.forward(x) for x in data], dim=0)
+         
 
 class LSTMOriginalTrainer():
     def __init__(self, params:dict, dataset) -> None:
@@ -79,6 +106,9 @@ class LSTMOriginalTrainer():
         }
         return data
     
+    def create_wrapper(self, shap_time_thres):
+        return LSTMOriginalExplainerWrapper(self.model, shap_time_thres).to(self.device)
+
     def summary(self):
         torchinfo.summary(self.model)
 
