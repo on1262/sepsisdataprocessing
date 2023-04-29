@@ -83,17 +83,34 @@ class SliceLabelGenerator:
         self.dyn_generator = DynamicLabelGenerator(**kwargs)
         self.slice_len = slice_len
 
+    def available_idx(self, n_fea=None):
+        return self.dyn_generator.available_idx(n_fea)
+    
     def __call__(self, _data:np.ndarray, _mask:np.ndarray) -> tuple:
         data, mask = _data.copy(), _mask.copy()
         mask, label = self.dyn_generator(data, mask) # (batch, n_fea, seq_len)
-        data, mask, label = self.make_slice(data), self.make_slice(mask), self.make_slice(label)
+        data, mask, label = self.make_slice(data), self.make_slice(mask), self.make_slice(np.transpose(label, (0,2,1)))
         return mask, {'X': data, 'Y': label}
 
+    def adjust_result(self, label, mask):
+        label = label[:, :self.slice_len, :]
+        mask = mask[:, :self.slice_len]
+        return label, mask
+    
     def make_slice(self, x):
-        '''(batch, n_fea, seq_len)->(batch*slice_len, n_fea)'''
+        '''
+        input: (batch, n_fea, seq_len) or (batch, seq_len)
+        output: (batch*slice_len, n_fea) or (batch*slice_len,)
+        '''
+        x_dim = len(x.shape)
+        if x_dim == 2: # for mask (batch, seq_len)
+            x = x[:, None, :]
         x = np.transpose(x[:,:, :self.slice_len], (0, 2, 1)) # (batch, seq_len, n_fea)
         x = x.reshape((x.shape[0]*x.shape[1], x.shape[2])) # 这样reshape不会破坏最后一维, 还原后等于原来的矩阵
-        return x
+        if x_dim == 2:
+            return x[:, 0]
+        else:
+            return x
 
     def restore_from_slice(self, x):
         '''make_slice的反向操作, 保证顺序不会更改'''
@@ -191,11 +208,18 @@ class DropoutLabelGenerator:
             assert(dim == 3)
         mask = np.ones(data.shape, dtype=bool)
         if self.dropout == 0:
+            if dim == 2:
+                data = data[:, :, 0]
+                mask = mask[:,:,0]
             return mask, data
-        for idx in len(data.shape[1]):
+        for idx in range(data.shape[1]):
             mat = np.ones((mask.shape[0]*mask.shape[2],), dtype=bool)
             k = round(min(1, self.miss_table[idx])*mask.shape[0]*mask.shape[2])
             mat[np.random.permutation(mask.shape[0]*mask.shape[2])[:k]] = False
             mask[:, idx, :] = np.reshape(mat, (mask.shape[0],mask.shape[2]))
-        return mask, data * mask + self.value * np.logical_not(mask)
+        data = data * mask + self.value * np.logical_not(mask)
+        if dim == 2:
+            data = data[:, :, 0]
+            mask = mask[:,:,0]
+        return mask, data
 

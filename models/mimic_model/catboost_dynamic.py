@@ -67,10 +67,10 @@ class CatboostDynamicTrainer():
             class_weights=cls_weight,
             use_best_model=True
         )
-        train_X = self.data_dict['train']['X'][self.data_dict['train']['mask']]
-        train_Y = self.data_dict['train']['Y'][self.data_dict['train']['mask']]
-        valid_X = self.data_dict['valid']['X'][self.data_dict['valid']['mask']]
-        valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
+        train_X = self.data_dict['train']['X']
+        train_Y = self.data_dict['train']['Y']
+        valid_X = self.data_dict['valid']['X']
+        valid_Y = self.data_dict['valid']['Y']
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
                 dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=tools.generate_miss_table(self.dataset.idx_dict))
@@ -86,7 +86,7 @@ class CatboostDynamicTrainer():
             key=dropout:val=missrate, 开启testX的随机置为-1
         '''
         assert(self.model is not None)
-        test_X = self.data_dict[mode]['X'][self.data_dict[mode]['mask']]
+        test_X = self.data_dict[mode]['X']
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
                 dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=tools.generate_miss_table(self.dataset.idx_dict))

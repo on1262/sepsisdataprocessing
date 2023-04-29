@@ -10,6 +10,7 @@ from .method_nearest_cls import BaselineNearestClsAnalyzer
 from .method_catboost_cls import CatboostAnalyzer
 from .method_random_forest import RandomForestAnalyzer
 from .method_catboost_forest import CatboostForestAnalyzer
+from .method_catboost_dynamic import CatboostDynamicAnalyzer
 from datasets import MIMICDataset
 
 
@@ -27,7 +28,8 @@ class Analyzer:
             'nearest_4cls': BaselineNearestClsAnalyzer,
             'catboost_4cls':CatboostAnalyzer,
             'random_forest':RandomForestAnalyzer,
-            'catboost_forest':CatboostForestAnalyzer
+            'catboost_forest':CatboostForestAnalyzer,
+            'catboost_dyn': CatboostDynamicAnalyzer
         }
         if params is not None:
             for key in params:

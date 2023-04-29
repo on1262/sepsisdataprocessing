@@ -56,7 +56,7 @@ class CatboostAnalyzer:
             else:
                 trainer.train()
             self.loss_logger.add_loss(trainer.get_loss())
-            Y_gt = label['Y'][test_index][mask[test_index]]
+            Y_gt = label['Y'][test_index]
             Y_pred = trainer.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, mask[test_index])

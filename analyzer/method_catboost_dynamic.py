@@ -45,8 +45,9 @@ class CatboostDynamicAnalyzer:
             slice_len=self.params['slice_len'],
             soft_label=False, window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'], limit_idx=self.params['limit_idx']
         )
-        mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
-        fea_names = [self.dataset.get_fea_label(idx) for idx in generator.available_idx()]
+        mask, label = generate_labels(self.dataset, self.data, generator.dyn_generator, self.out_dir)
+        label, mask = generator.adjust_result(label, mask)
+        # fea_names = [self.dataset.get_fea_label(idx) for idx in generator.available_idx()]
         # imp_logger = tools.TreeFeatureImportance(fea_names=fea_names)
         # step 4: train and predict
         for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()): 
@@ -56,17 +57,17 @@ class CatboostDynamicAnalyzer:
             else:
                 trainer.train()
             self.loss_logger.add_loss(trainer.get_loss())
-            Y_gt = label['Y'][test_index][mask[test_index]]
+            Y_gt = label[test_index] # 这里test index需要在label制作之前
             Y_pred = trainer.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
-            _Y_pred, _Y_gt, _mask = generator.restore_from_slice([Y_pred, Y_gt, mask[test_index]])
-            metric_4cls.add_prediction(_Y_pred, _Y_gt, _mask)
+            _Y_pred = generator.restore_from_slice(Y_pred)
+            metric_4cls.add_prediction(_Y_pred, Y_gt, mask[test_index])
             # imp_logger.add_record(trainer.model, label['X'])
             if self.robust:
                 for missrate in np.linspace(0, 1, 11):
                     R_pred = dropout_func(missrate)
-                    _R_pred, _Y_gt, _mask = generator.restore_from_slice([R_pred, Y_gt, mask[test_index]])
-                    metric_robust.add_prediction(missrate, _R_pred, _Y_gt, _mask)
+                    R_pred = generator.restore_from_slice(R_pred)
+                    metric_robust.add_prediction(missrate, R_pred, Y_gt, mask[test_index])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
         # imp_logger.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))

@@ -47,6 +47,7 @@
                 "rebalance_cache_path": "outputs/mimic-iv/cache/rebalance",
                 "catboost_forest_cache": "outputs/mimic-iv/cache/catboost_forest",
                 "catboost_cls_cache": "outputs/mimic-iv/cache/catboost_cls",
+                "catboost_dyn_cache": "outputs/mimic-iv/cache/catboost_dyn",
                 "random_forest_cache": "outputs/mimic-iv/cache/random_forest",
                 "conf_cache_path": "configs/mimic-iv/config_cache.json",
                 "conf_manual_path": "configs/mimic-iv/config_manual.json"
