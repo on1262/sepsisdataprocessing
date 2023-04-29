@@ -260,6 +260,7 @@ class MultiClassMetric:
         cm_norm = self.cm / np.sum(self.cm, axis=0)[None, ...]
         plot_confusion_matrix(cm_norm, labels=self.class_names, 
             title='Confusion matrix(norm)', save_path=os.path.join(self.out_dir, 'confusion_matrix(norm).png'))
+    
     def mean_acc(self):
         self.calculate_cm()
         # 每个类的正确率
@@ -280,7 +281,9 @@ class MultiClassMetric:
             print(f'{name} accuracy={accs[idx]}', file=fp)
         print('='*20, file=fp)
         print(f'Mean accuracy={mean_acc}', file=fp)
-    
+
+
+
 class RobustClassificationMetric:
     '''
     记录一个模型在样本不同缺失率下的性能曲线, 支持K-fold

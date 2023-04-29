@@ -12,7 +12,6 @@ from .lstm_original import OriginalClsLoss
 from catboost import CatBoostClassifier, Pool
 
 
-
 class LSTMCascadeModel(nn.Module):
     '''Catboost初始化初态, 动态预测模型'''
     def __init__(self, catboost_model:CatBoostClassifier, in_channels:int, n_cls=4, hidden_size=128) -> None:
@@ -46,7 +45,7 @@ class LSTMCascadeModel(nn.Module):
         给出某个时间点对未来一个窗口内是否发生ARDS的概率
         x: (batch, feature, time)
         '''
-        c_0 = torch.as_tensor(self.init_predict(self.tensor2numpy(x.copy()[:, :, 0])), dtype=torch.float32, device=x.device) # (batch, n_cls)
+        c_0 = torch.as_tensor(self.init_predict(self.tensor2numpy(x.clone()[:, :, 0])), dtype=torch.float32, device=x.device) # (batch, n_cls)
         c_0 = self.lin_init(c_0)[np.newaxis, ...] # (1, batch, hidden)
         # mask: (batch, time)
         x = self.norm(x)
@@ -68,14 +67,15 @@ class LSTMCascadeTrainer():
         self.params = params
         self.paths = params['paths']
         self.device = torch.device(self.params['device'])
-        self.cache_path = self.paths['lstm_original_cache']
+        self.cache_path = self.paths['lstm_cascade_cache']
         self.model = None
         # self.rebalance_trainer = RebalanceTrainer(self.params)
         self.n_cls = len(self.params['centers'])
         self.criterion = OriginalClsLoss(self.n_cls, params['weight'])
-        self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
+        self.opt = None
         self.dataset = dataset
         self.available_idx = params['available_idx']
+        self.dropout_generator = None # 应对robust metric
         self.generator = DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         self.train_dataloader = DataLoader(dataset=self.dataset, batch_size=params['batch_size'], shuffle=True, collate_fn=Collect_Fn)
         self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
@@ -131,27 +131,31 @@ class LSTMCascadeTrainer():
             self.dataset.mode(phase)
             data = []
             seq_lens = []
-            for _, batch in tqdm(enumerate(self.dataset), desc=phase):
+            for _, batch in enumerate(self.dataset):
                 data.append(batch['data'])
                 seq_lens.append(batch['length'])
             data = np.stack(data, axis=0)
             mask = tools.make_mask((data.shape[0], data.shape[-1]), seq_lens)
-            mask, out_dict = self.generator(data, mask) # e.g. [phase]['X']
-            out_dict.update({'mask':mask})
-            result[phase] = out_dict
+            mask, label = self.generator(data, mask) # e.g. [phase]['X']
+            result[phase] = {'mask':mask[:,0], 'X':data[:,:,0], 'Y':label[:,0,:]}
         self.dataset.mode('all')
         return result
     
-    def _batch_forward(self, data, return_set=set()):
+    def _batch_forward(self, data, return_set=set(), addi_params:dict=None):
         for p in return_set:
             assert(p in {'logit', 'mask', 'label', 'acc'})
-        np_data = np.asarray(data['data'][:, self.available_idx, :])
+        data['data'] = data['data'][:, self.available_idx, :]
+        np_data = np.asarray(data['data'])
+        if addi_params is not None:
+            if 'dropout' in addi_params.keys():
+                _, dp_data = self.dropout_generator(np_data)
+                data['data'] = torch.as_tensor(dp_data, dtype=torch.float32)
         seq_lens = data['length']
         mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
         mask[:, -1] = False
         mask, labels = self.generator(np_data, mask)
         mask, labels = torch.as_tensor(mask, device=self.device), torch.as_tensor(labels, device=self.device)
-        x = data['data'][:, self.available_idx, :].to(self.device)
+        x = data['data'].to(self.device)
         pred = self.model(x)
         loss = self.criterion(pred, labels, torch.as_tensor(mask, device=self.device))
         result = {'pred':pred, 'loss':loss}
@@ -179,7 +183,7 @@ class LSTMCascadeTrainer():
         tools.reinit_dir(p_catboost_cache, build=True) # 这是catboost输出loss的文件夹
         self.data_dict = self._extract_data()
         model = CatBoostClassifier(
-            train_dir=self.cache_path, # 读取数据
+            train_dir=p_catboost_cache, # 读取数据
             iterations=self.params['gbdt']['iterations'],
             depth=self.params['gbdt']['depth'],
             loss_function=self.params['gbdt']['loss_function'],
@@ -194,21 +198,22 @@ class LSTMCascadeTrainer():
         valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'],miss_table=tools.generate_miss_table(self.dataset.idx_dict))
-                _, train_X = dropout_generator(train_X)
-                _, valid_X = dropout_generator(valid_X)
+                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'],miss_table=tools.generate_miss_table(self.dataset.idx_dict))
+                _, train_X = self.dropout_generator(train_X)
+                _, valid_X = self.dropout_generator(valid_X)
         pool_train = Pool(train_X, np.argmax(train_Y, axis=-1))
         pool_valid = Pool(valid_X, np.argmax(valid_Y, axis=-1))
         model.fit(pool_train, eval_set=pool_valid, use_best_model=True)
         return model
 
-    def train(self):
+    def train(self, addi_params:dict=None):
         if self.trained:
             return
         self.trained = True # 不能训练多次
         self.reinit_cache(self.params['kf_index'])
-        gbdt_model = self.train_gbdt()
+        gbdt_model = self.train_gbdt(addi_params=addi_params)
         self.model = LSTMCascadeModel(gbdt_model, self.params['in_channels'])
+        self.opt = torch.optim.Adam(params=self.model.parameters(), lr=self.params['lr'])
         self.model = self.model.to(self.device)
         self.criterion = self.criterion.to(self.device)
         with tqdm(total=self.params['epochs']) as tq:
@@ -222,7 +227,7 @@ class LSTMCascadeTrainer():
                 self.dataset.mode('train')
                 self.model.train()
                 for data in self.train_dataloader:
-                    result = self._batch_forward(data, return_set={'acc'})
+                    result = self._batch_forward(data, return_set={'acc'}, addi_params=addi_params)
                     pred, loss, a_dict = result['pred'], result['loss'], result['acc']
                     for key in a_dict:
                         if key not in acc_dict:
@@ -266,22 +271,26 @@ class LSTMCascadeTrainer():
         best_path = self.load_model(None, load_best=True)
         logger.info(f'Load best model from {best_path} valid acc={best_valid_metric} epoch={best_epoch}')
     
-    def predict(self, mode, warm_step=30):
+    def predict(self, mode, warm_step=30, addi_params:dict=None):
         assert(self.trained == True)
         assert(mode in ['test', 'train', 'valid'])
         self.dataset.mode(mode)
         self.model = self.model.to(self.device).eval()
         register_vals = {'test_loss':0, 'pred':[], 'gt':[]}
+        # 更新dropout
+        if addi_params is not None:
+            if 'dropout' in addi_params.keys():
+                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=tools.generate_miss_table(self.dataset.idx_dict))
         with tqdm(total=len(self.test_dataloader)) as tq:
             tq.set_description(f'Testing, data={mode}')
             with torch.no_grad():
                 for idx, data in enumerate(self.test_dataloader):
                     if warm_step is not None:
                         new_data = torch.concat([torch.expand_copy(data['data'][:, :, 0][..., None], (-1,-1,warm_step)), data['data']], dim=-1)
-                        result = self._batch_forward({'data':new_data, 'length':data['length']})
+                        result = self._batch_forward({'data':new_data, 'length':data['length']}, addi_params=addi_params)
                         pred, loss = result['pred'][:,warm_step:,:], result['loss']
                     else:
-                        result = self._batch_forward(data)
+                        result = self._batch_forward(data, addi_params=addi_params)
                         pred, loss = result['pred'], result['loss']
                     register_vals['pred'].append(pred.detach().clone())
                     register_vals['test_loss'] += loss.detach().cpu().item()

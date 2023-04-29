@@ -8,9 +8,7 @@ from .utils import generate_labels, map_func, cal_label_weight
 import models.mimic_model as mlib
 
 class LSTMCascadeAnalyzer:
-    '''
-    动态模型, 四分类预测
-    '''
+    '''动态模型, 四分类预测'''
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
@@ -21,6 +19,7 @@ class LSTMCascadeAnalyzer:
         self.target_idx = container.dataset.target_idx
         self.dataset = container.dataset
         self.data = self.dataset.data
+        self.robust = params['robust']
         # initialize
         self.out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(self.out_dir, build=True)
@@ -36,8 +35,15 @@ class LSTMCascadeAnalyzer:
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
         os.makedirs(os.path.join(out_dir, 'startstep'), exist_ok=True)
+        os.makedirs(os.path.join(out_dir, 'initial_steps'), exist_ok=True)
+        # init metrics
+        if self.robust:
+            metric_robust = tools.RobustClassificationMetric(class_names=self.params['class_names'], out_dir=out_dir)
+            def dropout_func(missrate):
+                    return np.asarray(trainer.predict(mode='test', addi_params={'dropout':missrate}))
         metric_startstep = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'startstep')) # 起始时刻性能
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir) # 所有步平均性能
+        metric_initial = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'initial_steps')) # 起始一段时间的平均性能
         # metric_imp = tools.DeepFeatureImportance(device=self.params['device'], fea_names=[self.dataset.get_fea_label(key) for key in self.dataset.total_keys])
         # step 3: generate labels & label explore
         generator = mlib.DynamicLabelGenerator(soft_label=False, window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'], limit_idx=self.params['limit_idx'])
@@ -51,9 +57,12 @@ class LSTMCascadeAnalyzer:
             self.params['kf_index'] = idx
             self.params['weight'] = cal_label_weight(len(self.params['centers']), mask[train_index,...], label[train_index,...])
             trainer = mlib.LSTMCascadeTrainer(self.params, self.dataset)
+            if self.robust and 'train_miss_rate' in self.params.keys():
+                trainer.train(addi_params={'dropout':self.params['train_miss_rate']}) # 训练时对训练集随机dropout
+            else:
+                trainer.train()
             if idx == 0:
                 trainer.summary()
-            trainer.train()
             self.loss_logger.add_loss(trainer.get_loss())
             Y_mask = mask[test_index, ...]
             Y_gt = label[test_index, ...]
@@ -61,10 +70,17 @@ class LSTMCascadeAnalyzer:
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
             metric_startstep.add_prediction(Y_pred[:, 0, :], Y_gt[:, 0, :], Y_mask[:,0])
+            metric_initial.add_prediction(Y_pred[:, :16, :], Y_gt[:, :16, :], Y_mask[:,:16])
             # create wrapper
             # metric_imp.add_record(trainer.create_wrapper(self.params['shap_time_thres']), self.data[valid_index,...], self.params['shap_time_thres'])
+            if self.robust:
+                for missrate in np.linspace(0, 1, 11):
+                    R_pred = dropout_func(missrate)
+                    metric_robust.add_prediction(missrate, R_pred[:, 0, :], Y_gt[:, 0, :], Y_mask[:, 0])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
+        if self.robust:
+            metric_robust.plot_curve()
         # shap values
         # metric_imp.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
         # metric_imp.plot_hotspot(os.path.join(out_dir, 'shap_hotspot.png'))
@@ -74,6 +90,7 @@ class LSTMCascadeAnalyzer:
         # confusion matrix
         metric_4cls.confusion_matrix(comment=self.model_name)
         metric_startstep.confusion_matrix(comment='Start step ' + self.model_name)
+        metric_initial.confusion_matrix(comment='Initial Steps' + self.model_name)
         # save result
         with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
             print('Overall performance:', file=fp)
@@ -81,6 +98,10 @@ class LSTMCascadeAnalyzer:
             print('\n', file=fp)
             print('Startstep performance:', file=fp)
             metric_startstep.write_result(fp)
+            print('\n', file=fp)
+            print('Initial steps performance:', file=fp)
+            metric_initial.write_result(fp)
+
 
 
 
