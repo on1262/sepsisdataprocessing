@@ -512,7 +512,8 @@ class MIMICDataset():
         for s in self.subjects.values():
             for key in list(s.static_data.keys()):
                 if key == 'gender':
-                    s.static_data[key] = 0 if s.static_data[key] == 'F' else 1
+                    # female: 0, male: 1
+                    s.static_data[key] = 0 if s.static_data[key][0][0] == 'F' else 1
                 elif 'Blood Pressure' in key:
                     s.static_data['systolic pressure'] = []
                     s.static_data['diastolic pressure'] = []
@@ -695,6 +696,7 @@ class MIMICDataset():
         self.data = version_dict['data']
         self.idx_dict = version_dict['idx_dict']
         self.kf_list = version_dict['kf']
+        self.target_idx = self.idx_dict[self.target_name]
 
     def proprocess_version(self):
         '''
@@ -824,7 +826,7 @@ class MIMICDataset():
         # switch version
         self.load_version(version_name)
         self.mode('all')
-        out_path = os.path.join(self.gbl_conf['paths']['out_dir'], 'dataset_report.txt')
+        out_path = os.path.join(self.gbl_conf['paths']['out_dir'], 'dataset_report_{version_name}.txt')
         dist_dir = os.path.join(self.gbl_conf['paths']['out_dir'], 'report_dist')
         dir_names = ['points', 'duration', 'frequency', 'value', 'from_sepsis', 'static_value']
         tools.reinit_dir(dist_dir, build=True)
@@ -844,6 +846,7 @@ class MIMICDataset():
         if params['dynamic_dist']:
             # dynamic feature explore
             for id in self.dynamic_keys:
+                fea_name = self.get_fea_label(id)
                 save_name = tools.remove_slash(str(fea_name))
                 write_lines.append('='*10 + f'{fea_name}({id})' + '='*10)
                 arr_points = []
@@ -1010,7 +1013,4 @@ def make_report(dataset:MIMICDataset):
 
 if __name__ == '__main__':
     dataset = MIMICDataset()
-    dataset.load_version('lite_explore')
-    # make report
-    make_report(dataset)
     

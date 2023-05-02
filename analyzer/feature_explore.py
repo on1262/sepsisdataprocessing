@@ -4,15 +4,42 @@ from .container import DataContainer
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
+import seaborn as sns
 import os
+import pandas as pd
 
 class FeatureExplorer:
-    def __init__(self, container:DataContainer) -> None:
+    def __init__(self, params:dict, container:DataContainer) -> None:
+        self.params = params
         self.container = container
         self.gbl_conf = container._conf
         self.dataset = container.dataset
         self.data = self.dataset.data
 
+    def run(self):
+        '''输出mimic-iv数据集的统计特征, 独立于模型和研究方法'''
+        logger.info('Analyzer: Feature explore')
+        dataset_version = self.params['dataset_version']
+        out_dir = os.path.join(tools.GLOBAL_CONF_LOADER['analyzer'][self.container.dataset.name()]['paths']['out_dir'], f'explore_{dataset_version}')
+        tools.reinit_dir(out_dir, build=True)
+        # random plot sample time series
+        if self.params['generate_report']:
+            self.dataset.make_report(version_name=dataset_version, params=self.params['report_params'])
+        if self.params['plot_samples']:
+            self.plot_samples(num=50, id_list=["220224", "223835"], id_names=['PaO2', 'FiO2'], out_dir=os.path.join(out_dir, 'samples'))
+        if self.params['plot_time_series']:
+            self.plot_time_series_samples(self.container.target_name, n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "target_plot"))
+            self.plot_time_series_samples("220224", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "pao2_plot"))
+            self.plot_time_series_samples("223835", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "fio2_plot"))
+        if self.params['correlation']:
+            self.correlation(out_dir)
+        if self.params['miss_mat']:
+            self.miss_mat(out_dir)
+        if self.params['first_ards_time']:
+            self.first_ards_time(out_dir)
+        if self.params['feature_count']:
+            self.feature_count(out_dir)
+    
     def first_ards_time(self, out_dir):
         '''打印首次呼衰出现的时间分布'''
         times = []
@@ -40,7 +67,7 @@ class FeatureExplorer:
     def correlation(self, out_dir):
         # plot correlation matrix
         labels = [self.container.dataset.get_fea_label(id) for id in self.container.dataset.total_keys]
-        corr_mat = tools.plot_correlation_matrix(self.container.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation _matrix'))
+        corr_mat = tools.plot_correlation_matrix(self.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation _matrix'))
         correlations = []
         for idx in range(corr_mat.shape[1]):
             correlations.append([corr_mat[-1, idx], labels[idx]]) # list[(correlation coeff, label)]
@@ -175,9 +202,23 @@ def plot_cover_rate(class_names, labels, mask, out_dir):
             data_name=f'{class_names[1]} cover rate (per sample)', 
             save_path=os.path.join(out_dir, 'cover_rate.png'), discrete=False, adapt=False,bins=10)
     else:
+        cover_rate = []
+        names = []
         for idx, name in enumerate(class_names):
-            cover_rate = np.sum(label_class==idx+1, axis=1)[valid] / mask_sum[valid] # ->(sample,)
-            tools.plot_single_dist(data=cover_rate, 
-                data_name=f'{name} cover rate (per sample)', 
-                save_path=os.path.join(out_dir, f'coverrate_{name}.png'), discrete=False, adapt=False, bins=10)
+            arr = np.sum(label_class==idx+1, axis=1)[valid] / mask_sum[valid] # ->(sample,)
+            arr = arr[arr > 0]
+            names += [name for _ in range(len(arr))]
+            cover_rate += [arr]
+        cover_rate = np.concatenate(cover_rate, axis=0)
+        df = pd.DataFrame(data={'coverrate':cover_rate, 'class':names})
+        sns.histplot(
+            df,
+            x="coverrate", hue='class',
+            multiple="stack",
+            palette=sns.light_palette("#79C", reverse=True, n_colors=4),
+            edgecolor=".3",
+            linewidth=.5,
+            log_scale=False,
+        )
+        plt.savefig(os.path.join(out_dir, f'coverrate_4cls.png'))
 

@@ -23,8 +23,12 @@ class TreeFeatureImportance():
     def update_record(self):
         if isinstance(self.records, list):
             base_values = np.concatenate([record[0] for record in self.records], axis=0)
+            if len(base_values.shape) == 2:
+                base_values = np.mean(base_values, axis=-1)
             data = np.concatenate([record[1] for record in self.records], axis=0)
             shap_values = np.concatenate([record[2] for record in self.records], axis=0)
+            if len(shap_values.shape) == 3:
+                shap_values = 3*shap_values[:,:,0] + 2*shap_values[:,:,1] + shap_values[:,:,2]
             self.records = shap.Explanation(base_values=base_values, data=data, values=shap_values, feature_names=self.fea_names)
 
     def plot_beeswarm(self, plot_path):
@@ -49,7 +53,8 @@ class TreeFeatureImportance():
         names = [self.fea_names[idx] for idx in order]
         for idx, name in zip(order, names):
             plt.subplots_adjust(left=0.3) 
-            shap.plots.scatter(self.records[:,name], )
+            shap.plots.scatter(self.records[:,name])
+            plt.xlabel(name)
             plt.savefig(os.path.join(out_dir, f'{name}.png'))
             plt.close()
 

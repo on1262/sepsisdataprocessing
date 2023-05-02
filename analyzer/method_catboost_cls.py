@@ -60,17 +60,17 @@ class CatboostAnalyzer:
             Y_pred = trainer.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, mask[test_index])
-            imp_logger.add_record(trainer.model, label['X'])
+            imp_logger.add_record(trainer.model, label['X'][valid_index])
             if self.robust:
                 for missrate in np.linspace(0, 1, 11):
                     R_pred = dropout_func(missrate)
                     metric_robust.add_prediction(missrate, R_pred, Y_gt, mask[test_index])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
-        # imp_logger.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
+        imp_logger.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
         single_imp_out = os.path.join(out_dir, 'single_shap')
         tools.reinit_dir(single_imp_out, build=True)
-        # imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
+        imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
         if self.robust:
             metric_robust.plot_curve()
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for Catboost cls Model', 
