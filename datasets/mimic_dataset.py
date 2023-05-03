@@ -139,7 +139,7 @@ class MIMICIV:
         self.subjects = {} # subject_id:Subject
         self.preprocess()
         # post process
-        self.miss_rate = self.global_miss_rate()
+        self.miss_rate = self._global_miss_rate()
         self.remove_invalid_data(rules=self.loc_conf['dataset']['remove_rule'])
         logger.info('MIMICIV inited')
 
@@ -283,22 +283,30 @@ class MIMICIV:
         logger.info('Dump subjects: Done')
         self.procedure_flag = 'phase3'
 
-    def global_miss_rate(self) -> dict:
+    def _global_miss_rate(self) -> dict:
         '''
         返回dict(key:value)其中key是str(id), value是该特征对应的列缺失率
+        NOTE: miss rate和hit table的区别: miss rate在MIMIC-IV执行remove invalid subjects之前进行,
+        基于所有sepsis患者计算缺失率, 而hit table基于筛选后的患者计算缺失率.
         '''
         miss_dict = {}
         count = 0
         for s_id in self.subjects:
-            if not self.subjects[s_id].empty():
+            s = self.subjects[s_id]
+            if not s.empty():
+                for key in s.static_data.keys():
+                    if key not in miss_dict:
+                        miss_dict[key] = 1
+                    else:
+                        miss_dict[key] += 1
                 count += 1
-                adm = self.subjects[s_id].admissions[0]
+                adm = s.admissions[0]
                 for key in adm.keys():
                     if key not in miss_dict:
                         miss_dict[key] = 1
                     else:
                         miss_dict[key] += 1
-        miss_dict = {key:val/count for key, val in miss_dict.items()}
+        miss_dict = {key:1-val/count for key, val in miss_dict.items()}
         return miss_dict
 
     def remove_invalid_data(self, rules=None):
@@ -370,6 +378,8 @@ class MIMICDataset():
         self._additional_feas = self.loc_conf['dataset']['additional_features']
         # hit table
         self._hit_table = None
+        # miss_table
+        self._miss_table = None
         # preload data
         self.data_table = None # to derive other versions
         self.data = None # ndarray(samples, n_fea, ticks)
@@ -395,6 +405,23 @@ class MIMICDataset():
         self.mimiciv.subjects = self.subjects # update
         
         logger.info(f'Dynamic keys={len(self.dynamic_keys)}, static_keys={len(self.static_keys)}')
+
+    def _update_miss_table(self):
+        '''
+        将特征工程构造的特征与原始特征联系, 得到缺失情况
+        NOTE 从subject计算得到的缺失值并不包括新增特征
+        '''
+        construct_dict = GLOBAL_CONF_LOADER["dataset"]['mimic-iv']['miss_dict']
+        miss_dict = self.mimiciv.miss_rate
+        for fea_id, idx in self.idx_dict.items():
+            if fea_id not in miss_dict.keys() and fea_id in construct_dict.keys():
+                miss_dict[fea_id] = np.max([miss_dict[f] for f in construct_dict[fea_id]])
+        result = [(idx, miss_dict[id]) for id, idx in self.idx_dict.items()]
+        result = sorted(result, key=lambda x:x[0])
+        self._miss_table = np.asarray([r[1] for r in result])
+
+    def miss_table(self):
+        return self._miss_table
 
     def get_fea_label(self, key_or_idx):
         '''输入key/idx得到关于特征的简短描述, 从icu_item中提取'''
@@ -697,6 +724,7 @@ class MIMICDataset():
         self.idx_dict = version_dict['idx_dict']
         self.kf_list = version_dict['kf']
         self.target_idx = self.idx_dict[self.target_name]
+        self._update_miss_table()
 
     def proprocess_version(self):
         '''
@@ -826,7 +854,7 @@ class MIMICDataset():
         # switch version
         self.load_version(version_name)
         self.mode('all')
-        out_path = os.path.join(self.gbl_conf['paths']['out_dir'], 'dataset_report_{version_name}.txt')
+        out_path = os.path.join(self.gbl_conf['paths']['out_dir'], f'dataset_report_{version_name}.txt')
         dist_dir = os.path.join(self.gbl_conf['paths']['out_dir'], 'report_dist')
         dir_names = ['points', 'duration', 'frequency', 'value', 'from_sepsis', 'static_value']
         tools.reinit_dir(dist_dir, build=True)
@@ -916,10 +944,9 @@ class MIMICDataset():
         if params['miss_rate']:
             # write global miss rate
             write_lines.append('='*10 + 'Global miss rate' + '='*10)
-            gbl_msr = self.mimiciv.miss_rate.copy()
-            for key in gbl_msr:
-                if key in self.total_keys:
-                    write_lines.append(f'{gbl_msr[key]:.3f} \t ({key}){self.get_fea_label(key)}')
+            gbl_msr = self.miss_table()
+            for idx, key in enumerate(self.total_keys):
+                write_lines.append(f'{gbl_msr[idx]:.3f} \t ({key}){self.get_fea_label(key)}')
         # write report
         with open(out_path, 'w', encoding='utf-8') as fp:
             for line in write_lines:
@@ -999,17 +1026,6 @@ def load_sepsis_patients(csv_path:str) -> dict:
     df.apply(build_dict, axis=1)
     logger.info(f'Load {len(sepsis_dict.keys())} sepsis patients based on sepsis3.csv')
     return sepsis_dict
-
-def make_report(dataset:MIMICDataset):
-    params = {
-        'basic':True,
-        'dynamic_dist':False,
-        'static_dist':False,
-        'hit_table':True,
-        'miss_rate':True,
-    }
-    version_name = 'lite_explore'
-    dataset.make_report(version_name, params)
 
 if __name__ == '__main__':
     dataset = MIMICDataset()

@@ -2,6 +2,14 @@
     "work_dir": "/home/chenyt/sepsisinducedards",
     "dataset":{
         "mimic-iv":{
+            "miss_dict":{
+                "PF_ratio": ["220224", "223835"],
+                "PPD":["220050", "220051"],
+                "MAP":["220050", "220051"],
+                "shock_index": ["220050","220045"],
+                "systolic pressure":["Blood Pressure"],
+                "diastolic pressure":["Blood Pressure"]
+            },
             "paths": {
                 "mimic_dir":"data/mimic-iv",
                 "cache_dir": "data/mimic-iv/cache",
@@ -10,26 +18,6 @@
                 "sepsis_patient_path": "data/mimic-iv/sepsis_result/sepsis3.csv",
                 "out_dir":"outputs/mimic-iv"
             }
-        }
-    },
-    "metric":{
-        "miss_rate":{
-            "220277":0.999,
-            "223835":0.692,
-            "224689":0.612,
-            "224690":0.610,
-            "224696":0.539,
-            "223834":0.834,
-            "220224":0.659,
-            "220227":0.386,
-            "220235":0.659,
-            "223830":0.661,
-            "225698":0.659,
-            "224639":0.660,
-            "respiration":0.659,
-            "sofa_score":0.659,
-            "age":0.0,
-            "PF_ratio":0.659
         }
     },
     "analyzer":{

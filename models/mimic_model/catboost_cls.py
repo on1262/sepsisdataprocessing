@@ -73,7 +73,7 @@ class CatboostTrainer():
         valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'],miss_table=tools.generate_miss_table(self.dataset.idx_dict))
+                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'],miss_table=self.dataset.miss_table())
                 _, train_X = dropout_generator(train_X)
                 _, valid_X = dropout_generator(valid_X)
         pool_train = Pool(train_X, np.argmax(train_Y, axis=-1))
@@ -89,7 +89,7 @@ class CatboostTrainer():
         test_X = self.data_dict[mode]['X'][self.data_dict[mode]['mask']]
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=tools.generate_miss_table(self.dataset.idx_dict))
+                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=self.dataset.miss_table())
                 _, test_X = dropout_generator(test_X)
         pool_test = Pool(data=test_X)
         return self.model.predict(pool_test, prediction_type='Probability')

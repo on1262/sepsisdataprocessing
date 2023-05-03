@@ -182,7 +182,7 @@ class LSTMOriginalTrainer():
         # 更新dropout
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'],miss_table=tools.generate_miss_table(self.dataset.idx_dict))
+                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'],miss_table=self.dataset.miss_table())
         with tqdm(total=self.params['epochs']) as tq:
             tq.set_description(f'Training, Epoch')
             best_epoch = 0
@@ -247,7 +247,7 @@ class LSTMOriginalTrainer():
         # 更新dropout
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=tools.generate_miss_table(self.dataset.idx_dict))
+                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=self.dataset.miss_table())
         with tqdm(total=len(self.test_dataloader)) as tq:
             tq.set_description(f'Testing, data={mode}')
             with torch.no_grad():

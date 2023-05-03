@@ -57,10 +57,9 @@ class LSTMOriginalAnalyzer:
             def dropout_func(missrate):
                     return np.asarray(trainer.predict(mode='test', addi_params={'dropout':missrate}))
         metric_startstep = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'startstep')) 
-        
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir) # 所有步平均性能
         metric_initial = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'initial_steps')) # 起始一段时间的平均性能
-        metric_imp = tools.DeepFeatureImportance(device=self.params['device'], fea_names=[self.dataset.get_fea_label(key) for key in self.dataset.total_keys]) #  
+        # metric_imp = tools.DeepFeatureImportance(device=self.params['device'], fea_names=[self.dataset.get_fea_label(key) for key in self.dataset.total_keys]) #  
         # step 3: generate labels & label explore
         generator = mlib.DynamicLabelGenerator(soft_label=False, window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'], limit_idx=self.params['limit_idx'])
         available_idx = generator.available_idx(n_fea=self.data.shape[1])
@@ -93,14 +92,14 @@ class LSTMOriginalAnalyzer:
                     R_pred = dropout_func(missrate)
                     metric_robust.add_prediction(missrate, R_pred[:, 0, :], Y_gt[:, 0, :], Y_mask[:,0])
             # create wrapper
-            metric_imp.add_record(trainer.create_wrapper(self.params['shap_time_thres']), self.data[valid_index,...], self.params['shap_time_thres'])
+            # metric_imp.add_record(trainer.create_wrapper(self.params['shap_time_thres']), self.data[valid_index,...], self.params['shap_time_thres'])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
         if self.robust:
             metric_robust.plot_curve()
         # shap values
-        metric_imp.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
-        metric_imp.plot_hotspot(os.path.join(out_dir, 'shap_hotspot.png'))
+        # metric_imp.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
+        # metric_imp.plot_hotspot(os.path.join(out_dir, 'shap_hotspot.png'))
         # loss logger
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))

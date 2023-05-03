@@ -57,7 +57,7 @@ class LSTMCascadeAnalyzer:
             self.params['kf_index'] = idx
             self.params['weight'] = cal_label_weight(len(self.params['centers']), mask[train_index,...], label[train_index,...])
             trainer = mlib.LSTMCascadeTrainer(self.params, self.dataset)
-            if self.robust and 'train_miss_rate' in self.params.keys():
+            if 'train_miss_rate' in self.params.keys():
                 trainer.train(addi_params={'dropout':self.params['train_miss_rate']}) # 训练时对训练集随机dropout
             else:
                 trainer.train()

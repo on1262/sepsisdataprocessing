@@ -323,9 +323,3 @@ class RobustClassificationMetric:
         save_path = os.path.join(self.out_dir, 'missrate_performance.png')
         plt.savefig(save_path)
         plt.close()
-        
-def generate_miss_table(idx_dict):
-    miss_dict = GLOBAL_CONF_LOADER['metric']['miss_rate']
-    result = [(idx, miss_dict[id]) for id, idx in idx_dict.items()]
-    result = sorted(result, key=lambda x:x[0])
-    return np.asarray([r[1] for r in result])

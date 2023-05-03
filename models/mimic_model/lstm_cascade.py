@@ -198,7 +198,8 @@ class LSTMCascadeTrainer():
         valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'],miss_table=tools.generate_miss_table(self.dataset.idx_dict))
+                # 这个dropout是gbdt+LSTM训练时都要的
+                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=self.dataset.miss_table())
                 _, train_X = self.dropout_generator(train_X)
                 _, valid_X = self.dropout_generator(valid_X)
         pool_train = Pool(train_X, np.argmax(train_Y, axis=-1))
@@ -280,12 +281,12 @@ class LSTMCascadeTrainer():
         # 更新dropout
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=tools.generate_miss_table(self.dataset.idx_dict))
+                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=self.dataset.miss_table())
         with tqdm(total=len(self.test_dataloader)) as tq:
             tq.set_description(f'Testing, data={mode}')
             with torch.no_grad():
                 for idx, data in enumerate(self.test_dataloader):
-                    if warm_step is not None:
+                    if warm_step > 0:
                         new_data = torch.concat([torch.expand_copy(data['data'][:, :, 0][..., None], (-1,-1,warm_step)), data['data']], dim=-1)
                         result = self._batch_forward({'data':new_data, 'length':data['length']}, addi_params=addi_params)
                         pred, loss = result['pred'][:,warm_step:,:], result['loss']
