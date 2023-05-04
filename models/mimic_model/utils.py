@@ -194,7 +194,7 @@ class DropoutLabelGenerator:
         self.value = value
         self.miss_table = np.asarray(miss_table)
         # norm
-        self.miss_table = self.dropout * (self.miss_table / np.max(self.miss_table))
+        self.miss_table = np.clip(self.dropout * (self.miss_table / np.mean(self.miss_table)), 0, 1)
     
     def __call__(self, data:np.ndarray) -> np.ndarray:
         '''
@@ -206,7 +206,7 @@ class DropoutLabelGenerator:
             data = data[:, :, np.newaxis] # ->(batch, n_fea, seq_len)
         else:
             assert(dim == 3)
-        mask = np.ones(data.shape, dtype=bool)
+        mask = np.ones(data.shape, dtype=bool) # ->(batch, n_fea, seq_len)
         if self.dropout == 0:
             if dim == 2:
                 data = data[:, :, 0]

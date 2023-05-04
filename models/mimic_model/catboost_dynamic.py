@@ -89,7 +89,10 @@ class CatboostDynamicTrainer():
         test_X = self.data_dict[mode]['X']
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
-                dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=self.dataset.miss_table())
+                dp = addi_params['dropout']
+                if dp == 1:
+                    print(1)
+                dropout_generator = DropoutLabelGenerator(dropout=dp, miss_table=self.dataset.miss_table())
                 _, test_X = dropout_generator(test_X)
         pool_test = Pool(data=test_X)
         return self.model.predict(pool_test, prediction_type='Probability')

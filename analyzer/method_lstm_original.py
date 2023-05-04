@@ -90,7 +90,7 @@ class LSTMOriginalAnalyzer:
             if self.robust:
                 for missrate in np.linspace(0, 1, 11):
                     R_pred = dropout_func(missrate)
-                    metric_robust.add_prediction(missrate, R_pred[:, 0, :], Y_gt[:, 0, :], Y_mask[:,0])
+                    metric_robust.add_prediction(missrate, R_pred[:, 0:16, :], Y_gt[:, 0:16, :], Y_mask[:, 0:16])
             # create wrapper
             # metric_imp.add_record(trainer.create_wrapper(self.params['shap_time_thres']), self.data[valid_index,...], self.params['shap_time_thres'])
             self.dataset.mode('all') # 恢复原本状态

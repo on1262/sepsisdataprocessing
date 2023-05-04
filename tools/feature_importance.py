@@ -7,6 +7,7 @@ import numpy as np
 import random
 from captum.attr import DeepLift
 import seaborn as sns
+import sys
 
 
 class TreeFeatureImportance():
@@ -57,6 +58,19 @@ class TreeFeatureImportance():
             plt.xlabel(name)
             plt.savefig(os.path.join(out_dir, f'{name}.png'))
             plt.close()
+
+    def get_importance_array(self, feature_ids, fp=sys.stdout):
+        '''返回特征重要性的排序'''
+        self.update_record()
+        imp = self.records.abs.mean(0).values
+        order = sorted(list(range(len(self.fea_names))), key=lambda x:imp[x], reverse=True)
+        ids = [feature_ids[idx] for idx in order]
+        names = [self.fea_names[idx] for idx in order]
+        result = ['\nFeature Importance\n']
+        for id, name in zip(ids, names):
+            result.append(f'\"{id}\", {name}\n')
+        fp.writelines(result)
+
 
 class DeepFeatureImportance():
     '''基于intergrated-gradients对深度学习网络计算重要性'''

@@ -70,7 +70,7 @@ class CatboostAnalyzer:
         imp_logger.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
         single_imp_out = os.path.join(out_dir, 'single_shap')
         tools.reinit_dir(single_imp_out, build=True)
-        imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
+        # imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
         if self.robust:
             metric_robust.plot_curve()
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for Catboost cls Model', 
@@ -78,3 +78,4 @@ class CatboostAnalyzer:
         metric_4cls.confusion_matrix(comment=self.model_name)
         with open(os.path.join(self.out_dir, 'result.txt'), 'a') as f:
             metric_4cls.write_result(f)
+            imp_logger.get_importance_array([self.dataset.total_keys[idx] for idx in generator.available_idx()], fp=f)

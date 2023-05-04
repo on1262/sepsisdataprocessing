@@ -67,7 +67,7 @@ class CatboostDynamicAnalyzer:
                 for missrate in np.linspace(0, 1, 11):
                     R_pred = dropout_func(missrate)
                     R_pred = generator.restore_from_slice(R_pred)
-                    metric_robust.add_prediction(missrate, R_pred, Y_gt, mask[test_index])
+                    metric_robust.add_prediction(missrate, R_pred[:, :16, :], Y_gt[:, :16, :], mask[test_index, :16])
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
         # imp_logger.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))

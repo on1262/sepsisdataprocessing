@@ -221,4 +221,5 @@ def plot_cover_rate(class_names, labels, mask, out_dir):
             log_scale=False,
         )
         plt.savefig(os.path.join(out_dir, f'coverrate_4cls.png'))
+        plt.close()
 
