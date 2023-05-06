@@ -5,7 +5,6 @@ from tools import logger as logger
 from .container import DataContainer
 from .feature_explore import FeatureExplorer
 from .method_lstm_original import LSTMOriginalAnalyzer
-from .method_lstm_balanced import LSTMBalancedAnalyzer
 from .method_nearest_cls import BaselineNearestClsAnalyzer
 from .method_catboost_cls import CatboostAnalyzer
 from .method_random_forest import RandomForestAnalyzer
@@ -23,11 +22,11 @@ class Analyzer:
         '''
         self.container = DataContainer(dataset)
         self.analyzer_dict = {
-            'LSTM_original_pf_dp': LSTMOriginalAnalyzer,
-            'LSTM_original_pf':LSTMOriginalAnalyzer,
-            'LSTM_original_dp':LSTMOriginalAnalyzer,
+            'LSTM_original_dp2':LSTMOriginalAnalyzer,
+            'LSTM_original_dp4':LSTMOriginalAnalyzer,
+            'LSTM_original_dp6':LSTMOriginalAnalyzer,
+            'LSTM_original_dp8':LSTMOriginalAnalyzer,
             'LSTM_original':LSTMOriginalAnalyzer,
-            "LSTM_balanced":LSTMBalancedAnalyzer,
             "LSTM_cascade": LSTMCascadeAnalyzer,
             'nearest_4cls': BaselineNearestClsAnalyzer,
             'catboost_4cls':CatboostAnalyzer,

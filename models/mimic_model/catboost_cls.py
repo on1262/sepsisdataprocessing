@@ -13,8 +13,7 @@ class CatboostTrainer():
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
         self.paths = params['paths']
-        self.cache_path = self.paths['catboost_cls_cache']
-        tools.reinit_dir(self.cache_path, build=True)
+        self.cache_path = os.path.join(self.paths['cache_dir'], self.params['analyzer_name'])
         self.dataset = dataset
         self.target_idx = dataset.target_idx
         self.generator = StaticLabelGenerator(

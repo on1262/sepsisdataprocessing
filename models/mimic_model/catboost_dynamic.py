@@ -14,7 +14,7 @@ class CatboostDynamicTrainer():
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
         self.paths = params['paths']
-        self.cache_path = self.paths['catboost_dyn_cache']
+        self.cache_path = os.path.join(self.paths['cache_dir'], self.params['analyzer_name'])
         tools.reinit_dir(self.cache_path, build=True)
         self.dataset = dataset
         self.target_idx = dataset.target_idx

@@ -185,15 +185,12 @@ class StaticLabelGenerator():
                     np.logical_and(mat_min > 0.5*(self.centers[c_idx-1]+self.centers[c_idx]), mat_min <= 0.5*(self.centers[c_idx+1]+self.centers[c_idx]))
         return mask[:, 0], {'X': data[:, self.available_idx(n_fea), 0], 'Y': label}
 
-
-
 class DropoutLabelGenerator:
     '''按照给定的缺失率, 将输入的数据进行-1填充'''
     def __init__(self, dropout, miss_table, value=-1) -> None:
         self.dropout = dropout
         self.value = value
         self.miss_table = np.asarray(miss_table)
-        # norm
         self.miss_table = np.clip(self.dropout * (self.miss_table / np.mean(self.miss_table)), 0, 1)
     
     def __call__(self, data:np.ndarray) -> np.ndarray:

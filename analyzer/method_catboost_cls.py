@@ -5,13 +5,14 @@ import os
 from tools import logger as logger
 from .container import DataContainer
 from .utils import generate_labels
+import models.mimic_model as mlib
 
 class CatboostAnalyzer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
         self.container = container
-        self.model_name = 'catboost_4cls'
+        self.model_name = params['analyzer_name']
         self.loss_logger = tools.LossLogger()
         # copy attribute from container
         self.target_idx = container.dataset.target_idx
@@ -25,8 +26,6 @@ class CatboostAnalyzer:
 
     def run(self):
         '''预测窗口内是否发生ARDS的分类器'''
-        if self.dataset.name() == 'mimic-iv':
-            import models.mimic_model as mlib
         # step 1: append additional params
         self.params['in_channels'] = self.dataset.data.shape[1]
         forbidden_idx = {self.dataset.idx_dict[name] for name in self.params['forbidden_feas']}

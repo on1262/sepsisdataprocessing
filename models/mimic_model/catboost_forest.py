@@ -21,6 +21,7 @@ class CatboostForestTrainer():
         self.n_trees = params['n_trees']
         self.n_cls = len(params['centers'])
         self.n_fea = None
+        self.cache_path = os.path.join(self.paths['cache_dir'], self.params['analyzer_name'])
         self.generator = StaticLabelGenerator(
             window=self.params['window'], centers=self.params['centers'],
             target_idx=self.target_idx, forbidden_idx=self.params['forbidden_idx'],
@@ -88,6 +89,7 @@ class CatboostForestTrainer():
     def train(self):
         # prepare data and class weight
         self.data_dict = self._extract_data()
+        tools.reinit_dir(self.cache_path, build=True)
         cls_weight = self.cal_label_weight(
             n_cls=len(self.params['centers']), mask=self.data_dict['train']['mask'], label=self.data_dict['train']['Y'])
         train_X = self.data_dict['train']['X'][self.data_dict['train']['mask']]
@@ -119,6 +121,7 @@ class CatboostForestTrainer():
         self.update_hash(combination_list, imp_idx)
         # 训练模型
         self.models = [CatBoostClassifier(
+            train_dir=self.cache_path,
             iterations=self.params['iterations'],
             depth=self.params['depth'],
             loss_function=self.params['loss_function'],

@@ -4,14 +4,13 @@ from datasets import MIMICDataset
 analyzer_params = [
     #'feature_explore',
     #'nearest_4cls',
-    'LSTM_balanced',
-    #'LSTM_original',
-    #'LSTM_original_pf_dp',
-    #'LSTM_original_pf', pf没有测试过
-    #'LSTM_original_dp',
+    #'LSTM_original_dp2'
+    #'LSTM_original_dp4'
+    #'LSTM_original_dp6'
+    #'LSTM_original_dp8'
     #'LSTM_original',
     #'LSTM_cascade',
-    #'catboost_dyn',
+    'catboost_dyn',
     #'catboost_4cls',
     #'random_forest',
     #'catboost_forest',
