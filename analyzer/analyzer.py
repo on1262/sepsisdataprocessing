@@ -22,10 +22,6 @@ class Analyzer:
         '''
         self.container = DataContainer(dataset)
         self.analyzer_dict = {
-            'LSTM_original_dp2':LSTMOriginalAnalyzer,
-            'LSTM_original_dp4':LSTMOriginalAnalyzer,
-            'LSTM_original_dp6':LSTMOriginalAnalyzer,
-            'LSTM_original_dp8':LSTMOriginalAnalyzer,
             'LSTM_original':LSTMOriginalAnalyzer,
             "LSTM_cascade": LSTMCascadeAnalyzer,
             'nearest_4cls': BaselineNearestClsAnalyzer,
@@ -36,17 +32,19 @@ class Analyzer:
             'feature_explore': FeatureExplorer,
         }
         if params is not None:
-            for key in params:
-                if key in self.analyzer_dict:
-                    self.run_sub_analyzer(key)
+            for name in params:
+                for label in self.analyzer_dict.keys():
+                    if label in name:
+                        self.run_sub_analyzer(name, label)
+                        break
 
         
-    def run_sub_analyzer(self, analyzer_name):
+    def run_sub_analyzer(self, analyzer_name, label):
         logger.info(f'Run Analyzer: {analyzer_name}')
         params = self.container.get_model_params(analyzer_name)
         if 'dataset_version' in params:
             self.container.dataset.load_version(params['dataset_version'])
         params['analyzer_name'] = analyzer_name
-        sub_analyzer = self.analyzer_dict[analyzer_name](params, self.container)
+        sub_analyzer = self.analyzer_dict[label](params, self.container)
         sub_analyzer.run()
         # utils.create_final_result()

@@ -13,7 +13,7 @@ class CatboostForestAnalyzer:
         self.params = params
         self.paths = params['paths']
         self.container = container
-        self.model_name = 'catboost_forest'
+        self.model_name = self.params['analyzer_name']
         # copy attribute from container
         self.target_idx = container.dataset.target_idx
         self.dataset = container.dataset

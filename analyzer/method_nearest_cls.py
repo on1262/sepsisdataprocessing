@@ -15,7 +15,7 @@ class BaselineNearestClsAnalyzer:
         self.dataset = container.dataset
         self.container= container
         self.target_idx = self.dataset.target_idx
-        self.model_name = 'nearest_4cls'
+        self.model_name = self.params['analyzer_name']
         # copy params
         self.centers = params['centers']
         self.n_cls = len(self.centers)

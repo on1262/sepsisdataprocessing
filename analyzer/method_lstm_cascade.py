@@ -13,7 +13,7 @@ class LSTMCascadeAnalyzer:
         self.params = params
         self.paths = params['paths']
         self.container = container
-        self.model_name = 'LSTM_cascade'
+        self.model_name = self.params['analyzer_name']
         self.loss_logger = tools.LossLogger()
         # copy attribute from container
         self.target_idx = container.dataset.target_idx

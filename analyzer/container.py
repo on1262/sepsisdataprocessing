@@ -19,7 +19,7 @@ class DataContainer():
     def get_model_params(self, model_name) -> dict:
         '''根据数据集和模型名不同, 获取所需的模型参数'''
         paths = tools.GLOBAL_CONF_LOADER['analyzer'][self.dataset.name()]['paths']
-        params = tools.Config(paths['conf_cache_path'],paths['conf_manual_path'])['model'][model_name]
+        params = tools.Config(paths['conf_cache_path'], paths['conf_manual_path'])['model'][model_name]
         params['paths'] = paths # 添加global config的paths到params中
         return params
     

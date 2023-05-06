@@ -88,7 +88,7 @@ class DeepFeatureImportance():
         max_k = min(500, valid_X.shape[0]//2)
         valid_X = torch.as_tensor(valid_X, dtype=torch.float32).to(self.device)
         model = model.eval().to(self.device)
-        background = valid_X[:max_k,...]
+        background = torch.mean(valid_X[:max_k,...], dim=0)[None, ...]
         valid = valid_X[max_k:,...]
         explainer = DeepLift(model=model)
         shap_values = explainer.attribute(valid, background)
