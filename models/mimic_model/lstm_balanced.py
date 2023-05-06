@@ -40,13 +40,13 @@ class LSTMBalancedModel(nn.Module):
         return x # (batch, time, n_cls)
 
 
+
 class LSTMBalancedTrainer():
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
         self.paths = params['paths']
         self.device = torch.device(self.params['device'])
-        self.cache_path = self.paths['lstm_balanced_cache']
-        tools.reinit_dir(self.cache_path, build=True)
+        self.cache_path = os.path.join(self.paths['cache_dir'], self.params['analyzer_name'])
         self.model = LSTMBalancedModel(params['device'], params['in_channels'])
         self.rebalance_trainer = RebalanceTrainer(self.params)
         self.n_cls = len(self.params['centers'])
@@ -63,7 +63,7 @@ class LSTMBalancedTrainer():
         self.trained = False
         if self.params['pretrained'] == True:
             self.trained = True
-            load_path = self.load_model(self, None, load_latest=True)
+            load_path = self.load_model(None, load_latest=True)
             logger.info(f'Load pretrained model from {load_path}')
             self.model = self.model.to(self.device)
             self.criterion = self.criterion.to(self.device)
@@ -91,10 +91,10 @@ class LSTMBalancedTrainer():
         model_dir = os.path.join(self.cache_path, str(self.params['kf_index']))
         if load_latest:
             model_path = tools.find_best(model_dir)
-            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+            self.model = torch.load(model_path, map_location=self.device)
         else:
             model_path = os.path.join(model_dir, f'{epoch}.pt')
-            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+            self.model = torch.load(model_path, map_location=self.device)
         return model_path
 
     def save_model(self, epoch):

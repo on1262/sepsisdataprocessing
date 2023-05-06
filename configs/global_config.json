@@ -29,6 +29,7 @@
         "mimic-iv":{
             "paths": {
                 "out_dir":"outputs/mimic-iv",
+                "cache_dir":"outputs/mimic-iv/cache",
                 "lstm_original_cache": "outputs/mimic-iv/cache/lstm_original",
                 "lstm_balanced_cache": "outputs/mimic-iv/cache/lstm_balanced",
                 "lstm_cascade_cache": "outputs/mimic-iv/cache/lstm_cascade",

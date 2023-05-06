@@ -70,14 +70,13 @@ class LSTMOriginalExplainerWrapper(nn.Module):
     def forward(self, x:torch.Tensor):
         data = torch.split(x, 100, dim=0)
         return torch.concat([self.model.forward(x) for x in data], dim=0)
-         
 
 class LSTMOriginalTrainer():
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
         self.paths = params['paths']
         self.device = torch.device(self.params['device'])
-        self.cache_path = self.paths['lstm_original_cache']
+        self.cache_path = os.path.join(self.paths['cache_dir'], self.params['analyzer_name']) # cache不单独reinit, 因为可能有pretrain, 训练时才init
         self.model = LSTMOriginalModel(params['in_channels'])
         # self.rebalance_trainer = RebalanceTrainer(self.params)
         self.n_cls = len(self.params['centers'])
@@ -86,7 +85,7 @@ class LSTMOriginalTrainer():
         self.dataset = dataset
         self.available_idx = params['available_idx']
         self.dropout_generator = None # 应对robust metric
-        self.generator = DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        self.generator = DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'], limit_idx=params['limit_idx'])
         self.train_dataloader = DataLoader(dataset=self.dataset, batch_size=params['batch_size'], shuffle=True, collate_fn=Collect_Fn)
         self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
         self.test_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
@@ -138,16 +137,19 @@ class LSTMOriginalTrainer():
     def _batch_forward(self, data, return_set=set(), addi_params:dict=None):
         for p in return_set:
             assert(p in {'logit', 'mask', 'label', 'acc'})
-        data['data'] = data['data'][:, self.available_idx, :]
+        seq_lens = data['length']
         np_data = np.asarray(data['data'])
+        mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
+        mask[:, -1] = False
+        mask, labels = self.generator(np_data, mask)
+        np_data = np_data[:, self.available_idx, :] # available_idx不能在generato label之前, 避免pf_ratio被去掉
+        data['data'] = data['data'][:, self.available_idx, :]
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
                 _, dp_data = self.dropout_generator(np_data)
                 data['data'] = torch.as_tensor(dp_data, dtype=torch.float32)
-        seq_lens = data['length']
-        mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
-        mask[:, -1] = False
-        mask, labels = self.generator(np_data, mask)
+        
+       
         mask, labels = torch.as_tensor(mask, device=self.device), torch.as_tensor(labels, device=self.device)
         x = data['data'].to(self.device)
         pred = self.model(x)

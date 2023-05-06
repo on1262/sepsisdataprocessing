@@ -23,6 +23,9 @@ class Analyzer:
         '''
         self.container = DataContainer(dataset)
         self.analyzer_dict = {
+            'LSTM_original_pf_dp': LSTMOriginalAnalyzer,
+            'LSTM_original_pf':LSTMOriginalAnalyzer,
+            'LSTM_original_dp':LSTMOriginalAnalyzer,
             'LSTM_original':LSTMOriginalAnalyzer,
             "LSTM_balanced":LSTMBalancedAnalyzer,
             "LSTM_cascade": LSTMCascadeAnalyzer,
@@ -44,6 +47,7 @@ class Analyzer:
         params = self.container.get_model_params(analyzer_name)
         if 'dataset_version' in params:
             self.container.dataset.load_version(params['dataset_version'])
+        params['analyzer_name'] = analyzer_name
         sub_analyzer = self.analyzer_dict[analyzer_name](params, self.container)
         sub_analyzer.run()
         # utils.create_final_result()

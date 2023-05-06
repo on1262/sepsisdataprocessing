@@ -67,10 +67,10 @@ class CatboostDynamicTrainer():
             class_weights=cls_weight,
             use_best_model=True
         )
-        train_X = self.data_dict['train']['X']
-        train_Y = self.data_dict['train']['Y']
-        valid_X = self.data_dict['valid']['X']
-        valid_Y = self.data_dict['valid']['Y']
+        train_X = self.data_dict['train']['X'][self.data_dict['train']['mask']]
+        train_Y = self.data_dict['train']['Y'][self.data_dict['train']['mask']]
+        valid_X = self.data_dict['valid']['X'][self.data_dict['valid']['mask']]
+        valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
                 dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=self.dataset.miss_table())
@@ -90,8 +90,6 @@ class CatboostDynamicTrainer():
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
                 dp = addi_params['dropout']
-                if dp == 1:
-                    print(1)
                 dropout_generator = DropoutLabelGenerator(dropout=dp, miss_table=self.dataset.miss_table())
                 _, test_X = dropout_generator(test_X)
         pool_test = Pool(data=test_X)

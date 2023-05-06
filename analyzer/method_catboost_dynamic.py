@@ -36,6 +36,7 @@ class CatboostDynamicAnalyzer:
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
+        metric_initial = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         if self.robust:
             metric_robust = tools.RobustClassificationMetric(class_names=self.params['class_names'], out_dir=out_dir)
             def dropout_func(missrate):
@@ -62,6 +63,7 @@ class CatboostDynamicAnalyzer:
             Y_pred = np.asarray(Y_pred)
             _Y_pred = generator.restore_from_slice(Y_pred)
             metric_4cls.add_prediction(_Y_pred, Y_gt, mask[test_index])
+            metric_initial.add_prediction(_Y_pred[:, :16, :], Y_gt[:, :16, :], mask[test_index, :16])
             # imp_logger.add_record(trainer.model, label['X'])
             if self.robust:
                 for missrate in np.linspace(0, 1, 11):
@@ -80,4 +82,8 @@ class CatboostDynamicAnalyzer:
             out_path=os.path.join(out_dir, 'loss.png'))
         metric_4cls.confusion_matrix(comment=self.model_name)
         with open(os.path.join(self.out_dir, 'result.txt'), 'a') as f:
+            print('Overall performance:', file=f)
             metric_4cls.write_result(f)
+            print('\n', file=f)
+            print('Initial steps performance:', file=f)
+            metric_initial.write_result(f)

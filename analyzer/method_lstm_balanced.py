@@ -6,6 +6,7 @@ from tools import logger as logger
 from .container import DataContainer
 from .utils import generate_labels, map_func, cal_label_weight
 from .feature_explore import plot_cover_rate
+import models.mimic_model as mlib
 
 class LSTMBalancedAnalyzer:
     '''
@@ -15,7 +16,7 @@ class LSTMBalancedAnalyzer:
         self.params = params
         self.paths = params['paths']
         self.container = container
-        self.model_name = 'LSTM_balanced'
+        self.model_name = params['analyzer_name']
         self.loss_logger = tools.LossLogger()
         # copy attribute from container
         self.target_idx = container.dataset.target_idx
@@ -39,8 +40,6 @@ class LSTMBalancedAnalyzer:
 
     def run(self):
         '''预测窗口内是否发生ARDS的分类器'''
-        if self.dataset.name() == 'mimic-iv':
-            import models.mimic_model as mlib
         # step 1: append additional params
         limit_idx = {self.dataset.idx_dict[name] for name in self.params['feature_limit']}
         forbidden_idx = {self.dataset.idx_dict[name] for name in self.params['forbidden_feas']}
@@ -62,7 +61,8 @@ class LSTMBalancedAnalyzer:
         mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
         self.label_explore(label, mask)
         # step 4: train and predict
-        for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()): 
+        for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()):
+            self.params['kf_index'] = idx
             self.params['weight'] = cal_label_weight(len(self.params['centers']), mask[train_index,...], label[train_index,...])
             trainer = mlib.LSTMBalancedTrainer(self.params, self.dataset)
             if idx == 0:
