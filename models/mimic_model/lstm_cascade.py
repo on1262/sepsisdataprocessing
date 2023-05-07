@@ -8,51 +8,41 @@ import os
 from tqdm import tqdm
 from .utils import Collect_Fn, DynamicLabelGenerator, DropoutLabelGenerator
 import torchinfo
-from .lstm_original import OriginalClsLoss
-from catboost import CatBoostClassifier, Pool
 
 
+    
 class LSTMCascadeModel(nn.Module):
-    '''Catboost初始化初态, 动态预测模型'''
-    def __init__(self, catboost_model:CatBoostClassifier, in_channels:int, n_cls=4, hidden_size=128) -> None:
+    '''带预测窗口的多分类判别模型'''
+    def __init__(self, in_channels:int, n_cls=4, hidden_size=128) -> None:
         super().__init__()
         self.in_channels = in_channels
         self.n_cls = n_cls
         self.hidden_size = hidden_size
-        self.catboost_model = catboost_model
+
         self.norm = nn.BatchNorm1d(num_features=in_channels)
         self.ebd = nn.Linear(in_features=in_channels, out_features=in_channels)
         self.den = nn.Linear(in_features=hidden_size, out_features=n_cls)
-        self.lin_init = nn.Linear(in_features=n_cls, out_features=hidden_size)
         self.sf = nn.Softmax(dim=-1)
         self.lstm = nn.LSTM(input_size=in_channels, hidden_size=hidden_size, batch_first=True)
-        self.h_0 = torch.zeros((1, 1, hidden_size))
+        self.c_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
+        self.h_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
         self.explainer_mode = False
         self.explainer_time_thres = 0
 
     def set_explainer_mode(self, value):
         self.explainer_mode = value
     
-    def init_predict(self, x:np.ndarray):
-        pool_test = Pool(data=x)
-        return self.catboost_model.predict(pool_test, prediction_type='Probability')
-    
-    def tensor2numpy(self, x):
-        return x.detach().clone().cpu().numpy()
-
     def forward(self, x:torch.Tensor):
         '''
         给出某个时间点对未来一个窗口内是否发生ARDS的概率
         x: (batch, feature, time)
         '''
-        c_0 = torch.as_tensor(self.init_predict(self.tensor2numpy(x.clone()[:, :, 0])), dtype=torch.float32, device=x.device) # (batch, n_cls)
-        c_0 = self.lin_init(c_0)[np.newaxis, ...] # (1, batch, hidden)
         # mask: (batch, time)
         x = self.norm(x)
         # x: (batch, feature, time)
         x = self.ebd(x.transpose(1,2))
         # x: (batch, time, feature) out带有tanh
-        h_0 = self.h_0.to(x.device).expand(-1, x.size(0), -1).contiguous()
+        h_0, c_0 = self.h_0.expand(-1, x.size(0), -1).contiguous(), self.c_0.expand(-1, x.size(0), -1).contiguous()
         x, _ = self.lstm(x, (h_0, c_0))
         # x: (batch, time, hidden_size)
         x = self.den(x)
@@ -67,16 +57,16 @@ class LSTMCascadeTrainer():
         self.params = params
         self.paths = params['paths']
         self.device = torch.device(self.params['device'])
-        self.cache_path = self.paths['lstm_cascade_cache']
-        self.model = None
+        self.cache_path = os.path.join(self.paths['cache_dir'], self.params['analyzer_name']) # cache不单独reinit, 因为可能有pretrain, 训练时才init
+        self.model = LSTMCascadeModel(params['in_channels'])
         # self.rebalance_trainer = RebalanceTrainer(self.params)
         self.n_cls = len(self.params['centers'])
         self.criterion = OriginalClsLoss(self.n_cls, params['weight'])
-        self.opt = None
+        self.opt = torch.optim.Adam(params=self.model.parameters(), lr=params['lr'])
         self.dataset = dataset
         self.available_idx = params['available_idx']
         self.dropout_generator = None # 应对robust metric
-        self.generator = DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        self.generator = DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'], limit_idx=params['limit_idx'])
         self.train_dataloader = DataLoader(dataset=self.dataset, batch_size=params['batch_size'], shuffle=True, collate_fn=Collect_Fn)
         self.valid_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
         self.test_dataloader = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
@@ -96,9 +86,6 @@ class LSTMCascadeTrainer():
             'valid': np.asarray(self.register_vals['valid_loss'])
         }
         return data
-    
-    # def create_wrapper(self, shap_time_thres):
-    #     return LSTMOriginalExplainerWrapper(self.model, shap_time_thres).to(self.device)
 
     def summary(self):
         torchinfo.summary(self.model)
@@ -125,35 +112,22 @@ class LSTMCascadeTrainer():
     def save_model(self, name):
         torch.save(self.model, os.path.join(self.cache_path, str(self.params['kf_index']), f'{name}.pt'))
 
-    def _extract_data(self):
-        result = {}
-        for phase in ['train', 'valid', 'test']:
-            self.dataset.mode(phase)
-            data = []
-            seq_lens = []
-            for _, batch in enumerate(self.dataset):
-                data.append(batch['data'])
-                seq_lens.append(batch['length'])
-            data = np.stack(data, axis=0)
-            mask = tools.make_mask((data.shape[0], data.shape[-1]), seq_lens)
-            mask, label = self.generator(data, mask) # e.g. [phase]['X']
-            result[phase] = {'mask':mask[:,0], 'X':data[:,:,0], 'Y':label[:,0,:]}
-        self.dataset.mode('all')
-        return result
-    
     def _batch_forward(self, data, return_set=set(), addi_params:dict=None):
         for p in return_set:
             assert(p in {'logit', 'mask', 'label', 'acc'})
-        data['data'] = data['data'][:, self.available_idx, :]
+        seq_lens = data['length']
         np_data = np.asarray(data['data'])
+        mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
+        mask[:, -1] = False
+        mask, labels = self.generator(np_data, mask)
+        np_data = np_data[:, self.available_idx, :] # available_idx不能在generato label之前, 避免pf_ratio被去掉
+        data['data'] = data['data'][:, self.available_idx, :]
         if addi_params is not None:
             if 'dropout' in addi_params.keys():
                 _, dp_data = self.dropout_generator(np_data)
                 data['data'] = torch.as_tensor(dp_data, dtype=torch.float32)
-        seq_lens = data['length']
-        mask = tools.make_mask((np_data.shape[0], np_data.shape[2]), seq_lens)
-        mask[:, -1] = False
-        mask, labels = self.generator(np_data, mask)
+        
+       
         mask, labels = torch.as_tensor(mask, device=self.device), torch.as_tensor(labels, device=self.device)
         x = data['data'].to(self.device)
         pred = self.model(x)
@@ -178,45 +152,17 @@ class LSTMCascadeTrainer():
             result['label'] = labels
         return result
 
-    def train_gbdt(self, addi_params:dict=None):
-        p_catboost_cache = os.path.join(self.cache_path, 'catboost')
-        tools.reinit_dir(p_catboost_cache, build=True) # 这是catboost输出loss的文件夹
-        self.data_dict = self._extract_data()
-        model = CatBoostClassifier(
-            train_dir=p_catboost_cache, # 读取数据
-            iterations=self.params['gbdt']['iterations'],
-            depth=self.params['gbdt']['depth'],
-            loss_function=self.params['gbdt']['loss_function'],
-            learning_rate=self.params['gbdt']['learning_rate'],
-            verbose=0,
-            class_weights=self.params['weight'],
-            use_best_model=True
-        )
-        train_X = self.data_dict['train']['X'][self.data_dict['train']['mask']]
-        train_Y = self.data_dict['train']['Y'][self.data_dict['train']['mask']]
-        valid_X = self.data_dict['valid']['X'][self.data_dict['valid']['mask']]
-        valid_Y = self.data_dict['valid']['Y'][self.data_dict['valid']['mask']]
-        if addi_params is not None:
-            if 'dropout' in addi_params.keys():
-                # 这个dropout是gbdt+LSTM训练时都要的
-                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'], miss_table=self.dataset.miss_table())
-                _, train_X = self.dropout_generator(train_X)
-                _, valid_X = self.dropout_generator(valid_X)
-        pool_train = Pool(train_X, np.argmax(train_Y, axis=-1))
-        pool_valid = Pool(valid_X, np.argmax(valid_Y, axis=-1))
-        model.fit(pool_train, eval_set=pool_valid, use_best_model=True)
-        return model
-
     def train(self, addi_params:dict=None):
         if self.trained:
             return
         self.trained = True # 不能训练多次
         self.reinit_cache(self.params['kf_index'])
-        gbdt_model = self.train_gbdt(addi_params=addi_params)
-        self.model = LSTMCascadeModel(gbdt_model, self.params['in_channels'])
-        self.opt = torch.optim.Adam(params=self.model.parameters(), lr=self.params['lr'])
         self.model = self.model.to(self.device)
         self.criterion = self.criterion.to(self.device)
+        # 更新dropout
+        if addi_params is not None:
+            if 'dropout' in addi_params.keys():
+                self.dropout_generator = DropoutLabelGenerator(dropout=addi_params['dropout'],miss_table=self.dataset.miss_table())
         with tqdm(total=self.params['epochs']) as tq:
             tq.set_description(f'Training, Epoch')
             best_epoch = 0
@@ -286,7 +232,7 @@ class LSTMCascadeTrainer():
             tq.set_description(f'Testing, data={mode}')
             with torch.no_grad():
                 for idx, data in enumerate(self.test_dataloader):
-                    if warm_step > 0:
+                    if warm_step is not None:
                         new_data = torch.concat([torch.expand_copy(data['data'][:, :, 0][..., None], (-1,-1,warm_step)), data['data']], dim=-1)
                         result = self._batch_forward({'data':new_data, 'length':data['length']}, addi_params=addi_params)
                         pred, loss = result['pred'][:,warm_step:,:], result['loss']
@@ -300,3 +246,30 @@ class LSTMCascadeTrainer():
         pred = torch.concat(register_vals['pred'], dim=0)
         return pred.cpu()
 
+
+class OriginalClsLoss(nn.Module):
+    '''提供动态预测的分类loss'''
+    def __init__(self, n_cls:int, target_weight=None) -> None:
+        '''forecast window: 向前预测的窗口'''
+        super().__init__()
+        self.n_cls = n_cls
+        # input: (N,C,d1,...dk)
+        self.weight = torch.as_tensor(target_weight) # 目标准确率的权重修正
+    
+    def forward(self, pred:torch.Tensor, labels:torch.Tensor, mask:torch.Tensor):
+        '''
+            pred, labels: (batch, seq_len, n_cls)
+            mask: (batch, seq_len)
+            labels可以是软标签, 但不建议使用(因为交叉熵的原因)
+        '''
+        assert(pred.size() == labels.size())
+        if len(mask.size()) + 1 == len(pred.size()): 
+            mask = mask[..., None] # mask->(batch, seq_len, 1)
+        pred, labels = pred.permute(0, 2, 1), labels.permute(0, 2, 1) # permute: ->(batch, n_cls, seq_len)
+        # 只有label中置为1的样本分类对结果有贡献
+        # 可以加入focal loss: torch.pow(1-pred, 5)
+        loss = -torch.log(pred)*labels*(mask.permute(0,2,1)) # ->(batch, n_cls, seq_len)
+        loss = torch.sum(torch.sum(loss, dim=2), dim=0) / (torch.sum(mask)) # -> (n_cls,) average
+        self.weight = self.weight.to(loss.device) # ->(n_cls,)
+        loss = torch.sum(loss * self.weight)
+        return 5*loss

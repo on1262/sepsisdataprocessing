@@ -169,10 +169,12 @@ class StaticLabelGenerator():
             mask: (batch,)
         '''
         n_fea = data.shape[1]
+        # print(np.sum(data[:, self.target_idx, :] / 1000)) # full和lite完全一样
+        
         # seq_lens = mask.sum(axis=1)
-        label = np.zeros((data.shape[0],len(self.centers)))
-        data_max = data.max()
-        stop = min(data.shape[1], self.window)
+        label = np.zeros((data.shape[0], len(self.centers)))
+        data_max = 10000
+        stop = min(data.shape[-1], self.window)
         mat = mask[:, 1:stop] * data[:, self.target_idx, 1:stop] + np.logical_not(mask[:, 1:stop]) * (data_max+1) # seq_len的最后一个格子是无效的
         mat_min = np.min(mat, axis=1) # (batch,)
         for c_idx in range(len(self.centers)):

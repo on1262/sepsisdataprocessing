@@ -17,7 +17,6 @@ class CatboostAnalyzer:
         # copy attribute from container
         self.target_idx = container.dataset.target_idx
         self.dataset = container.dataset
-        self.data = self.dataset.data
         # initialize
         self.out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         self.robust = params['robust']
@@ -44,7 +43,7 @@ class CatboostAnalyzer:
         generator = mlib.StaticLabelGenerator(
             window=self.params['window'], centers=self.params['centers'],
             target_idx=self.target_idx, forbidden_idx=self.params['forbidden_idx'], limit_idx=self.params['limit_idx'])
-        mask, label = generate_labels(self.dataset, self.data, generator, self.out_dir)
+        mask, label = generate_labels(self.dataset, self.dataset.data, generator, self.out_dir)
         fea_names = [self.dataset.get_fea_label(idx) for idx in generator.available_idx()]
         imp_logger = tools.TreeFeatureImportance(fea_names=fea_names)
         # step 4: train and predict
