@@ -1,16 +1,29 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+import os
+import pandas as pd
+
+def plot_curve(csv_path, out_dir):
+    '''绘制缺失率和性能关系曲线'''
+    df = pd.read_csv(csv_path, encoding='utf-8')
+    missrates = np.linspace(0, 1, 0.1)
+    legends = []
+    for idx in range(len(df)):
+        metrics = np.asarray(df.iloc[idx, 0:11])
+        plt.plot(missrates, metrics, 'b+-')
+        auc = df['auc']
+        name = df['name']
+        legends.append(f'{name}, AUC={auc:.3f}')
+    plt.title('Performance with missrate')
+    plt.legend(legends)
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.0])
+    plt.xlabel("Missing rate")
+    plt.ylabel("Metric")
+    save_path = os.path.join(out_dir, 'metric_comp.png')
+    plt.savefig(save_path)
+    plt.close()
 
 if __name__ == '__main__':
-    x = np.arange(0, 16, 1)
-    legend = []
-    for dp in np.linspace(0, 1, 11):
-        y = np.zeros(x.shape)
-        for idx in range(1, len(y)+1):
-            y[idx-1] = math.comb(16, idx)*(dp**idx)*((1-dp)**(16-idx))
-        plt.plot(x, y[:])
-        legend.append(f'dp={dp:.2f}')
-    plt.legend(legend)
-    plt.savefig('eval.png')
-    plt.close()
+    plot_curve('missrate_performance.csv', '.')

@@ -77,6 +77,7 @@ class CatboostDynamicAnalyzer:
         tools.reinit_dir(single_imp_out, build=True)
         # imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
         if self.robust:
+            metric_robust.save_df(self.model_name)
             metric_robust.plot_curve()
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for Catboost dynamic Model', 
             out_path=os.path.join(out_dir, 'loss.png'))

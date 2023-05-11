@@ -402,3 +402,14 @@ def plot_category_dist(data:pd.DataFrame, type_dict:dict, output_dir=None):
             plt.title(f'Category items distribution of {name}')
             plt.savefig(os.path.join(output_dir, f'{name}_dist.png'))
             plt.close()
+
+def plot_model_comparison(csv_path, title, out_path):
+    '''输出模型对比的散点图'''
+    df = pd.read_csv(csv_path, encoding='utf-8')
+    plt.figure(figsize=(10,10))
+    # columns=[model_name, hyper_params, metricA, metricB]
+    sns.scatterplot(data=df, x="4cls_accuracy", y="robust_AUC",
+                hue="model",
+                palette="ch:r=-.2,d=.3_r", linewidth=0)
+    plt.title(title)
+    plt.savefig(out_path)

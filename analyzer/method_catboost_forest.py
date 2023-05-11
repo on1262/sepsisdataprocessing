@@ -67,6 +67,7 @@ class CatboostForestAnalyzer:
         # single_imp_out = os.path.join(out_dir, 'single_shap')
         # tools.reinit_dir(single_imp_out, build=True)
         # imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
+        metric_robust.save_df(self.model_name)
         metric_robust.plot_curve()
         metric_4cls.confusion_matrix(comment=self.model_name)
         with open(os.path.join(self.out_dir, 'result.txt'), 'a') as f:

@@ -35,7 +35,7 @@ class TreeFeatureImportance():
     def plot_beeswarm(self, plot_path):
         self.update_record()
         plt.subplots_adjust(left=0.3)
-        shap.plots.beeswarm(self.records, order=self.records.abs.mean(0), show=False, plot_size=(14,10))
+        shap.plots.beeswarm(self.records, order=self.records.abs.mean(0), max_display=20, show=False, plot_size=(14,14))
         plt.savefig(plot_path)
         plt.close()
 
@@ -111,17 +111,26 @@ class DeepFeatureImportance():
     def plot_beeswarm(self, plot_path):
         self.update_record()
         plt.subplots_adjust(left=0.3)
-        shap.plots.beeswarm(self.records['exp'], order=self.records['exp'].abs.mean(0), show=False, plot_size=(14,10))
+        shap.plots.beeswarm(self.records['exp'], order=self.records['exp'].abs.mean(0), max_display=20, show=False, plot_size=(14,14))
         plt.savefig(plot_path)
         plt.close()
 
     def plot_hotspot(self, plot_path):
         self.update_record()
-        shap_values = np.mean(self.records['shap_values'], axis=0) # (n_fea, threshold)
+        shap_values = np.mean(np.abs(self.records['shap_values']), axis=0) # (n_fea, threshold)
+        shap_values = np.log10(shap_values-np.min(shap_values)+1e-6)
+        # reference_index = list(self.fea_names).index('age')
+        # reference_seq = shap_values[reference_index, :].copy()
+        # for idx in range(shap_values.shape[0]):
+        #     shap_values[idx, :] -= reference_seq
+        imps = np.mean(shap_values, axis=-1)
+        sorted_idx = sorted(list(range(len(imps))), key=lambda x:imps[x])
+        sorted_names = [self.fea_names[idx] for idx in sorted_idx]
+        sorted_values = np.asarray([shap_values[idx, :] for idx in sorted_idx])
         time_ticks = [n for n in range(shap_values.shape[-1])]
         f, ax = plt.subplots(figsize=(15, 15))
         cmap = sns.diverging_palette(230, 20, as_cmap=True)
-        sns.heatmap(shap_values, cmap=cmap, annot=False, yticklabels=self.fea_names, xticklabels=time_ticks,
+        sns.heatmap(sorted_values, cmap=cmap, annot=False, yticklabels=sorted_names, xticklabels=time_ticks,
                     square=True, linewidths=.5, cbar_kws={"shrink": .5})
         plt.xticks(rotation=90)
         plt.yticks(rotation=0)

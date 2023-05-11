@@ -11,6 +11,7 @@ from .method_random_forest import RandomForestAnalyzer
 from .method_catboost_forest import CatboostForestAnalyzer
 from .method_catboost_dynamic import CatboostDynamicAnalyzer
 from .method_lstm_cascade import LSTMCascadeAnalyzer
+from .method_lstm_cascade_extend import LSTMCascadeExtendAnalyzer
 from datasets import MIMICDataset
 
 
@@ -24,6 +25,7 @@ class Analyzer:
         self.analyzer_dict = {
             'LSTM_original':LSTMOriginalAnalyzer,
             "LSTM_cascade": LSTMCascadeAnalyzer,
+            'LSTM_extend_cascade': LSTMCascadeExtendAnalyzer,
             'nearest_4cls': BaselineNearestClsAnalyzer,
             'catboost_4cls':CatboostAnalyzer,
             'random_forest':RandomForestAnalyzer,

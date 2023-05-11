@@ -6,6 +6,7 @@ from sklearn.metrics import auc as sk_auc
 from .colorful_logging import logger
 from .plot import plot_confusion_matrix
 from tools import GLOBAL_CONF_LOADER
+import pandas as pd
 
 
 
@@ -303,17 +304,23 @@ class RobustClassificationMetric:
         '''
         record_key = round(missrate * 1000) # 精度支持
         if self.records.get(record_key) is None:
-            self.records[record_key] = MultiClassMetric(class_names=self.class_names, out_dir=None)
-        self.records[record_key].add_prediction(_prediction, _gt, _mask)
+            self.records[record_key] = (MultiClassMetric(class_names=self.class_names, out_dir=None), [])
+        self.records[record_key][1].append(MultiClassMetric(class_names=self.class_names, out_dir=None))
+        self.records[record_key][1][-1].add_prediction(_prediction, _gt, _mask)
+        self.records[record_key][0].add_prediction(_prediction, _gt, _mask)
 
     def plot_curve(self):
         '''绘制缺失率和性能关系曲线'''
         sorted_keys = sorted(list(self.records.keys()))
         missrates = np.asarray([key/1000 for key in sorted_keys])
-        metrics = np.asarray([self.records[key].mean_acc() for key in sorted_keys])
+        mean_metrics = np.asarray([self.records[key][0].mean_acc() for key in sorted_keys])
+        metrics = np.asarray([[m.mean_acc() for m in self.records[key][1]] for key in sorted_keys]).T
+        mean_auc = sk_auc(missrates, mean_metrics)
+        aucs = [sk_auc(missrates, metrics[idx, :]) for idx in range(metrics.shape[0])]
+        std = np.std(aucs)
         # draw mean curve
-        plt.plot(missrates, metrics, 'b+-')
-        auc_str = f'AUC={sk_auc(missrates, metrics):.3f}'
+        plt.plot(missrates, mean_metrics, 'b+-')
+        auc_str = f'AUC={mean_auc:.3f} ({std})'
         plt.annotate(auc_str, xy=[0.7, 0.05], fontsize=12)
         plt.title('Performance with missrate')
         plt.xlim([0.0, 1.0])
@@ -323,3 +330,24 @@ class RobustClassificationMetric:
         save_path = os.path.join(self.out_dir, 'missrate_performance.png')
         plt.savefig(save_path)
         plt.close()
+
+    def save_df(self, model_name):
+        result = {}
+        sorted_keys = sorted(list(self.records.keys()))
+        missrates = np.asarray([key/1000 for key in sorted_keys])
+        mean_metrics = np.asarray([self.records[key][0].mean_acc() for key in sorted_keys])
+        mean_auc = sk_auc(missrates, mean_metrics)
+        metrics = np.asarray([[m.mean_acc() for m in self.records[key][1]] for key in sorted_keys]).T
+        aucs = [sk_auc(missrates, metrics[idx, :]) for idx in range(metrics.shape[0])]
+        std = np.std(aucs)
+        result['name'] = model_name
+        result['std'] = std
+        result['auc'] = mean_auc
+        idx_cols = list(range(11))
+        for idx, m in enumerate(mean_metrics):
+            result[idx] = m
+        result = {key:[val] for key, val in result.items()}
+        df = pd.DataFrame(data=result, columns=idx_cols + ['auc','std', 'name'])
+        df.to_csv(os.path.join(self.out_dir, 'missrate_performance.csv'), encoding='utf-8')
+            
+            

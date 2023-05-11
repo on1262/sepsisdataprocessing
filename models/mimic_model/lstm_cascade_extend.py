@@ -13,7 +13,7 @@ from .catboost_dynamic import CatboostDynamicTrainer
 
 
     
-class LSTMCascadeModel(nn.Module):
+class LSTMCascadeExtendModel(nn.Module):
     '''带预测窗口的多分类判别模型'''
     def __init__(self, catboost_model:CatBoostClassifier, in_channels:int, n_cls=4, hidden_size=128) -> None:
         super().__init__()
@@ -26,7 +26,7 @@ class LSTMCascadeModel(nn.Module):
         self.ebd = nn.Linear(in_features=in_channels, out_features=in_channels)
         self.den = nn.Linear(in_features=hidden_size, out_features=n_cls)
         self.sf = nn.Softmax(dim=-1)
-        self.lstm = nn.LSTM(input_size=in_channels, hidden_size=hidden_size, batch_first=True)
+        self.lstm = nn.LSTM(input_size=in_channels+1, hidden_size=hidden_size, batch_first=True)
         self.c_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
         self.h_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
         self.explainer_mode = False
@@ -43,10 +43,11 @@ class LSTMCascadeModel(nn.Module):
         给出某个时间点对未来一个窗口内是否发生ARDS的概率
         x: (batch, feature, time)
         '''
+        b,f,t = x.size(0), x.size(1), x.size(2)
+        dp_mask = torch.mean((torch.abs(x + 1) < 1e-3).to(torch.float32), dim=1)[:, :, None] # (batch, time, 1)
+        dp_mask[dp_mask < 0.05] = 1
         if mix:
             assert(self.catboost_model is not None)
-            b,f,t = x.size(0), x.size(1), x.size(2)
-            dp_mask = torch.mean((torch.abs(x + 1) < 1e-3).to(torch.float32), dim=1)[:, :, None]
             test_gbdt = torch.reshape(x.permute(0, 2, 1), (b*t, f)).detach().clone().cpu()
             pool_test = Pool(data=test_gbdt.numpy())
             gbdt_out = self.catboost_model.predict(pool_test, prediction_type='Probability')
@@ -56,6 +57,8 @@ class LSTMCascadeModel(nn.Module):
         # x: (batch, feature, time)
         x = self.ebd(x.transpose(1,2))
         # x: (batch, time, feature) out带有tanh
+        x = torch.concat([x, dp_mask], dim=-1)
+        # x: (batch, time, feature+1)
         h_0, c_0 = self.h_0.expand(-1, x.size(0), -1).contiguous(), self.c_0.expand(-1, x.size(0), -1).contiguous()
         x, _ = self.lstm(x, (h_0, c_0))
         # x: (batch, time, hidden_size)
@@ -63,19 +66,19 @@ class LSTMCascadeModel(nn.Module):
         if self.explainer_mode:
             result = x[:,self.explainer_time_thres,3] # (batch,) 计算给定时刻的梯度贡献
         else:
-            result =  self.sf(x) # (batch, time, n_cls)
-        if mix:
-            result = result * (1-dp_mask) + gbdt_out * dp_mask
+            result = self.sf(x) # (batch, time, n_cls)
+        #if mix:
+        #    result = result * (1-dp_mask) + gbdt_out * dp_mask
         return result
         
 
-class LSTMCascadeTrainer():
+class LSTMCascadeExtendTrainer():
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
         self.paths = params['paths']
         self.device = torch.device(self.params['device'])
         self.cache_path = os.path.join(self.paths['cache_dir'], self.params['analyzer_name']) # cache不单独reinit, 因为可能有pretrain, 训练时才init
-        self.model = LSTMCascadeModel(catboost_model=None, in_channels=params['in_channels'])
+        self.model = LSTMCascadeExtendModel(catboost_model=None, in_channels=params['in_channels'])
         for key in ['dataset_version', 'window','class_names', 'forbidden_idx','centers','limit_idx', 'paths']:
             params['catboost_dyn'][key] = params[key]
         self.catboost_trainer = CatboostDynamicTrainer(params['catboost_dyn'], dataset)

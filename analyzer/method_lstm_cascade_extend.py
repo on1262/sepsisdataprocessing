@@ -1,5 +1,4 @@
 import numpy as np
-from sklearn.model_selection import KFold
 import tools
 import os
 from tools import logger as logger
@@ -8,7 +7,7 @@ from .utils import generate_labels, map_func, cal_label_weight
 from .feature_explore import plot_cover_rate
 import models.mimic_model as mlib
 
-class LSTMOriginalAnalyzer:
+class LSTMCascadeExtendAnalyzer:
     '''
     动态模型, 四分类预测
     '''
@@ -55,11 +54,10 @@ class LSTMOriginalAnalyzer:
         if self.robust:
             metric_robust = tools.RobustClassificationMetric(class_names=self.params['class_names'], out_dir=out_dir)
             def dropout_func(missrate):
-                    return np.asarray(trainer.predict(mode='test', warm_step=self.params['warm_step'], addi_params={'dropout':missrate}))
+                    return np.asarray(trainer.predict(mode='test', warm_step=self.params['warm_step'], addi_params={'dropout':missrate, 'mix':True}))
         metric_startstep = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'startstep')) 
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir) # 所有步平均性能
         metric_initial = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'initial_steps')) # 起始一段时间的平均性能
-        metric_imp = tools.DeepFeatureImportance(device=self.params['device'], fea_names=[self.dataset.get_fea_label(key) for key in self.dataset.total_keys]) 
         # step 3: generate labels & label explore
         generator = mlib.DynamicLabelGenerator(soft_label=False, window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'], limit_idx=self.params['limit_idx'])
         available_idx = generator.available_idx(n_fea=self.data.shape[1])
@@ -72,7 +70,7 @@ class LSTMOriginalAnalyzer:
         for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()):
             self.params['kf_index'] = idx
             self.params['weight'] = cal_label_weight(len(self.params['centers']), mask[train_index,...], label[train_index,...])
-            trainer = mlib.LSTMOriginalTrainer(self.params, self.dataset)
+            trainer = mlib.LSTMCascadeExtendTrainer(self.params, self.dataset)
             if idx == 0:
                 trainer.summary()
             if self.robust and 'train_miss_rate' in self.params.keys():
@@ -82,7 +80,7 @@ class LSTMOriginalAnalyzer:
             self.loss_logger.add_loss(trainer.get_loss())
             Y_mask = mask[test_index, ...]
             Y_gt = label[test_index, ...]
-            Y_pred = trainer.predict(mode='test', warm_step=self.params['warm_step'])
+            Y_pred = trainer.predict(mode='test', warm_step=self.params['warm_step'], addi_params={'mix':True})
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
             metric_startstep.add_prediction(Y_pred[:, 0, :], Y_gt[:, 0, :], Y_mask[:,0])
@@ -91,19 +89,11 @@ class LSTMOriginalAnalyzer:
                 for missrate in np.linspace(0, 1, 11):
                     R_pred = dropout_func(missrate)
                     metric_robust.add_prediction(missrate, R_pred[:, 0:16, :], Y_gt[:, 0:16, :], Y_mask[:, 0:16])
-            # create wrapper
-            metric_imp.add_record(
-                trainer.create_wrapper(self.params['shap_time_thres']),
-                self.data[valid_index, ...][:, available_idx, :], self.params['shap_time_thres']
-            )
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
         if self.robust:
             metric_robust.save_df(self.model_name)
             metric_robust.plot_curve()
-        # shap values
-        metric_imp.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
-        metric_imp.plot_hotspot(os.path.join(out_dir, 'shap_hotspot.png'))
         # loss logger
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
             out_path=os.path.join(out_dir, 'loss.png'))

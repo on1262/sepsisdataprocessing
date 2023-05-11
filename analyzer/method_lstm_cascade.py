@@ -55,7 +55,7 @@ class LSTMCascadeAnalyzer:
         if self.robust:
             metric_robust = tools.RobustClassificationMetric(class_names=self.params['class_names'], out_dir=out_dir)
             def dropout_func(missrate):
-                    return np.asarray(trainer.predict(mode='test', addi_params={'dropout':missrate}))
+                    return np.asarray(trainer.predict(mode='test', warm_step=self.params['warm_step'], addi_params={'dropout':missrate, 'mix':True}))
         metric_startstep = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'startstep')) 
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir) # 所有步平均性能
         metric_initial = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'initial_steps')) # 起始一段时间的平均性能
@@ -71,7 +71,7 @@ class LSTMCascadeAnalyzer:
         for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()):
             self.params['kf_index'] = idx
             self.params['weight'] = cal_label_weight(len(self.params['centers']), mask[train_index,...], label[train_index,...])
-            trainer = mlib.LSTMOriginalTrainer(self.params, self.dataset)
+            trainer = mlib.LSTMCascadeTrainer(self.params, self.dataset)
             if idx == 0:
                 trainer.summary()
             if self.robust and 'train_miss_rate' in self.params.keys():
@@ -81,7 +81,7 @@ class LSTMCascadeAnalyzer:
             self.loss_logger.add_loss(trainer.get_loss())
             Y_mask = mask[test_index, ...]
             Y_gt = label[test_index, ...]
-            Y_pred = trainer.predict(mode='test', warm_step=self.params['warm_step'])
+            Y_pred = trainer.predict(mode='test', warm_step=self.params['warm_step'], addi_params={'mix':True})
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
             metric_startstep.add_prediction(Y_pred[:, 0, :], Y_gt[:, 0, :], Y_mask[:,0])
@@ -93,6 +93,7 @@ class LSTMCascadeAnalyzer:
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
         if self.robust:
+            metric_robust.save_df(self.model_name)
             metric_robust.plot_curve()
         # loss logger
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for LSTM cls Model', 
