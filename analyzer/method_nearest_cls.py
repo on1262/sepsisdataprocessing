@@ -9,6 +9,7 @@ from .utils import generate_labels, map_func
 
 
 class BaselineNearestClsAnalyzer:
+    '''window=72时start step就是静态模型baseline, window=8时overall performance'''
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
@@ -29,7 +30,7 @@ class BaselineNearestClsAnalyzer:
         pred = np.zeros((len(self.dataset), self.dataset.data.shape[-1], len(self.centers)))
         for idx, data in tqdm(enumerate(self.dataset), desc='testing', total=len(self.dataset)):
             np_data = data['data']
-            np_data = np_data + (-10)*(np_data < 150) - 10
+            # np_data = np_data + (-10)*(np_data < 150) - 10
             pred[idx, :, :] = tools.label_smoothing(self.centers, np_data[self.target_idx, :], band=50)
         return pred
 
@@ -43,6 +44,7 @@ class BaselineNearestClsAnalyzer:
         tools.reinit_dir(out_dir, build=True)
         #metric_2cls = tools.DichotomyMetric()
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
+        metric_startstep = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
         generator = mlib.DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.dataset.data, generator, out_dir)
@@ -53,6 +55,7 @@ class BaselineNearestClsAnalyzer:
             Y_pred = self.predict(mode='test')
             Y_pred = np.asarray(Y_pred)
             metric_4cls.add_prediction(Y_pred, Y_gt, Y_mask) # 去掉mask外的数据
+            metric_startstep.add_prediction(Y_pred[:,0, ...], Y_gt[:,0, ...], Y_mask[:,0, ...])
             #metric_2cls.add_prediction(map_func(Y_pred)[..., 1][Y_mask][:], map_func(Y_gt)[..., 1][Y_mask][:])
             self.dataset.mode('all') # 恢复原本状态
         metric_4cls.confusion_matrix(comment=self.model_name)
@@ -60,3 +63,5 @@ class BaselineNearestClsAnalyzer:
         with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
             print('Overall performance:', file=fp)
             metric_4cls.write_result(fp)
+            print('Start step performance:', file=fp)
+            metric_startstep.write_result(fp)

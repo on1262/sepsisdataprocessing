@@ -196,7 +196,7 @@ def plot_correlation_matrix(data:np.ndarray, fea_names:list, save_path=None):
     fea_names: (n_fea)
     '''
     assert(len(fea_names) == data.shape[1])
-    plt.figure(figsize=(15,15))
+    plt.figure(figsize=(round(6+fea_names*0.1),round(6+fea_names*0.1)))
     mat = np.corrcoef(x=data, rowvar=False)
     f, ax = plt.subplots(figsize=(60, 60))
     mask = np.triu(np.ones_like(mat, dtype=bool))

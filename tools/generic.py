@@ -9,11 +9,8 @@ import missingno as msno
 import hashlib
 from .colorful_logging import logger
 
-
-'''
-清除并且重建一个文件夹和其中所有的内容
-'''
 def reinit_dir(write_dir_path=None, build=True):
+    '''清除并且重建一个文件夹和其中所有的内容'''
     if write_dir_path is not None:
         if os.path.exists(write_dir_path):
             for name in os.listdir(write_dir_path):

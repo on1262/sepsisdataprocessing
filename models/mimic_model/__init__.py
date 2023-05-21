@@ -5,3 +5,4 @@ from .lstm_cascade import *
 from .lstm_cascade_extend import *
 from .random_forest import *
 from .catboost_forest import *
+from .logsitic_reg import *

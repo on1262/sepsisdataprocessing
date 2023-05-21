@@ -66,8 +66,8 @@ class RandomForestAnalyzer:
             self.dataset.mode('all') # 恢复原本状态
         # step 5: result explore
         # imp_logger.plot_beeswarm(os.path.join(out_dir, 'shap_overview.png'))
-        single_imp_out = os.path.join(out_dir, 'single_shap')
-        tools.reinit_dir(single_imp_out, build=True)
+        # single_imp_out = os.path.join(out_dir, 'single_shap')
+        # tools.reinit_dir(single_imp_out, build=True)
         # imp_logger.plot_single_importance(out_dir=single_imp_out, select=10)
         if self.robust:
             metric_robust.plot_curve()

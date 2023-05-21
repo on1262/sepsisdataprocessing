@@ -215,8 +215,10 @@ class MultiClassMetric:
         # calculate statistics
         self.calculated = False # lazy update
         self.cm = None
+        self.accs = None
+        self.acc_std = None
     
-    def calculate_cm(self):
+    def update_metrics(self):
         if self.calculated:
             return
         self.calculated = True
@@ -227,9 +229,23 @@ class MultiClassMetric:
         pred_label = np.argmax(pred, axis=1)
         for idx in range(pred.shape[0]):
             self.cm[pred_label[idx]][gt_label[idx]] += 1
-        # for x in range(self.n_cls):
-        #     for y in range(self.n_cls):
-        #         logger.debug(f'pred={x}, gt={y}: {self.cm[x][y]}') 
+        self.accs = [self.cm[idx, idx] / np.sum(self.cm[:, idx]) for idx in range(self.n_cls)]
+        # 计算acc的std
+        k = 5
+        self.acc_std = []
+        for k_idx in range(k):
+            idx_start = round(k_idx * pred.shape[0] / k)
+            idx_end = min(round((k_idx + 1) * pred.shape[0] / k), pred.shape[0])
+            k_pred = pred[idx_start:idx_end]
+            k_gt = gt[idx_start:idx_end]
+            k_cm = np.zeros((self.n_cls, self.n_cls), dtype=np.int32)
+            k_gt_label = np.argmax(k_gt, axis=1)
+            k_pred_label = np.argmax(k_pred, axis=1)
+            for idx in range(k_pred.shape[0]):
+                k_cm[k_pred_label[idx]][k_gt_label[idx]] += 1
+            k_accs = [k_cm[idx, idx] / np.sum(k_cm[:, idx]) for idx in range(self.n_cls)]
+            self.acc_std.append(np.mean(k_accs))
+        self.acc_std = np.std(self.acc_std)
 
     def add_prediction(self, _prediction:np.ndarray, _gt:np.ndarray, _mask:np.ndarray):
         '''
@@ -255,7 +271,7 @@ class MultiClassMetric:
         输出混淆矩阵
         cm[x][y] 代表pred=x, gt=y
         '''
-        self.calculate_cm()
+        self.update_metrics()
         plot_confusion_matrix(self.cm, labels=self.class_names, 
             title='Confusion matrix', save_path=os.path.join(self.out_dir, 'confusion_matrix.png'))
         cm_norm = self.cm / np.sum(self.cm, axis=0)[None, ...]
@@ -263,25 +279,21 @@ class MultiClassMetric:
             title='Confusion matrix(norm)', save_path=os.path.join(self.out_dir, 'confusion_matrix(norm).png'))
     
     def mean_acc(self):
-        self.calculate_cm()
-        # 每个类的正确率
-        accs = [self.cm[idx, idx] / np.sum(self.cm[:, idx]) for idx in range(self.n_cls)]
+        self.update_metrics()        
         # 平均正确率, 每个类的权重是相等的
-        mean_acc = np.mean(accs)
+        mean_acc = np.mean(self.accs)
         return mean_acc
     
     def write_result(self, fp=sys.stdout):
         '''输出准确率等信息'''
         print('='*10 + 'Metric 4 classes:'+ '='*10, file=fp)
-        self.calculate_cm()
-        # 每个类的正确率
-        accs = [self.cm[idx, idx] / np.sum(self.cm[:, idx]) for idx in range(self.n_cls)]
+        self.update_metrics()
         # 平均正确率, 每个类的权重是相等的
         mean_acc = self.mean_acc()
         for idx, name in enumerate(self.class_names):
-            print(f'{name} accuracy={accs[idx]}', file=fp)
+            print(f'{name} accuracy={self.accs[idx]}', file=fp)
         print('='*20, file=fp)
-        print(f'Mean accuracy={mean_acc}', file=fp)
+        print(f'Mean accuracy={mean_acc}, std={self.acc_std}', file=fp)
 
 
 
@@ -320,7 +332,7 @@ class RobustClassificationMetric:
         std = np.std(aucs)
         # draw mean curve
         plt.plot(missrates, mean_metrics, 'b+-')
-        auc_str = f'AUC={mean_auc:.3f} ({std})'
+        auc_str = f'AUC={mean_auc:.3f} ({std:.4f})'
         plt.annotate(auc_str, xy=[0.7, 0.05], fontsize=12)
         plt.title('Performance with missrate')
         plt.xlim([0.0, 1.0])

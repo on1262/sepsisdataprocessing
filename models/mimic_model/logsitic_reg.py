@@ -6,10 +6,10 @@ import os
 from tqdm import tqdm
 import pandas as pd
 from .utils import StaticLabelGenerator, DropoutLabelGenerator
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 
 
-class RandomForestTrainer():
+class LogisticRegTrainer():
     def __init__(self, params:dict, dataset) -> None:
         self.params = params
         self.paths = params['paths']
@@ -49,10 +49,8 @@ class RandomForestTrainer():
         self.data_dict = self._extract_data()
         #cls_weight = self.cal_label_weight(
         #    n_cls=len(self.params['centers']), mask=self.data_dict['train']['mask'], label=self.data_dict['train']['Y'])
-        self.model = RandomForestClassifier(
+        self.model = LogisticRegression(
             class_weight='balanced',
-            max_depth=self.params['max_depth'],
-            n_estimators=50,
             n_jobs=-1
         )
         train_X = self.data_dict['train']['X'][self.data_dict['train']['mask']]
