@@ -2,9 +2,10 @@ from analyzer import Analyzer
 from datasets import MIMICDataset
 
 analyzer_params = [
-    'feature_explore',
+    #'feature_explore',
     #'nearest_4cls',
     #'LSTM_original',
+    #'LSTM_original_no_warm'
     #'LSTM_original_dp2',
     #'LSTM_original_dp4',
     #'LSTM_original_dp6',
@@ -16,7 +17,7 @@ analyzer_params = [
     #'catboost_dyn_dp4',
     #'catboost_dyn_dp6',
     #'catboost_dyn_dp8',
-    #'catboost_4cls',
+    'catboost_4cls',
     #'catboost_4cls_dp2',
     #'catboost_4cls_dp4',
     #'catboost_4cls_dp6',
@@ -31,7 +32,7 @@ analyzer_params = [
     #'catboost_forest',
     #'catboost_forest_dp2',
     #'catboost_forest_dp4',
-    #'feature_explore'
+    #'holt_winters'
 ]
 
 if __name__ == '__main__':

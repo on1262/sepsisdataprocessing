@@ -13,6 +13,7 @@ from .method_catboost_dynamic import CatboostDynamicAnalyzer
 from .method_lstm_cascade import LSTMCascadeAnalyzer
 from .method_lstm_cascade_extend import LSTMCascadeExtendAnalyzer
 from .method_logistic_regression import LogisticRegAnalyzer
+from .method_holt_winters import HoltWintersDynamicAnalyzer
 from datasets import MIMICDataset
 
 
@@ -34,6 +35,7 @@ class Analyzer:
             'catboost_dyn': CatboostDynamicAnalyzer,
             'feature_explore': FeatureExplorer,
             'logistic_reg': LogisticRegAnalyzer,
+            'holt_winters': HoltWintersDynamicAnalyzer
         }
         if params is not None:
             for name in params:

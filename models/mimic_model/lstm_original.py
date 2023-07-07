@@ -25,8 +25,8 @@ class LSTMOriginalModel(nn.Module):
         self.den = nn.Linear(in_features=hidden_size, out_features=n_cls)
         self.sf = nn.Softmax(dim=-1)
         self.lstm = nn.LSTM(input_size=in_channels, hidden_size=hidden_size, batch_first=True)
-        self.c_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
-        self.h_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
+        #self.c_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
+        #self.h_0 = nn.Parameter(torch.zeros((1, 1, hidden_size)), requires_grad=True)
         self.explainer_mode = False
         self.explainer_time_thres = 0
 
@@ -43,7 +43,8 @@ class LSTMOriginalModel(nn.Module):
         # x: (batch, feature, time)
         x = self.ebd(x.transpose(1,2))
         # x: (batch, time, feature) out带有tanh
-        h_0, c_0 = self.h_0.expand(-1, x.size(0), -1).contiguous(), self.c_0.expand(-1, x.size(0), -1).contiguous()
+        h_0, c_0 = torch.zeros((1, x.size(0), self.hidden_size), device=x.device), torch.zeros((1, x.size(0), self.hidden_size), device=x.device)
+        #h_0, c_0 = self.h_0.expand(-1, x.size(0), -1).contiguous(), self.c_0.expand(-1, x.size(0), -1).contiguous()
         x, _ = self.lstm(x, (h_0, c_0))
         # x: (batch, time, hidden_size)
         x = self.den(x)
@@ -254,7 +255,7 @@ class LSTMOriginalTrainer():
             tq.set_description(f'Testing, data={mode}')
             with torch.no_grad():
                 for idx, data in enumerate(self.test_dataloader):
-                    if warm_step is not None:
+                    if warm_step is not None and warm_step > 0:
                         new_data = torch.concat([torch.expand_copy(data['data'][:, :, 0][..., None], (-1,-1,warm_step)), data['data']], dim=-1)
                         result = self._batch_forward({'data':new_data, 'length':data['length']}, addi_params=addi_params)
                         pred, loss = result['pred'][:,warm_step:,:], result['loss']

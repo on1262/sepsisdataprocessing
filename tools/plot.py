@@ -196,9 +196,9 @@ def plot_correlation_matrix(data:np.ndarray, fea_names:list, save_path=None):
     fea_names: (n_fea)
     '''
     assert(len(fea_names) == data.shape[1])
-    plt.figure(figsize=(round(6+fea_names*0.1),round(6+fea_names*0.1)))
+    fig_size = int(8+len(fea_names)*0.2)
     mat = np.corrcoef(x=data, rowvar=False)
-    f, ax = plt.subplots(figsize=(60, 60))
+    f, ax = plt.subplots(figsize=(fig_size, fig_size))
     mask = np.triu(np.ones_like(mat, dtype=bool))
     cmap = sns.diverging_palette(230, 20, as_cmap=True)
     sns.heatmap(mat, mask=mask, cmap=cmap, vmax=1, center=0, annot = False, xticklabels=fea_names, yticklabels=fea_names,
@@ -206,6 +206,7 @@ def plot_correlation_matrix(data:np.ndarray, fea_names:list, save_path=None):
     plt.xticks(rotation=90)
     plt.yticks(rotation=0)
     plt.title('Pearson Correlation Matrix', fontsize = 13)
+    plt.subplots_adjust(left=0.3)
     plt.savefig(save_path)
     plt.close()
     return mat

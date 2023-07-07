@@ -53,9 +53,14 @@ class TreeFeatureImportance():
             order = order[:min(select, len(order))]
         names = [self.fea_names[idx] for idx in order]
         for idx, name in zip(order, names):
+            data = self.records[:,name]
+            if len(data) >= 20:
+                data_sorted = np.sort(data.data)[5:-5]
+                xmin, xmax = data_sorted[0], data_sorted[-1]
             plt.subplots_adjust(left=0.3) 
             shap.plots.scatter(self.records[:,name])
             plt.xlabel(name)
+            plt.xlim((xmin, xmax))
             plt.savefig(os.path.join(out_dir, f'{name}.png'))
             plt.close()
 

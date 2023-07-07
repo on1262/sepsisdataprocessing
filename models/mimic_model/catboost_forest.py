@@ -105,11 +105,12 @@ class CatboostForestTrainer():
                 imp_idx.append(pos)
         other_idx = sorted(list(set(range(self.n_fea)) - set(imp_idx)))
         for n in range(len(imp_idx)):
-            combination_list += (list(combinations(imp_idx, n+1))) # 添加重要特征1->n的全组合
+            combination_list += (list(combinations(imp_idx, n+1))) # 添加重要特征1->n的全组合, 2^n
+        # 重要特征全组合时, 默认其他特征都存在
         for idx in range(len(combination_list)):
             combination_list[idx] = sorted(list(combination_list[idx]) + other_idx)
         combination_list.append(other_idx)
-        # 生成其余特征的序列
+        # 生成其余特征的序列, 其余情况也包括重要特征
         all_idx = list(range(self.n_fea))
         other_list = []
         for n in range(round(len(all_idx)*self.params['min_feature_coeff']), len(all_idx), 1):

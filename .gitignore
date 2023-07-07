@@ -12,3 +12,4 @@ outputs/
 *.csv
 catboost_info/
 nohup.out
+simhei.ttf

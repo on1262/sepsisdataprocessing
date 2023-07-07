@@ -25,7 +25,6 @@ class CatboostDynamicAnalyzer:
 
 
     def run(self):
-        '''预测窗口内是否发生ARDS的分类器'''
         # step 1: append additional params
         self.params['in_channels'] = self.dataset.data.shape[1]
         forbidden_idx = {self.dataset.idx_dict[name] for name in self.params['forbidden_feas']}
@@ -35,8 +34,12 @@ class CatboostDynamicAnalyzer:
         # step 2: init variables
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
-        metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
-        metric_initial = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
+        metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, '4cls'))
+        metric_initial = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'initial'))
+        metric_startstep = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=os.path.join(out_dir, 'startstep'))
+        tools.reinit_dir(os.path.join(out_dir, '4cls'), build=True)
+        tools.reinit_dir(os.path.join(out_dir, 'initial'), build=True)
+        tools.reinit_dir(os.path.join(out_dir, 'startstep'), build=True)
         if self.robust:
             metric_robust = tools.RobustClassificationMetric(class_names=self.params['class_names'], out_dir=out_dir)
             def dropout_func(missrate):
@@ -53,7 +56,7 @@ class CatboostDynamicAnalyzer:
         # step 4: train and predict
         for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()): 
             trainer = mlib.CatboostDynamicTrainer(self.params, self.dataset)
-            if self.robust and 'train_miss_rate' in self.params.keys():
+            if 'train_miss_rate' in self.params.keys():
                 trainer.train(addi_params={'dropout':self.params['train_miss_rate']}) # 训练时对训练集随机dropout
             else:
                 trainer.train()
@@ -64,6 +67,7 @@ class CatboostDynamicAnalyzer:
             _Y_pred = generator.restore_from_slice(Y_pred)
             metric_4cls.add_prediction(_Y_pred, Y_gt, mask[test_index])
             metric_initial.add_prediction(_Y_pred[:, :16, :], Y_gt[:, :16, :], mask[test_index, :16])
+            metric_startstep.add_prediction(_Y_pred[:, 0, :], Y_gt[:, 0, :], mask[test_index, 0])
             # imp_logger.add_record(trainer.model, label['X'])
             if self.robust:
                 for missrate in np.linspace(0, 1, 11):
@@ -81,10 +85,13 @@ class CatboostDynamicAnalyzer:
             metric_robust.plot_curve()
         self.loss_logger.plot(std_bar=False, log_loss=False, title='Loss for Catboost dynamic Model', 
             out_path=os.path.join(out_dir, 'loss.png'))
-        metric_4cls.confusion_matrix(comment=self.model_name)
+        metric_4cls.confusion_matrix(comment=self.model_name + '_all')
+        metric_startstep.confusion_matrix(comment=self.model_name + '_startstep')
         with open(os.path.join(self.out_dir, 'result.txt'), 'a') as f:
             print('Overall performance:', file=f)
             metric_4cls.write_result(f)
             print('\n', file=f)
+            print('Start Step:', file=f)
+            metric_startstep.write_result(f)
             print('Initial steps performance:', file=f)
             metric_initial.write_result(f)
