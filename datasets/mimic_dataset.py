@@ -356,7 +356,7 @@ class MIMICIV:
         logger.info(f'del_invalid_subjects: Deleted {len(pop_list)}/{len(pop_list)+len(self.subjects)} subjects')
 
 
-class MIMICDataset():
+class MIMICDataset(torch.Dataset):
     '''
     MIMIC-IV上层抽象, 从中间文件读取数据, 进行处理, 得到最终数据集
     (batch, n_fea, seq_len)

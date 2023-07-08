@@ -17,7 +17,7 @@ analyzer_params = [
     #'catboost_dyn_dp4',
     #'catboost_dyn_dp6',
     #'catboost_dyn_dp8',
-    'catboost_4cls',
+    #'catboost_4cls',
     #'catboost_4cls_dp2',
     #'catboost_4cls_dp4',
     #'catboost_4cls_dp6',

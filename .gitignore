@@ -9,7 +9,6 @@ outputs/
 *.txt
 *.pt
 *.log
-*.csv
 catboost_info/
 nohup.out
 simhei.ttf

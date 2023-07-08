@@ -1,12 +1,14 @@
-# Sepsis induced ARDS
+# MIMIC-IV data processing pipeline
 
-main: 静态模型和动态模型独立, 包括lstm, quantile等, 作为备份
-combined_model: 先进模型
 ## 架构
 
+该框架主要包括三个部分：数据集dataset、模型model、分析器analyzer。dataset将原数据抽象为torch.dataset接口；model对批次输入计算输出；analyzer类似trainer，提供K-fold、指标计算、绘图等工作。将model和analyzer拆分，使得一个analyzer调用多个model进行集成学习、一个model被多个analzyer调用等情况更加方便。其余的tools部分包括共用的工具方法，configs部分为需要配置的字段，例如路径、数据清洗的参数等。
+
 analyzer: 分析模块
-1. analyzer: 包含与各种model的接口
-2. analyzer_utils: 工具方法
+1. analyzer: 按照序列运行anlayzer，添加新analyzer时需要注册
+2. container: 存放与模型无关的参数
+3. feature_explore: 生成数据集的探查报告，可配置生成参数
+3. utils: 工具方法
 
 configs: 每个数据集对应的配置文件
 1. global_config: 配置路径
@@ -16,11 +18,10 @@ configs: 每个数据集对应的配置文件
 data: 数据集文件
 
 datasets: 数据集抽象, 包括数据提取/清洗/重新组织
-1. abstract_dataset: 所有数据集需要实现的接口
 
 libs: 第三方库和相关代码
 
-models: 模型, 包括baseline/LSTM等
+models: 模型
 
 outputs: 输出图片/分析表等
 
@@ -30,13 +31,9 @@ main.py: 主入口, 通过参数配置和luncher对接
 
 ## 数据集
 
-注意: 数据集的区分是因为特征数量/采样时间地点不同而产生显著差异.
-
 micmic-iv: MIMIC-IV数据集
 
-NanjingA: 东南大学附属中大医院的数据集
-
-JiangsuA(采集中):来自江苏省内多家医院的数据集 
+框架本身可以支持多个数据集，且对一个数据集可以产生多个“版本”（version），不同版本的数据集可以有不同的特征数量和处理方法，便于特征筛选和不同数据集的对照设计
 
 ## sepsis3.csv 生成
 
@@ -64,7 +61,7 @@ psql -d mimiciv
 
 \copy (SELECT * FROM mimiciv_derived.sepsis3) TO '~/sepsisinducedards/mimic-iv/cache/sepsis3.csv' WITH CSV HEADER; -- 提取出csv文件
 
-## feature engineering
+## 特征加工
 
 PF_ratio: PaO2/FiO2
 

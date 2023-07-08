@@ -4,16 +4,7 @@ import os
 from tools import logger as logger
 from .container import DataContainer
 from .feature_explore import FeatureExplorer
-from .method_lstm_original import LSTMOriginalAnalyzer
 from .method_nearest_cls import BaselineNearestClsAnalyzer
-from .method_catboost_cls import CatboostAnalyzer
-from .method_random_forest import RandomForestAnalyzer
-from .method_catboost_forest import CatboostForestAnalyzer
-from .method_catboost_dynamic import CatboostDynamicAnalyzer
-from .method_lstm_cascade import LSTMCascadeAnalyzer
-from .method_lstm_cascade_extend import LSTMCascadeExtendAnalyzer
-from .method_logistic_regression import LogisticRegAnalyzer
-from .method_holt_winters import HoltWintersDynamicAnalyzer
 from datasets import MIMICDataset
 
 
@@ -25,17 +16,8 @@ class Analyzer:
         '''
         self.container = DataContainer(dataset)
         self.analyzer_dict = {
-            'LSTM_original':LSTMOriginalAnalyzer,
-            "LSTM_cascade": LSTMCascadeAnalyzer,
-            'LSTM_extend_cascade': LSTMCascadeExtendAnalyzer,
             'nearest_4cls': BaselineNearestClsAnalyzer,
-            'catboost_4cls':CatboostAnalyzer,
-            'random_forest':RandomForestAnalyzer,
-            'catboost_forest':CatboostForestAnalyzer,
-            'catboost_dyn': CatboostDynamicAnalyzer,
             'feature_explore': FeatureExplorer,
-            'logistic_reg': LogisticRegAnalyzer,
-            'holt_winters': HoltWintersDynamicAnalyzer
         }
         if params is not None:
             for name in params:
