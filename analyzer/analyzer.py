@@ -5,11 +5,11 @@ from tools import logger as logger
 from .container import DataContainer
 from .feature_explore import FeatureExplorer
 from .method_nearest_cls import BaselineNearestClsAnalyzer
-from datasets import MIMICDataset
+from datasets import MIMICIVDataset
 
 
 class Analyzer:
-    def __init__(self, params:list, dataset:MIMICDataset) -> None:
+    def __init__(self, params:list, dataset:MIMICIVDataset) -> None:
         '''
         params: 启动脚本, 否则需要手动run_sub_analyzer, 可以是None
         dataset: 数据集

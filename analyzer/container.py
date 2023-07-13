@@ -1,11 +1,11 @@
-from datasets import MIMICDataset
+from datasets import MIMICIVDataset
 import tools
 import os
 
 
 class DataContainer():
     '''存放数据和一些与模型无关的内容'''
-    def __init__(self, dataset:MIMICDataset):
+    def __init__(self, dataset:MIMICIVDataset):
         self.dataset = dataset
         self._conf = tools.GLOBAL_CONF_LOADER['analyzer']['data_container'] # 这部分是global, 对外界不可见
         self.target_name = dataset.target_name # only one name
