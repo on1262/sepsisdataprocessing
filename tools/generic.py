@@ -29,7 +29,7 @@ def reinit_dir(write_dir_path=None, build=True):
 def set_chinese_font():
     logger.info("Set Chinese Font in Matplotlib")
     from matplotlib import pyplot as plt
-    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
+    plt.rcParams['font.family'] = ['Arial Unicode MS']
 
 #  清空文件
 def clear_file(name):
@@ -169,4 +169,4 @@ def find_best(path_dir, prefix='best'):
     assert(0)
     return None
 
-set_chinese_font()
+# set_chinese_font()

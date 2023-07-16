@@ -87,7 +87,7 @@ preprocess version: 生成数据集的不同版本
 
 ## sepsis3.csv 生成
 
-提取的sepsis3表格有**32971**个样本，包含的列有：
+提取的sepsis3表格有**32971**个行，**25596**个患者，包含的列有：
 - subject_id
 - stay_id
 - antibiotic_time
@@ -129,17 +129,23 @@ psql -d mimiciv
 
 ## 特征加工 & 新增特征
 
-PF_ratio: PaO2/FiO2
-
-MAP(平均动脉压): (SBP(收缩压) + 2*DBP(舒张压))/3
-
-shock_index(休克指数): HR(心率) / SBP(收缩压)
-
-PPD(pulse pressure difference,脉压差): SBP - DBP
-
-sepsis time: 相对于起始时刻的sepsis发生时间（小时）
+新增特征：
+- PF_ratio: PaO2/FiO2
+- MAP(平均动脉压): (SBP(收缩压) + 2*DBP(舒张压))/3
+- shock_index(休克指数): HR(心率) / SBP(收缩压)
+- PPD(pulse pressure difference,脉压差): SBP - DBP
+- sepsis time: 相对于起始时刻的sepsis发生时间（小时）
 
 data source: 样本对应的admission的来源位置
 - icu: 样本对应的stay id在ICU stays内
 - ed: 样本对应的transfer id在Emergency Department内
+
+## dataset report & feature explorer
+
+阐明一些特殊概念：
+- config/miss_dict：新增特征计算缺失值时需要指定参与计算的特征，取输入特征缺失情况的交集
+- global miss rate: 不受remove rule version2影响，可以看作所有sepsis患者的缺失情况，以subject为最小单位，覆盖static+dynamic feature
+- hit table：按照remove rule去除不合适的患者后，剩下群体中的特征覆盖率（覆盖率=1-缺失率），以admission为最小单位，并且覆盖dynamic feature+additional feature
+    - 预处理阶段会按照hit table去除覆盖率较小的特征，阈值为`remove_rule/min_cover_rate`
+- miss mat: 去除不合适的患者后，剩余群体中的特征缺失情况分布
 

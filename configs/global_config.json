@@ -1,5 +1,5 @@
 {
-    "work_dir": "~/sepsis_data_processing/data_processing",
+    "work_dir": ".",
     "dataset":{
         "mimic-iv":{
             "miss_dict":{

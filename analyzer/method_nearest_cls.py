@@ -15,7 +15,7 @@ class BaselineNearestClsAnalyzer:
         self.paths = params['paths']
         self.dataset = container.dataset
         self.container= container
-        self.target_idx = self.dataset.target_idx
+        self.target_idx = self.dataset.idx_dict['PF_ratio']
         self.model_name = self.params['analyzer_name']
         # copy params
         self.centers = params['centers']
@@ -30,13 +30,12 @@ class BaselineNearestClsAnalyzer:
         pred = np.zeros((len(self.dataset), self.dataset.data.shape[-1], len(self.centers)))
         for idx, data in tqdm(enumerate(self.dataset), desc='testing', total=len(self.dataset)):
             np_data = data['data']
-            # np_data = np_data + (-10)*(np_data < 150) - 10
             pred[idx, :, :] = tools.label_smoothing(self.centers, np_data[self.target_idx, :], band=50)
         return pred
 
     def run(self):
         if self.dataset.name() == 'mimic-iv':
-            import models.mimic_model as mlib
+            import models as mlib
         # step 1: append additional params
         self.params['in_channels'] = self.dataset.data.shape[1]
         # step 2: init variables

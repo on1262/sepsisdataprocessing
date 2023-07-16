@@ -25,14 +25,18 @@ class FeatureExplorer:
         # random plot sample time series
         if self.params['generate_report']:
             self.dataset.make_report(version_name=dataset_version, params=self.params['report_params'])
-        if self.params['plot_samples']:
-            self.plot_samples(num=50, id_list=["220224", "223835"], id_names=['PaO2', 'FiO2'], out_dir=os.path.join(out_dir, 'samples'))
-        if self.params['plot_time_series']:
-            self.plot_time_series_samples(self.container.target_name, n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "target_plot"))
-            self.plot_time_series_samples("220224", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "pao2_plot"))
-            self.plot_time_series_samples("223835", n_sample=400, n_per_plots=40, write_dir=os.path.join(out_dir, "fio2_plot"))
-        if self.params['correlation']:
-            self.correlation(out_dir)
+        if self.params['plot_samples']['enabled']:
+            n_sample = self.params['plot_samples']['n_sample']
+            id_list = [self.dataset.get_id_and_label(x)[0] for x in self.params['plot_samples']['features']]
+            id_names = [self.dataset.get_id_and_label(x)[1] for x in self.params['plot_samples']['features']]
+            self.plot_samples(num=n_sample, id_list=id_list, id_names=id_names, out_dir=os.path.join(out_dir, 'samples'))
+        if self.params['plot_time_series']['enabled']:
+            n_sample = self.params['plot_time_series']['n_sample']
+            n_per_plots = self.params['plot_time_series']['n_per_plots']
+            for name in self.params['plot_time_series']["names"]:
+                self.plot_time_series_samples(name, n_sample=n_sample, n_per_plots=n_per_plots, write_dir=os.path.join(out_dir, f"time_series_{name}"))
+        if self.params['correlation']['enabled']:
+            self.correlation(out_dir, self.params['correlation']['target'])
         if self.params['miss_mat']:
             self.miss_mat(out_dir)
         if self.params['first_ards_time']:
@@ -64,26 +68,34 @@ class FeatureExplorer:
         tools.plot_single_dist(np.asarray(counts), f"ARDS Count", os.path.join(out_dir, "ards_count.png"), adapt=True)
         logger.info(f"ARDS patients count={ards_count}")
 
-    def correlation(self, out_dir):
+    def correlation(self, out_dir, target_id_or_label):
         # plot correlation matrix
+        if target_id_or_label in self.container.dataset.additional_feas:
+            target_id, target_label = target_id_or_label, target_id_or_label
+        else:
+            target_id, target_label = self.container.dataset.get_id_and_label(target_id_or_label)
+        target_index = self.container.dataset.idx_dict[target_id]
         labels = [self.container.dataset.get_fea_label(id) for id in self.container.dataset.total_keys]
-        corr_mat = tools.plot_correlation_matrix(self.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation _matrix'))
+        corr_mat = tools.plot_correlation_matrix(self.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation_matrix'))
         correlations = []
         for idx in range(corr_mat.shape[1]):
-            correlations.append([corr_mat[-1, idx], labels[idx]]) # list[(correlation coeff, label)]
+            correlations.append([corr_mat[target_index, idx], labels[idx]]) # list[(correlation coeff, label)]
         correlations = sorted(correlations, key=lambda x:np.abs(x[0]), reverse=True)
         with open(os.path.join(out_dir, 'correlation.txt'), 'w') as fp:
+            fp.write(f"Target feature: {target_label}")
             for idx in range(corr_mat.shape[1]):
                 fp.write(f'Correlation with target: {correlations[idx][0]} \t{correlations[idx][1]}\n')
         
     def miss_mat(self, out_dir):
         '''计算行列缺失分布并输出'''
-        na_table = np.zeros((len(self.dataset.subjects), len(self.dataset.dynamic_keys)), dtype=bool)
+        na_table = np.ones((len(self.dataset.subjects), len(self.dataset.dynamic_keys)), dtype=bool)
         for r_id, s_id in enumerate(self.dataset.subjects):
-            adm_key = set(self.dataset.subjects[s_id].admissions[0].keys())
-            for c_id, key in enumerate(self.dataset.dynamic_keys):
-                if key in adm_key:
-                    na_table[r_id, c_id] = True
+            for adm in self.dataset.subjects[s_id].admissions:
+                # TODO 替换dynamic keys到total keys
+                adm_key = set(adm.keys())
+                for c_id, key in enumerate(self.dataset.dynamic_keys):
+                    if key in adm_key:
+                        na_table[r_id, c_id] = False
         # 行缺失
         row_nas = na_table.mean(axis=1)
         col_nas = na_table.mean(axis=0)
@@ -106,10 +118,11 @@ class FeatureExplorer:
         key_list = list(count_hist.keys())
         key_list = sorted(key_list, key=lambda x:count_hist[x]['count'])
         key_list = key_list[-40:] # 最多80, 否则vital_sig可能不准
-        for key in key_list:
-            interval = count_hist[key]['interval']
-            logger.info(f'\"{key}\", {self.dataset.get_fea_label(key)} interval={interval:.1f}')
-        vital_sig = {"220045", "220210", "220277", "220181", "220179", "220180", "223761", "223762", "224685", "224684", "224686", "228640",    "224417"}
+        with open(os.path.join(out_dir, 'interval.txt'), 'w') as fp:
+            for key in key_list:
+                interval = count_hist[key]['interval']
+                fp.write(f'\"{key}\", {self.dataset.get_fea_label(key)} mean interval={interval:.1f}')
+        vital_sig = {"220045", "220210", "220277", "220181", "220179", "220180", "223761", "223762", "224685", "224684", "224686", "228640", "224417"}
         med_ind = {key for key in key_list} - vital_sig
         for name in ['vital_sig', 'med_ind']:
             subset = vital_sig if name == 'vital_sig' else med_ind

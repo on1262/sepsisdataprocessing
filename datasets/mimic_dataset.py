@@ -8,6 +8,7 @@ from tools import GLOBAL_CONF_LOADER
 from tools import logger
 from tqdm import tqdm
 from sklearn.model_selection import KFold
+import math
 
 
 class Admission:
@@ -17,12 +18,11 @@ class Admission:
     admittime: 起始时间
     dischtime: 结束时间
     '''
-    def __init__(self, hadm_id:int, admittime:float, dischtime:float, label=['ed', 'icu'], stay_id:int=None, transfer_id:int=None) -> None:
+    def __init__(self, unique_id:int, admittime:float, dischtime:float, label=['ed', 'icu']) -> None:
         self.dynamic_data = {} # dict(fea_name:ndarray(value, time))
         assert(admittime < dischtime)
         self.label = label # ed or icu
-        append_id = stay_id if label == 'icu' else transfer_id
-        self.unique_id = hadm_id*1e8 + append_id # hadm_id+stay_id or hadm_id+transfer_id, 16 digits
+        self.unique_id = unique_id # hadm_id+stay_id or hadm_id+transfer_id, 16 digits
         self.admittime = admittime
         self.dischtime = dischtime
         self.data_updated = False
@@ -36,12 +36,13 @@ class Admission:
 
     def update_data(self):
         '''绝对时间变为相对时间，更改动态特征的格式'''
-        self.data_updated = True
-        for key in self.dynamic_data:
-            if isinstance(self.dynamic_data[key], list):
-                arr = np.asarray(sorted(self.dynamic_data[key], key=lambda x:x[1]))
-                arr[:, 1] -= self.admittime
-                self.dynamic_data[key] = arr
+        if not self.data_updated:
+            self.data_updated = True
+            for key in self.dynamic_data:
+                if isinstance(self.dynamic_data[key], list):
+                    arr = np.asarray(sorted(self.dynamic_data[key], key=lambda x:x[1]))
+                    arr[:, 1] -= self.admittime
+                    self.dynamic_data[key] = arr
     
     def duration(self):
         return max(0, self.dischtime - self.admittime)
@@ -49,7 +50,7 @@ class Admission:
     def empty(self):
         return True if len(self.dynamic_data) == 0 else False
 
-    def __getitem__(self, idx): # TODO error 220074
+    def __getitem__(self, idx):
         return self.dynamic_data[idx]
 
     def keys(self):
@@ -138,7 +139,8 @@ class MIMICIV:
         # configs
         self.loc_conf = tools.Config(cache_path=self.gbl_conf['paths']['conf_cache_path'], manual_path=self.gbl_conf['paths']['conf_manual_path'])
         self.procedure_flag = 'init' # 控制标志, 进行不同阶段的cache和dump
-        self.time_convertor = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
+        self.ymdhms_convertor = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
+        self.ymd_convertor = tools.TimeConverter(format="%Y-%m-%d", out_unit='hour')
         self.align_key_ids = self.loc_conf['dataset']['alignment_key_id']
         # self.report_ids = self.loc_conf['dataset']['make_report']
 
@@ -151,8 +153,8 @@ class MIMICIV:
 
         self.preprocess()
         # post process
-        self.miss_rate = self._global_miss_rate()
-        self.remove_invalid_data(rules=self.loc_conf['dataset']['remove_rule'])
+        self.global_missrate = self._global_miss_rate()
+        self.remove_invalid_data(rule=self.loc_conf['dataset']['remove_rule']['version2'])
         logger.info('MIMICIV inited')
 
     def preprocess(self, from_pkl=True):
@@ -225,22 +227,23 @@ class MIMICIV:
                 由于起始点设为max(sepsis, t_start), 所以sepsis_time只会是负数或者0
                 当sepsis_time<0的时候, 表明sepsis发生得早, 对于一些模型, sepsis time不能太小, 可以用来筛选数据
                 '''
-                for element in self.sepsis_result[s_id]:
-                    sepsis_time, stay_id, sofa_score, respiration, liver, cardiovascular, cns, renal = element
+                for ele_dict in self.sepsis_result[s_id]: # dict(list(dict))
+                    sepsis_time = ele_dict['sepsis_time']
+
                     self.subjects[s_id] = Subject(row['subject_id'], anchor_year=row['anchor_year'])
                     # self.subjects[s_id].append_static(sepsis_time, 'age', row['anchor_age']) 每次入院的年龄是有可能变化的
                     self.subjects[s_id].append_static(sepsis_time, 'gender', row['gender'])
 
-                    if row['dod'] is not None:
-                        self.subjects[s_id].append_static(sepsis_time, 'dod', self.time_convertor(row['dod']))
+                    if row['dod'] is not None and isinstance(row['dod'], str):
+                        self.subjects[s_id].append_static(sepsis_time, 'dod', self.ymd_convertor(row['dod']))
 
                     self.subjects[s_id].append_static(sepsis_time, 'sepsis_time', sepsis_time)
-                    self.subjects[s_id].append_static(sepsis_time, 'sofa_score', sofa_score)
-                    self.subjects[s_id].append_static(sepsis_time, 'respiration', respiration)
-                    self.subjects[s_id].append_static(sepsis_time, 'liver', liver)
-                    self.subjects[s_id].append_static(sepsis_time, 'cardiovascular', cardiovascular)
-                    self.subjects[s_id].append_static(sepsis_time, 'cns', cns)
-                    self.subjects[s_id].append_static(sepsis_time, 'renal', renal)
+                    self.subjects[s_id].append_static(sepsis_time, 'sofa_score', ele_dict['sofa_score'])
+                    self.subjects[s_id].append_static(sepsis_time, 'respiration', ele_dict['respiration'])
+                    self.subjects[s_id].append_static(sepsis_time, 'liver', ele_dict['liver'])
+                    self.subjects[s_id].append_static(sepsis_time, 'cardiovascular', ele_dict['cardiovascular'])
+                    self.subjects[s_id].append_static(sepsis_time, 'cns', ele_dict['cns'])
+                    self.subjects[s_id].append_static(sepsis_time, 'renal', ele_dict['renal'])
         # 更新sepsis_result, 去除不存在的s_id
         logger.info(f'Extract {len(self.subjects)} from {len(self.sepsis_result)} patients in sepsis3 results')
         self.sepsis_result = {key:self.sepsis_result[key] for key in self.subjects.keys()}
@@ -248,40 +251,44 @@ class MIMICIV:
         table_icustays = pd.read_csv(os.path.join(self.mimic_dir, 'icu', 'icustays.csv'), encoding='utf-8')
         for _,row in tqdm(table_icustays.iterrows(), desc='extract admission from ICU', total=len(table_icustays)):
             s_id = int(row['subject_id'])
+            if s_id not in self.subjects:
+                continue
             adm = Admission(
-                hadm_id=int(row['hadm_id']),
-                admittime=self.time_convertor(row['intime']), 
-                dischtime=self.time_convertor(row['outtime']),
+                unique_id=int(row['hadm_id']*1e8+row['stay_id']),
+                admittime=self.ymdhms_convertor(row['intime']), 
+                dischtime=self.ymdhms_convertor(row['outtime']),
                 label='icu',
-                stay_id=int(row['stay_id'])
             )
-            self.subjects[s_id].append(adm)
+            self.subjects[s_id].append_admission(adm)
         del table_icustays
         # 从transfer中抽取Emergency Department的transfer
-        table_transfer = pd.read_csv(os.path.join(self.mimic_dir, 'icu', 'icustays.csv'), encoding='utf-8')
+        table_transfer = pd.read_csv(os.path.join(self.mimic_dir, 'hosp', 'transfers.csv'), encoding='utf-8')
         for _,row in tqdm(table_transfer.iterrows(), desc='extract admission from ED', total=len(table_transfer)):
             s_id = int(row['subject_id'])
-            if row['careunit'] != 'Emergency Department':
+            if row['careunit'] != 'Emergency Department' or s_id not in self.subjects:
                 continue
             else:
+                if not np.isnan(row['hadm_id']):
+                    unique_id = int(row['hadm_id']*1e8+row['transfer_id'])
+                else:
+                    unique_id = int(row['transfer_id']*1e8+row['transfer_id']) # transfer中某些情况没有分配admission
                 adm = Admission(
-                    hadm_id=int(row['hadm_id']),
-                    admittime=self.time_convertor(row['intime']), 
-                    dischtime=self.time_convertor(row['outtime']),
+                    unique_id=unique_id,
+                    admittime=self.ymdhms_convertor(row['intime']), 
+                    dischtime=self.ymdhms_convertor(row['outtime']),
                     label='ed',
-                    transfer_id=int(row['transfer_id'])
                 )
-                self.subjects[s_id].append(adm)
+                self.subjects[s_id].append_admission(adm)
         # 若要补充admission表中的有效信息，如insurance、race，从这里插入
 
         # 患者的基本信息，如身高、体重、血压
         omr = pd.read_csv(os.path.join(self.mimic_dir, 'hosp', 'omr.csv'), encoding='utf-8') # [subject_id,chartdate,seq_num,result_name,result_value]
-        ymd_convertor = tools.TimeConverter(format="%Y-%m-%d", out_unit='hour')
         omr = omr.to_numpy()
-        for idx in range(omr.shape[0]):
+        for idx in tqdm(range(omr.shape[0]), 'extract omr'):
             s_id = omr[idx, 0]
-            if s_id in self.subjects and int(omr[idx, 2]) == 1:
-                self.subjects[s_id].append_static(ymd_convertor(omr[idx, 1]), omr[idx, 3], omr[idx, 4])
+            # TODO 是否需要seq num>1的数据？
+            if s_id in self.subjects and int(omr[idx, 2]) == 1: # sequence num=1, fist element only
+                self.subjects[s_id].append_static(self.ymd_convertor(omr[idx, 1]), omr[idx, 3], omr[idx, 4])
         # dump
         with open(pkl_path, 'wb') as fp:
             pickle.dump((self.subjects, self.sepsis_result), fp)
@@ -299,8 +306,8 @@ class MIMICIV:
         logger.info(f'MIMIC-IV: processing dynamic data, flag={self.procedure_flag}')
 
         collect_id_set = set() # 只有数值型的特征是需要捕捉的
-        for id in self.icu_item['id']:
-            if self.icu_item['id']['category'] in ['Numeric', 'Numeric with tag'] and self.icu_item['id'][id]['type'] != 'Alarms':
+        for id, data in self.icu_item['id'].items():
+            if data['type'] in ['Numeric', 'Numeric with tag'] and data['category'] != 'Alarms':
                 collect_id_set.add(id)
         # 采集icu内的动态数据
         out_cache_dir = os.path.join(self.gbl_conf['paths']['cache_dir'], 'icu_events')
@@ -315,13 +322,13 @@ class MIMICIV:
             for idx in range(len(icu_events)):
                 s_id, itemid = icu_events[idx, 0], str(icu_events[idx, 1])
                 if s_id in self.subjects and itemid in collect_id_set:
-                    self.subjects[s_id].append_dynamic(charttime=self.time_convertor(icu_events[idx, 2]), itemid=itemid, value=icu_events[idx, 3])
+                    self.subjects[s_id].append_dynamic(charttime=self.ymdhms_convertor(icu_events[idx, 2]), itemid=itemid, value=icu_events[idx, 3])
             p_bar.update(1)
         # 整理admissions的格式
         for s_id in tqdm(self.subjects, desc='update data'):
             self.subjects[s_id].update_data()
         # 删去空的subject和空的admission
-        self.remove_invalid_data(rules=self.loc_conf['dataset']['remove_rule']['version1'])
+        self.remove_invalid_data(rule=self.loc_conf['dataset']['remove_rule']['version1'])
         # 保存subjects
         logger.info('Dump subjects')
         with open(pkl_path, 'wb') as fp:
@@ -346,16 +353,16 @@ class MIMICIV:
                     else:
                         miss_dict[key] += 1
                 count += 1
-                adm = s.admissions[0]
-                for key in adm.keys():
-                    if key not in miss_dict:
-                        miss_dict[key] = 1
-                    else:
-                        miss_dict[key] += 1
+                for adm in s.admissions:
+                    for key in adm.keys():
+                        if key not in miss_dict:
+                            miss_dict[key] = 1
+                        else:
+                            miss_dict[key] += 1
         miss_dict = {key:1-val/count for key, val in miss_dict.items()}
         return miss_dict
 
-    def remove_invalid_data(self, rule):
+    def remove_invalid_data(self, rule:dict):
         '''按照传入的配置去除无效特征'''
         for s_id in self.subjects:
             if not self.subjects[s_id].empty():
@@ -367,26 +374,27 @@ class MIMICIV:
                         for target_id in rule['target_id']:
                             if target_id not in adm.keys():
                                 flag = 0
+                        if flag == 0:
+                            continue
                         start_time, end_time = None, None
                         for id in rule['target_id']:
                             start_time = max(adm[id][0,1], start_time) if start_time is not None else adm[id][0,1]
                             end_time = min(adm[id][-1,1], end_time) if end_time is not None else adm[id][-1,1]
                         dur = end_time - start_time
                         if dur <= 0:
-                            flag = 0
-                        if 'duration_minmax' in rule and flag > 0:
+                            continue
+                        if 'duration_minmax' in rule:
                             dur_min, dur_max = rule['duration_minmax']
                             if not (dur > dur_min and dur < dur_max):
-                                flag = 0
-                        if 'check_sepsis_time' in rule and flag > 0:
+                                continue
+                        if 'check_sepsis_time' in rule:
                             # 检查sepsis time, 必须要有一个sepsis time和这次admission对应上
                             st_min, st_max = rule['check_sepsis_time']
                             sepsis_time = self.subjects[s_id].nearest_static('sepsis_time', adm.admittime+start_time)[0][0]
                             if not (st_min < adm.admittime+start_time-sepsis_time < st_max):
-                                flag = 0
+                                continue
                     
-                    if flag != 0:
-                        retain_adms.append(idx)
+                    retain_adms.append(idx)
                 self.subjects[s_id].admissions = [self.subjects[s_id].admissions[idx] for idx in retain_adms]
         if 'remove_empty' in rule: # 删除空的admission和subjects
             pop_list = []
@@ -397,6 +405,8 @@ class MIMICIV:
                     self.subjects[s_id].del_empty_admission()
             for s_id in pop_list:
                 self.subjects.pop(s_id)
+        else:
+            pop_list = []
         logger.info(f'del_invalid_subjects: Deleted {len(pop_list)}/{len(pop_list)+len(self.subjects)} subjects')
 
 
@@ -418,12 +428,11 @@ class MIMICIVDataset(Dataset):
         self.subjects = self.mimiciv.subjects
         self.gbl_conf = self.mimiciv.gbl_conf
         self.loc_conf = self.mimiciv.loc_conf
-        self.target_name = self.loc_conf['dataset']['target_label']
-        self._additional_feas = [self.get_id_and_label(id_or_label)[0] for id_or_label in self.loc_conf['dataset']['additional_features']] # convert to id
+        self.additional_feas = self.loc_conf['dataset']['additional_features']
         # hit table
         self._hit_table = None
         # miss_table
-        self._miss_table = None
+        self._global_misstable = None
         # preload data
         self.data_table = None # to derive other versions
         self.data = None # ndarray(samples, n_fea, ticks)
@@ -433,7 +442,6 @@ class MIMICIVDataset(Dataset):
         self.total_keys = None
         self.seqs_len = None # list(available_len)
         self.idx_dict = None
-        self.target_idx = None
         # mode switch
         self.now_mode = None # 'train'/'valid'/'test'/'all'
         self.kf_list = None # list([train_index, valid_index, test_index])
@@ -452,20 +460,20 @@ class MIMICIVDataset(Dataset):
 
     def _update_miss_table(self):
         '''
-        将特征工程构造的特征与原始特征联系, 得到缺失情况
+        将特征工程构造的特征与原始特征联系, 得到缺失情况. 该方法对整个数据集有效，不受样本筛选的影响
         NOTE 从subject计算得到的缺失值并不包括新增特征
         '''
         construct_dict = GLOBAL_CONF_LOADER["dataset"]['mimic-iv']['miss_dict']
-        miss_dict = self.mimiciv.miss_rate
-        for fea_id, idx in self.idx_dict.items():
+        miss_dict = self.mimiciv.global_missrate
+        for fea_id, _ in self.idx_dict.items():
             if fea_id not in miss_dict.keys() and fea_id in construct_dict.keys():
                 miss_dict[fea_id] = np.max([miss_dict[f] for f in construct_dict[fea_id]])
         result = [(idx, miss_dict[id]) for id, idx in self.idx_dict.items()]
         result = sorted(result, key=lambda x:x[0])
-        self._miss_table = np.asarray([r[1] for r in result])
+        self._global_misstable = np.asarray([r[1] for r in result])
 
-    def miss_table(self):
-        return self._miss_table
+    def global_misstable(self):
+        return self._global_misstable
 
     def get_fea_label(self, key_or_idx):
         '''输入key/idx得到关于特征的简短描述, 从icu_item中提取'''
@@ -473,27 +481,37 @@ class MIMICIVDataset(Dataset):
             name = self.total_keys[key_or_idx]
         else:
             name = key_or_idx
-        if self.icu_item['label'].get(name) is not None:
-            return self.icu_item['label'][name]['label']
-        elif self.icu_item['id'].get(name) is not None:
-            return self.icu_item['id'][name]['label']
+        if self.mimiciv.icu_item['label'].get(name) is not None:
+            return self.mimiciv.icu_item['label'][name]['label']
+        elif self.mimiciv.icu_item['id'].get(name) is not None:
+            return self.mimiciv.icu_item['id'][name]['label']
         else:
             logger.warning(f'No fea label for {name}, return name')
             return name
 
     def label2id(self, label):
-        return self.icu_item['label'][label]['id']
+        result = self.mimiciv.icu_item['label'].get(label)
+        if result is not None:
+            return result['id']
+        else:
+            logger.warning(f"label is not in icu item: {label}")
+            return None
     
     def id2label(self, id):
-        return self.icu_item['id'][id]['label']
+        result = self.mimiciv.icu_item['id'].get(id)
+        if result is not None:
+            return result['label']
+        else:
+            logger.warning(f"id is not in icu item: {id}")
+            return None
     
     def get_id_and_label(self, id_or_label:str):
-        if id_or_label in self.icu_item['id']:
+        if id_or_label in self.mimiciv.icu_item['id']:
             return id_or_label, self.id2label(id_or_label)
-        elif id_or_label in self.icu_item['label']:
+        elif id_or_label in self.mimiciv.icu_item['label']:
             return self.label2id(id_or_label), id_or_label
         else:
-            return None
+            return None, None
             
     # def register_split(self, train_index, valid_index, test_index):
     #     self.train_index = train_index
@@ -532,7 +550,7 @@ class MIMICIVDataset(Dataset):
             assert(mask.shape == data.shape)
             return (data * norm['std'] + norm['mean']) * (mask > 0) + data * (mask <= 0)
 
-    def _available_dyn_id(self, min_cover_rate=0.5) -> list:
+    def _available_dyn_id(self, min_cover_rate) -> list:
         '''
         根据hit table生成符合最小覆盖率的动态特征id
         return: list(id)
@@ -549,8 +567,8 @@ class MIMICIVDataset(Dataset):
         p_norm_dict = os.path.join(self.gbl_conf['paths']['cache_dir'], '5_norm_dict.pkl')
         # preprocessing
         self.static_feas = set()
-        self.target_label = self.loc_conf['dataset']['target_label']
-        self.dynamic_ids = self._available_dyn_id()
+        # 这一步按照hit table对特征进行筛选
+        self.dynamic_ids = self._available_dyn_id(min_cover_rate=self.loc_conf['dataset']['remove_rule']['min_cover_rate'])
         logger.info(f'Detected {len(self.dynamic_ids)} available dynamic features')
 
         # 将所有记录变成数值型
@@ -584,8 +602,7 @@ class MIMICIVDataset(Dataset):
         self.preprocess_table(from_pkl=from_pkl)
 
         # 不同版本的数据集需要进行不同的初始化
-        self.static_feas, self.dynamic_ids = None, None # not use these attributes
-        self.target_idx = self.data_table.shape[1] - 1
+        self.static_feas, self.dynamic_ids = None, None
         self.icu_item = self.mimiciv.icu_item
         self.idx_dict = dict( # idx_dict: fea_key->idx
             {str(key):val for val, key in enumerate(self.static_keys)}, \
@@ -631,8 +648,8 @@ class MIMICIVDataset(Dataset):
                             logger.warning(f'Invalid value {v} for {key}')
                     s.static_data[key] = np.asarray(s.static_data[key])[valid_idx, :]
             
-            # 进行特征的上下界约束
-            value_clip = self.loc_conf['dataset']['value_clip']
+        # 进行特征的上下界约束
+        value_clip = self.loc_conf['dataset']['value_clip']
 
             
         for id_or_label in value_clip:
@@ -687,7 +704,6 @@ class MIMICIVDataset(Dataset):
         origin_table:  list(ndarray(n_fea, lens)) 其中lens不对齐, 缺失值为-1
         '''
         p_origin_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '6_table_origin.pkl')
-        # p_normed_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '7_table_norm.pkl')
         p_final_table = os.path.join(self.gbl_conf['paths']['cache_dir'], '7_table_final.pkl')
 
         # step1: 插值并生成表格
@@ -699,19 +715,13 @@ class MIMICIVDataset(Dataset):
             data_table = []
             align_ids = [self.get_id_and_label(id_or_label)[0] for id_or_label in self.loc_conf['dataset']['alignment_key_id']] # 用来确认对齐的基准时间
             static_keys = list(self.static_feas)
-            dynamic_keys = self.dynamic_ids + self._additional_feas
-            # 基准id和对应的index
-            index_dict = {}
-            for id_or_label in align_ids:
-                id, label = self.get_id_and_label(id_or_label)
-                if id in static_keys:
-                    index_dict[id] = static_keys.index(id)
-                elif id in dynamic_keys:
-                    index_dict[id] = dynamic_keys.index(id) + len(static_keys)
-                else:
-                    assert(0)
+            dynamic_keys = self.dynamic_ids + self.additional_feas
+            # 添加所需feature对应的id
+            index_dict = dict( # idx_dict: fea_key->idx
+            {str(key):val for val, key in enumerate(static_keys)}, \
+                **{str(key):val+len(static_keys) for val, key in enumerate(dynamic_keys)})
             
-            additional_vals = {key:[] for key in self._additional_feas} # 记录特征工程生成的特征, 用于更新norm_dict
+            additional_vals = {key:[] for key in self.additional_feas} # 记录特征工程生成的特征, 用于更新norm_dict
             for s_id in tqdm(self.subjects.keys(), desc='Generate aligned table'):
                 for adm in self.subjects[s_id].admissions:
                     # skip bad admission
@@ -724,22 +734,20 @@ class MIMICIVDataset(Dataset):
                     if skip_flag:
                         continue
                     
-                    t_start, t_end = adm.admittime, adm.dischtime
-                    sepsis_time = self.subjects[s_id].nearest_static('sepsis_time', adm.admittime) - adm.admittime
-                    if sepsis_time >= (t_end-self.loc_conf['dataset']['remove_rule']['min_duration']):
-                        logger.warning('Invalid admission: no matching sepsis time')
-                        continue
-                    else:
-                        t_start = max(sepsis_time, t_start)
+                    t_start, t_end = None, None
+                    for id in self.loc_conf['dataset']['alignment_key_id']:
+                        t_start = max(adm[id][0,1], t_start) if t_start is not None else adm[id][0,1]
+                        t_end = min(adm[id][-1,1], t_end) if t_end is not None else adm[id][-1,1]
+                    # sepsis_time = self.subjects[s_id].nearest_static('sepsis_time', adm.admittime) - t_start
                     ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
                     # 生成表本身, 缺失值为-1
                     table = -np.ones((len(static_keys) + len(dynamic_keys), ticks.shape[0]), dtype=np.float32)
                     # 填充static data, 找最近的点
                     static_data = np.zeros((len(static_keys)))
                     for idx, key in enumerate(static_keys):
-                        static_data[idx] = self.subjects[s_id].nearest_static(key, adm[align_ids][0, 1] + adm.admittime)
-                        if key == 'sepsis_time': # sepsis time 基准变为表格的起始点
-                            static_data[idx] = static_data[idx] - adm.admittime - t_start
+                        static_data[idx] = self.subjects[s_id].nearest_static(key, adm.admittime)
+                        if key == 'sepsis_time' or key == 'dod': # sepsis time 基准变为表格的起始点
+                            static_data[idx] = static_data[idx] - t_start
                     table[:len(static_keys), :] = static_data[:, None]
                     # 插值dynamic data
                     for idx, key in enumerate(dynamic_keys[:-1]):
@@ -747,8 +755,8 @@ class MIMICIVDataset(Dataset):
                             continue
                         table[static_data.shape[0]+idx, :] = np.interp(x=ticks, xp=adm[key][:, 1], fp=adm[key][:, 0])
                     
-                    self._feature_engineering(table, index_dict, self._additional_feas, adm.label) # 特征工程
-                    for idx, key in enumerate(reversed(self._additional_feas)): # 记录附加信息
+                    self._feature_engineering(table, index_dict, self.additional_feas, adm.label) # 特征工程
+                    for idx, key in enumerate(reversed(self.additional_feas)): # 记录附加信息
                         additional_vals[key].append(table[-(idx+1), :])
                     data_table.append(table)
             # 计算特征工程新增特征的norm_dict
@@ -803,7 +811,6 @@ class MIMICIVDataset(Dataset):
         self.data = version_dict['data']
         self.idx_dict = version_dict['idx_dict']
         self.kf_list = version_dict['kf']
-        self.target_idx = self.idx_dict[self.target_name]
         self._update_miss_table()
 
     def proprocess_version(self):
@@ -835,11 +842,18 @@ class MIMICIVDataset(Dataset):
                 version_table = np.concatenate(data_source_parts, axis=0) if len(data_source_parts) > 1 else data_source_parts[0]
             # 筛选可用特征
             if len(version_conf[version_name]['feature_limit']) > 0:
-                limit_idx = [self.idx_dict[key] for key in version_conf[version_name]['feature_limit']]
+                limit_idx = []
+                for lfea in version_conf[version_name]['feature_limit']:
+                    if lfea in self.idx_dict:
+                        limit_idx.append(self.idx_dict[lfea])
             else:
                 limit_idx = list(self.idx_dict.values())
             avail_idx = []
-            forbidden_idx = set([self.idx_dict[key] for key in version_conf[version_name]['forbidden_feas']])
+            forbidden_idx = set()
+            for ffea in version_conf[version_name]['forbidden_feas']:
+                if ffea in self.idx_dict:
+                    forbidden_idx.add(self.idx_dict[ffea])
+            
             for idx in limit_idx:
                 if idx not in forbidden_idx:
                     avail_idx.append(idx)
@@ -858,7 +872,7 @@ class MIMICIVDataset(Dataset):
                 avail_keys[idx] = key
                 if idx in avail_idx:
                     derived_idx_dict[key] = idx_converter[idx]
-            assert(derived_idx_dict['PF_ratio'] == len(avail_idx)-1)
+            
             avail_keys = [avail_keys[idx] for idx in avail_idx]
             derived_static_keys = avail_keys[:np.sum(np.asarray(avail_idx) < len(self.static_keys))]
             derived_dynamic_keys = avail_keys[np.sum(np.asarray(avail_idx) < len(self.static_keys)):]
@@ -908,17 +922,17 @@ class MIMICIVDataset(Dataset):
         for idx, name in enumerate(reversed(addi_feas)):
             t_idx = -(idx+1)
             if name == 'PF_ratio':
-                table[t_idx, :] = np.clip(table[index_dict['pao2'], :] / table[index_dict['fio2'], :], 0, 500)
+                table[t_idx, :] = np.clip(table[index_dict['220224'], :] / (table[index_dict['223835'], :]*0.01), 0, 500)
             elif name == 'shock_index':
-                if np.all(table[index_dict['sbp'], :] > 0):
-                    table[t_idx, :] = table[index_dict['hr'], :] / table[index_dict['sbp'], :]
+                if np.all(table[index_dict['systolic pressure'], :] > 0):
+                    table[t_idx, :] = table[index_dict['220045'], :] / table[index_dict['systolic pressure'], :]
                 else:
                     table[t_idx, :] = 0
                     logger.warning('feature_engineering: skip shock_index with zero sbp')
             elif name == 'MAP':
-                table[t_idx, :] = (table[index_dict['sbp'], :] + 2*table[index_dict['dbp'], :]) / 3
+                table[t_idx, :] = (table[index_dict['systolic pressure'], :] + 2*table[index_dict['diastolic pressure'], :]) / 3
             elif name == 'PPD':
-                table[t_idx, :] = table[index_dict['sbp'], :] - table[index_dict['dbp'], :]
+                table[t_idx, :] = table[index_dict['systolic pressure'], :] - table[index_dict['diastolic pressure'], :]
             elif name == 'data_source':
                 table[t_idx, :] = 1 if data_source == 'icu' else 2
             else:
@@ -927,13 +941,13 @@ class MIMICIVDataset(Dataset):
 
     def hit_table(self):
         '''
-        生成特征在subject粒度的覆盖率
+        生成特征在admission粒度的覆盖率
         return: dict(key=feature_id, val=cover_rate)
         '''
         if self._hit_table is None:
             hit_table = {}
-            adm_count = np.sum([len(s.admissions) for s in self.subjects.values()])
-            for sub in self.subjects.values():
+            adm_count = np.sum([len(s.admissions) for s in self.mimiciv.subjects.values()])
+            for sub in self.mimiciv.subjects.values():
                 for adm in sub.admissions:
                     for id in adm.keys():
                         if hit_table.get(id) is None:
@@ -980,17 +994,17 @@ class MIMICIVDataset(Dataset):
                     for adm in s.admissions:
                         if id in adm.keys():
                             dur = adm[id][-1,1] - adm[id][0,1]
-                            if dur < 0.1:
-                                continue
+                            
                             sepsis_time = s.nearest_static('sepsis_time', adm[id][0, 1])
                             t_sep = adm[id][0, 1] + adm.admittime - sepsis_time
-                            if np.abs(t_sep) < 72:
-                                arr_from_sepsis_time.append(t_sep)
+                            arr_from_sepsis_time.append(t_sep)
                             arr_points.append(adm[id].shape[0])
                             arr_duration.append(dur)
-                            arr_frequency.append(arr_points[-1] / arr_duration[-1])
+                            if dur > 1e-3: # TODO 只有一个点无法计算
+                                arr_frequency.append(arr_points[-1] / arr_duration[-1])
+                            else:
+                                arr_frequency.append(0)
                             arr_avg_value.append(adm[id][:,0].mean())
-                            assert(arr_duration[-1] > 0)
                 arr_points, arr_duration, arr_frequency, arr_avg_value = np.asarray(arr_points), np.asarray(arr_duration), np.asarray   (arr_frequency), np.asarray(arr_avg_value)
                 arr_from_sepsis_time = np.asarray(arr_from_sepsis_time)
                 if np.size(arr_points) != 0:
@@ -1024,21 +1038,21 @@ class MIMICIVDataset(Dataset):
                 tools.plot_single_dist(
                     data=static_data, data_name=f'{fea_name}', 
                     save_path=os.path.join(dist_dir, 'static_value', save_name + '.png'), discrete=False, adapt=True)
-        if params['hit_table']:
+        if params['hit_table']['enabled']:
             # write hit table
             hit_table = self.hit_table()
             key_list = sorted(hit_table.keys(), key= lambda key:hit_table[key], reverse=True)
-            write_lines.append('='*10 + 'Feature hit table(>0.5)' + '='*10)
+            write_lines.append('\n='*10 + 'Feature hit table' + '='*10)
             for key in key_list:
-                fea_name = self.icu_item[key][0]
+                fea_name = self.get_fea_label(key)
                 value = hit_table[key]
-                if value < 0.5:
+                if value < params['hit_table']['min_thres']:
                     continue
                 write_lines.append(f"{value:.2f}\t({key}){fea_name} ")
-        if params['miss_rate']:
+        if params['global_missrate']:
             # write global miss rate
-            write_lines.append('='*10 + 'Global miss rate' + '='*10)
-            gbl_msr = self.miss_table()
+            write_lines.append('\n='*10 + 'Global miss rate' + '='*10)
+            gbl_msr = self.global_misstable()
             for idx, key in enumerate(self.total_keys):
                 write_lines.append(f'{gbl_msr[idx]:.3f} \t ({key}){self.get_fea_label(key)}')
         # write report
@@ -1119,7 +1133,7 @@ def load_sepsis_patients(csv_path:str) -> dict:
     df = pd.read_csv(csv_path, encoding='utf-8')
     df['sepsis_time'] = df.apply(extract_time, axis=1)
     df.apply(build_dict, axis=1)
-    logger.info(f'Load {len(sepsis_dict.keys())} sepsis patients based on sepsis3.csv')
+    logger.info(f'Load {len(sepsis_dict.keys())} sepsis subjects based on sepsis3.csv')
     return sepsis_dict
 
 if __name__ == '__main__':

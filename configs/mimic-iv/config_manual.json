@@ -1,11 +1,12 @@
 {
     "dataset":{
         "remove_rule":{
+            "min_cover_rate": 0.5,
             "version1": {
-                "remove_empty": true,
-                "target_id": ["220224", "223835"]
+                "remove_empty": true
             },
             "version2":{
+                "remove_empty": true,
                 "target_id": ["220224", "223835"],
                 "duration_minmax": [2, 96],
                 "check_sepsis_time": [-10, 30],
@@ -17,11 +18,6 @@
         "additional_features":["data_source", "PPD", "MAP", "shock_index", "PF_ratio"],
         "#high_correlation:": ["Height (Inches)", "225677", "220545", "226730", "226531", "Weight (Lbs)", "227467", "220339", "227443", "220587"],
         "version":{
-            "full":{
-                "data_source": ["ed", "icu"],
-                "feature_limit": [],
-                "forbidden_feas":["Height (Inches)", "225677", "220545", "226730", "sepsis_time", "226531", "Weight (Lbs)", "227467", "220339", "227443", "220587"]
-            },
             "icu_version":{
                 "data_source": ["icu"],
                 "fill_missvalue":"avg",
@@ -36,24 +32,39 @@
     },
     "model":{
         "feature_explore":{
-            "dataset_version":"full",
-            "plot_samples":false,
-            "plot_time_series":false,
-            "correlation":true,
+            "dataset_version":"icu_version",
+            "plot_samples":{
+                "enabled": true,
+                "n_sample": 50,
+                "features": ["Arterial O2 pressure", "Inspired O2 Fraction"]
+            },
+            "plot_time_series":{
+                "enabled": true,
+                "names": ["PF_ratio"],
+                "n_sample": 400,
+                "n_per_plots": 40
+            },
+            "correlation":{
+                "enabled":true,
+                "target": "PF_ratio"
+            },
             "miss_mat":true,
-            "first_ards_time":false,
+            "first_ards_time":true,
             "feature_count":true,
             "generate_report":true,
             "report_params":{
                 "basic":true,
-                "dynamic_dist":false,
-                "static_dist":false,
-                "hit_table":false,
-                "miss_rate":true
+                "dynamic_dist":true,
+                "static_dist":true,
+                "hit_table": {
+                    "enabled": true,
+                    "min_thres": 0.5
+                },
+                "global_missrate":true
             }
         },
         "nearest_4cls":{
-            "dataset_version":"lite",
+            "dataset_version":"icu_version",
             "window":16,
             "centers": [50, 150, 250, 350],
             "class_names": ["Severe", "Moderate", "Mild", "No_ARDS"],
