@@ -16,13 +16,14 @@
         "k-fold":5,
         "alignment_key_id": ["220224", "223835"],
         "additional_features":["data_source", "PPD", "MAP", "shock_index", "PF_ratio"],
+        "#duplicated features": ["Weight", "BMI"],
         "#high_correlation:": ["Height (Inches)", "225677", "220545", "226730", "226531", "Weight (Lbs)", "227467", "220339", "227443", "220587"],
         "version":{
             "icu_version":{
                 "data_source": ["icu"],
                 "fill_missvalue":"avg",
                 "feature_limit": [],
-                "forbidden_feas":["Height (Inches)", "225677", "220545", "226730", "226531", "Weight (Lbs)", "227467", "220339", "227443", "220587", "data_source"]
+                "forbidden_feas":["Weight", "BMI", "Height (Inches)", "225677", "220545", "226730", "226531", "Weight (Lbs)", "227467", "220339", "227443", "220587", "data_source"]
             }
         },
         "value_clip":{
@@ -34,7 +35,7 @@
         "feature_explore":{
             "dataset_version":"icu_version",
             "plot_samples":{
-                "enabled": true,
+                "enabled": false,
                 "n_sample": 50,
                 "features": ["Arterial O2 pressure", "Inspired O2 Fraction"]
             },
@@ -45,13 +46,13 @@
                 "n_per_plots": 40
             },
             "correlation":{
-                "enabled":true,
+                "enabled":false,
                 "target": "PF_ratio"
             },
-            "miss_mat":true,
-            "first_ards_time":true,
-            "feature_count":true,
-            "generate_report":true,
+            "miss_mat":false,
+            "first_ards_time":false,
+            "feature_count":false,
+            "generate_report":false,
             "report_params":{
                 "basic":true,
                 "dynamic_dist":true,

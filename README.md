@@ -15,19 +15,23 @@ configs: 每个数据集对应的配置文件
 2. config_manual: 手动配置, 能够覆盖自动生成的配置
 3. config_cache: 自动生成的配置文件, 不应被修改
 
-data: 数据集文件
+其他模块：
+- data: 数据集文件
+- datasets: 数据集抽象, 包括数据提取/清洗/重新组织
+- libs: 第三方库和相关代码
+- models: 模型
+- outputs: 输出图片/分析表等
+- tools: 工具类
+- main.py: 主入口, 通过参数配置和launcher对接
 
-datasets: 数据集抽象, 包括数据提取/清洗/重新组织
+## 部署方法
 
-libs: 第三方库和相关代码
+按照以下步骤部署：
+1. 在python=3.10.11环境下配置环境：`pip install -r requirements.txt`（其他版本没有测试过）
+2. 将MIMIC-IV数据集解压至`data/mimic-iv`文件夹下, 子文件夹有`hosp`,`icu`等
+3. 将生成的`sepsis3.csv`存放在`data/mimic-iv/sepsis_result`下
+4. 运行`python -u main.py`，生成整个数据集需要一个半小时左右，第一次运行会生成数据集探查结果和一个实例模型的预测结果
 
-models: 模型
-
-outputs: 输出图片/分析表等
-
-tools: 工具类
-
-main.py: 主入口, 通过参数配置和launcher对接
 
 ## MIMIC-IV数据集
 

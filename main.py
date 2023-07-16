@@ -2,7 +2,7 @@ from analyzer import Analyzer
 from datasets import MIMICIVDataset
 
 analyzer_params = [
-    #'feature_explore',
+    'feature_explore',
     'nearest_4cls',
 ]
 

@@ -4,7 +4,6 @@ data/
 outputs/
 *.pyc
 *.png
-*.txt
 *.pt
 *.log
 catboost_info/

@@ -121,7 +121,7 @@ class FeatureExplorer:
         with open(os.path.join(out_dir, 'interval.txt'), 'w') as fp:
             for key in key_list:
                 interval = count_hist[key]['interval']
-                fp.write(f'\"{key}\", {self.dataset.get_fea_label(key)} mean interval={interval:.1f}')
+                fp.write(f'\"{key}\", {self.dataset.get_fea_label(key)} mean interval={interval:.1f}\n')
         vital_sig = {"220045", "220210", "220277", "220181", "220179", "220180", "223761", "223762", "224685", "224684", "224686", "228640", "224417"}
         med_ind = {key for key in key_list} - vital_sig
         for name in ['vital_sig', 'med_ind']:

@@ -1,0 +1,9 @@
+captum==0.6.0
+matplotlib==3.7.1
+missingno==0.5.2
+numpy==1.23.5
+pandas==2.0.2
+scikit_learn==1.2.2
+shap==0.41.0
+torch==1.13.1+cu116
+tqdm==4.65.0
