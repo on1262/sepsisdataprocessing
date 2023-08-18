@@ -158,6 +158,8 @@ class MIMICIV:
         logger.info('MIMICIV inited')
 
     def preprocess(self, from_pkl=True):
+        if not os.path.exists(self.gbl_conf['paths']['cache_dir']):
+            tools.reinit_dir(self.gbl_conf['paths']['cache_dir'], build=True)
         self.preprocess_phase1(from_pkl)
         self.preprocess_phase2(from_pkl)
         self.preprocess_phase3(from_pkl)

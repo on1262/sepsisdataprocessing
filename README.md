@@ -27,11 +27,19 @@ configs: 每个数据集对应的配置文件
 ## 部署方法
 
 按照以下步骤部署：
-1. 在python=3.10.11环境下配置环境：`pip install -r requirements.txt`（其他版本没有测试过）
-2. 将MIMIC-IV数据集解压至`data/mimic-iv`文件夹下, 子文件夹有`hosp`,`icu`等
-3. 将生成的`sepsis3.csv`存放在`data/mimic-iv/sepsis_result`下
-4. 运行`python -u main.py`，生成整个数据集需要一个半小时左右，第一次运行会生成数据集探查结果和一个实例模型的预测结果
+1. 在`python=3.10.11`环境下配置conda环境，并安装所需的packages：`pip install -r requirements.txt`
+2. 第一步中关于pytorch的cuda版本问题参考下一小节
+3. 将MIMIC-IV数据集解压至`data/mimic-iv`文件夹下, 子文件夹有`hosp`,`icu`等
+4. 将生成的`sepsis3.csv`存放在`data/mimic-iv/sepsis_result`下
+5. 运行`python -u main.py`，生成整个数据集需要一个半小时左右，第一次运行会生成数据集探查结果和一个实例模型的预测结果
 
+安装Pytorch对应的CUDA版本：
+1. 新建并进入一个conda虚拟环境
+2. 输入`nvidia-smi` 查看服务器安装的CUDA版本
+3. 按照 https://pytorch.org/get-started/previous-versions/ 选择linux下的对应版本的安装命令，pytorch对应的CUDA版本可以落后于服务器的CUDA版本
+4. 检查是否安装成功： https://blog.csdn.net/qq_45032341/article/details/105196680
+5. 如果安装了不同于`requirements.txt`中的pytorch版本，将对应的行删掉，避免重复安装
+6. 这个框架本身对第三方库的版本没有严格限制
 
 ## MIMIC-IV数据集
 
@@ -152,4 +160,3 @@ data source: 样本对应的admission的来源位置
 - hit table：按照remove rule去除不合适的患者后，剩下群体中的特征覆盖率（覆盖率=1-缺失率），以admission为最小单位，并且覆盖dynamic feature+additional feature
     - 预处理阶段会按照hit table去除覆盖率较小的特征，阈值为`remove_rule/min_cover_rate`
 - miss mat: 去除不合适的患者后，剩余群体中的特征缺失情况分布
-
