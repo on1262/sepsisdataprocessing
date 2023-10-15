@@ -1,0 +1,88 @@
+---
+dataset:
+  miss_dict_reference:
+    PF_ratio: ['220224', '223835']
+    PPD:
+      - '220050'
+      - '220051'
+    MAP:
+      - '220050'
+      - '220051'
+    shock_index:
+      - '220050'
+      - '220045'
+    systolic pressure:
+      - Blood Pressure
+    diastolic pressure:
+      - Blood Pressure
+  remove_rule:
+    pass1:
+      target_id: ['220224', '223835']
+      duration_minmax: [2, 96]
+    pass2:
+      max_col_missrate: 1.0
+      max_subject_missrate: 0.5
+      choose_admission_in_subject: random
+      # check_sepsis_time: [-10, 30]
+  generate_table:
+    align_target: ['220224', '223835']
+    delta_t_hour: 0.5
+  k-fold: 5
+  validation_proportion: 0.15 # use 0.15*80% samples for validation
+  version:
+    icu_version:
+      data_source: icu
+      fill_missvalue: avg
+      feature_limit: []
+      forbidden_feas: [Weight, BMI, Height (Inches), '225677', '220545', '226730', '226531', Weight (Lbs), '227467', '220339', '227443', '220587', data_source]
+  value_clip:
+    Inspired O2 Fraction:
+      min: 21
+      max: 100
+    Arterial O2 pressure:
+      min: 0
+      max: 500
+model:
+  feature_explore:
+    dataset_version: icu_version
+    plot_samples:
+      enabled: false
+      n_sample: 50
+      features:
+        - Arterial O2 pressure
+        - Inspired O2 Fraction
+    plot_time_series:
+      enabled: true
+      names:
+        - PF_ratio
+      n_sample: 400
+      n_per_plots: 40
+    correlation:
+      enabled: false
+      target: PF_ratio
+    miss_mat: false
+    first_ards_time: false
+    feature_count: false
+    generate_report: false
+    report_params:
+      basic: true
+      dynamic_dist: true
+      static_dist: true
+      hit_table:
+        enabled: true
+        min_thres: 0.5
+      global_missrate: true
+  nearest_4cls:
+    dataset_version: icu_version
+    window: 16
+    centers:
+      - 50
+      - 150
+      - 250
+      - 350
+    class_names:
+      - Severe
+      - Moderate
+      - Mild
+      - No_ARDS
+    smoothing_band: 50

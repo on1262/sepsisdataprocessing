@@ -1,5 +1,5 @@
 import numpy as np
-import json
+import yaml
 import datetime
 from sklearn import random as sk_random
 import pandas as pd
@@ -61,7 +61,6 @@ def assert_no_na(dataset:pd.DataFrame):
                 logger.error(f'assert_na: NA in feature:{col}')
                 assert(0)
 
-
 class Config:
     '''
         加载配置表
@@ -73,10 +72,10 @@ class Config:
         self.manual_path = manual_path
         self.configs = {}
         with open(manual_path, 'r', encoding='utf-8') as fp:
-            manual_conf = json.load(fp)
+            manual_conf = yaml.load(fp, Loader=yaml.SafeLoader)
         if os.path.exists(cache_path):
             with open(cache_path, 'r', encoding='utf-8') as fp:
-                self.configs = json.load(fp)
+                self.configs = yaml.load(fp, Loader=yaml.SafeLoader)
         for key in manual_conf.keys(): # 覆盖
             self.configs[key] = manual_conf[key]
 
@@ -85,7 +84,7 @@ class Config:
     
     def dump(self):
         with open(self.manual_path, 'w', encoding='utf-8') as fp:
-            json.dump(self.configs, fp)
+            yaml.dump(self.configs, fp)
 
 class TimeConverter:
     '''
