@@ -53,6 +53,9 @@ class Admission:
 
     def __getitem__(self, idx):
         return self.dynamic_data[idx]
+    
+    def __len__(self):
+        return len(self.dynamic_data)
 
     def keys(self):
         return self.dynamic_data.keys()

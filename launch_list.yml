@@ -1,0 +1,5 @@
+---
+
+analyzer_params: [
+  feature_explore
+]

@@ -1,10 +1,9 @@
 from analyzer import Analyzer
 from datasets import MIMICIVDataset
+import yaml
 
-analyzer_params = [
-    'feature_explore',
-    'nearest_4cls',
-]
+with open('./launch_list.yml', 'r', encoding='utf-8') as fp:
+    analyzer_params = yaml.load(fp, Loader=yaml.SafeLoader)['analyzer_params']
 
 if __name__ == '__main__':
     dataset = MIMICIVDataset()

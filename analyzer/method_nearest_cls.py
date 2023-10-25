@@ -15,7 +15,7 @@ class BaselineNearestClsAnalyzer:
         self.paths = params['paths']
         self.dataset = container.dataset
         self.container= container
-        self.target_idx = self.dataset.idx_dict['PF_ratio']
+        self.target_idx = self.dataset._idx_dict['PF_ratio']
         self.model_name = self.params['analyzer_name']
         # copy params
         self.centers = params['centers']

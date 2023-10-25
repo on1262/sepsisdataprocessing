@@ -20,7 +20,7 @@ class FeatureExplorer:
         '''输出mimic-iv数据集的统计特征, 独立于模型和研究方法'''
         logger.info('Analyzer: Feature explore')
         dataset_version = self.params['dataset_version']
-        out_dir = os.path.join(tools.GLOBAL_CONF_LOADER['analyzer'][self.container.dataset.name()]['paths']['out_dir'], f'explore_{dataset_version}')
+        out_dir = os.path.join(self.params['paths']['out_dir'], f'explore_{dataset_version}')
         tools.reinit_dir(out_dir, build=True)
         # random plot sample time series
         if self.params['generate_report']:
@@ -70,12 +70,9 @@ class FeatureExplorer:
 
     def correlation(self, out_dir, target_id_or_label):
         # plot correlation matrix
-        if target_id_or_label in self.container.dataset.additional_feas:
-            target_id, target_label = target_id_or_label, target_id_or_label
-        else:
-            target_id, target_label = self.container.dataset.get_id_and_label(target_id_or_label)
+        target_id, target_label = self.container.dataset.get_id_and_label(target_id_or_label)
         target_index = self.container.dataset.idx_dict[target_id]
-        labels = [self.container.dataset.get_fea_label(id) for id in self.container.dataset.total_keys]
+        labels = [self.container.dataset.get_fea_label(id) for id in self.container.dataset._total_keys]
         corr_mat = tools.plot_correlation_matrix(self.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation_matrix'))
         correlations = []
         for idx in range(corr_mat.shape[1]):
@@ -88,12 +85,12 @@ class FeatureExplorer:
         
     def miss_mat(self, out_dir):
         '''计算行列缺失分布并输出'''
-        na_table = np.ones((len(self.dataset.subjects), len(self.dataset.dynamic_keys)), dtype=bool)
+        na_table = np.ones((len(self.dataset.subjects), len(self.dataset._dynamic_keys)), dtype=bool)
         for r_id, s_id in enumerate(self.dataset.subjects):
             for adm in self.dataset.subjects[s_id].admissions:
                 # TODO 替换dynamic keys到total keys
                 adm_key = set(adm.keys())
-                for c_id, key in enumerate(self.dataset.dynamic_keys):
+                for c_id, key in enumerate(self.dataset._dynamic_keys):
                     if key in adm_key:
                         na_table[r_id, c_id] = False
         # 行缺失
@@ -175,7 +172,7 @@ class FeatureExplorer:
             tools.reinit_dir(write_dir)
         n_sample = min(n_sample, self.data.shape[0])
         n_plot = int(np.ceil(n_sample / n_per_plots))
-        fea_idx = self.dataset.idx_dict[fea_name]
+        fea_idx = self.dataset._idx_dict[fea_name]
         start_idx = 0
         label = self.dataset.get_fea_label(fea_name)
         for p_idx in range(n_plot):
