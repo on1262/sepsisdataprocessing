@@ -34,7 +34,7 @@ dataset:
     delta_t_hour: 0.5
   k-fold: 5
   validation_proportion: 0.15 # use 0.15*80% samples for validation
-  bare_mode: False # avoid duplicate loading process during preprocess phase. Only load common components beside any version
+  compress_cache: True # compress cache file to speed up loading 
   version:
     icu_version:
       data_source: icu
@@ -48,7 +48,6 @@ dataset:
     Arterial O2 pressure:
       min: 0
       max: 500
-
 model:
   feature_explore:
     dataset_version: icu_version

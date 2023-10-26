@@ -26,7 +26,6 @@ class Analyzer:
                         self.run_sub_analyzer(name, label)
                         break
 
-        
     def run_sub_analyzer(self, analyzer_name, label):
         logger.info(f'Run Analyzer: {analyzer_name}')
         params = self.container.get_model_params(analyzer_name)

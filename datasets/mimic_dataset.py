@@ -1,6 +1,6 @@
 import os
 import tools
-import pickle
+import compress_pickle as pickle
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
@@ -16,10 +16,6 @@ from datetime import datetime
 from random import choice
 
 class MIMICIV(Dataset):
-    '''
-    MIMIC-IV底层抽象, 对源数据进行抽取/合并/移动, 生成中间数据集, 并将中间数据存储到pickle文件中
-    这一步的数据是不对齐的, 仅考虑抽取和类型转化问题
-    '''
     def __init__(self):
         super().__init__()
         # configs
@@ -49,7 +45,7 @@ class MIMICIV(Dataset):
         # version switch
         self._version_name = None
 
-        self._load_data(from_pkl=True, bare_mode=self._loc_conf['dataset']['bare_mode'])
+        self._load_data()
 
         logger.info('MIMICIV inited')
 
@@ -57,6 +53,10 @@ class MIMICIV(Dataset):
     @property
     def norm_dict(self):
         return self._norm_dict
+    
+    @property
+    def idx_dict(self):
+        return self._idx_dict
     
     @property
     def total_keys(self):
@@ -85,47 +85,57 @@ class MIMICIV(Dataset):
     @property
     def subjects(self):
         return self._subjects
-    
-    def _load_data(self, from_pkl=True, bare_mode=False):
-        if not os.path.exists(self._gbl_conf['paths']['cache_dir']):
-            tools.reinit_dir(self._gbl_conf['paths']['cache_dir'], build=True)
 
+    def _load_data(self):
+        '''Basic load manager. Eliminate unnecessary IO consumption.
+        '''
+        cache_dir = self._gbl_conf['paths']['cache_dir']
+        if not os.path.exists(cache_dir):
+            tools.reinit_dir(cache_dir, build=True)
+        suffix = '.pkl' if not self._loc_conf['dataset']['compress_cache'] else '.xz' # use lzma compression
+        # create pkl names for each phase
+        pkl_paths = [os.path.join(cache_dir, name + suffix) for name in ['1_phase1', '2_phase2', '3_subjects', '4_numeric_subject', '5_norm_dict', '6_table_final']]
+        version_files = [os.path.join(cache_dir, f'7_version_{version_name}' + suffix) for version_name in self._loc_conf['dataset']['version'].keys()] + \
+                [os.path.join(cache_dir, f'7_version_{version_name}.npz') for version_name in self._loc_conf['dataset']['version'].keys()]
+        bare_mode = np.all([os.path.exists(p) for p in pkl_paths] + [os.path.exists(p) for p in version_files]) # 仅当所有文件都存在时才进行载入加速
+        
         if bare_mode:
-            self._preprocess_phase1(from_pkl, bare_mode=True)
-            logger.info('MIMIC-IV: Bare Mode Enabled. Load dim files only')
+            logger.info('MIMIC-IV: Bare Mode Enabled')
+            self._preprocess_phase1(pkl_paths[0], dim_files_only=True) # load dim files
+            self._preprocess_phase5(pkl_paths[4], load_subject_only=True) # load subjects
         else:
-            self._preprocess_phase1(from_pkl, bare_mode=False)
-            self._preprocess_phase2(from_pkl)
-            self._preprocess_phase3(from_pkl)
-            self._preprocess_phase4(from_pkl)
-            self._preprocess_phase5(from_pkl)
-            self._preprocess_phase6(from_pkl)
+            logger.info('MIMIC-IV: Bare Mode Disabled')
+            for phase in range(1, 7):
+                func = getattr(self, '_preprocess_phase' + str(phase))
+                func(pkl_paths[phase-1])
             self._preprocess_phase7()
  
-    def _preprocess_phase1(self, from_pkl=True, bare_mode=False):
-        pkl_path = os.path.join(self._gbl_conf['paths']['cache_dir'], '1_phase1.pkl')
-        if from_pkl and os.path.exists(pkl_path):
+    def _preprocess_phase1(self, pkl_path=None, dim_files_only=False):
+        if os.path.exists(pkl_path):
             logger.info(f'load .pkl for phase 1 from {pkl_path}')
             with open(pkl_path, 'rb') as fp:
                 load_dict = pickle.load(fp)
-                if not bare_mode:
+                if not dim_files_only:
                     self._extract_result = load_dict['extract_result']
                 self._icu_item = load_dict['icu_item']
                 self._hosp_item = load_dict['hosp_item']
                 self._ed_item = load_dict['ed_item']
+                self._all_items = load_dict('d_item')
             return
     
         logger.info(f'MIMIC-IV: extract dim file')
         
         # 建立hospital lab_item编号映射
         d_hosp_item = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'd_labitems.csv'), encoding='utf-8')
-        hosp_item = {}
+        hosp_item = {'id':{}, 'label':{}}
         for _, row in tqdm(d_hosp_item.iterrows(), desc='hosp items'):
-            hosp_item[str(row['itemid'])] = {
+            hosp_item['id'][str(row['itemid'])] = {
+                'id': str(row['itemid']),
                 'label': row['label'], 
                 'fluid': row['fluid'], 
                 'category': row['category']
             }
+            hosp_item['label'][row['label']] = hosp_item['id'][str(row['itemid'])]
         
         # 建立icu lab_item编号映射
         d_icu_item = pd.read_csv(os.path.join(self._mimic_dir, 'icu', 'd_items.csv'), encoding='utf-8')
@@ -142,33 +152,38 @@ class MIMICIV(Dataset):
             icu_item['label'][row['label']] = icu_item['id'][str(row['itemid'])] # 可以用名字或id查找
 
         # 建立ed item的编号映射, 和icu lab_item关联
-        d_ed_item = {
-            'temperature': ['223761', 'Temperature Fahrenheit'], 
-            'heartrate': ['220045', 'Heart Rate'],
-            'resprate': ['220210', 'Respiratory Rate'],
-            'o2sat': ['220277', 'O2 saturation pulseoxymetry'],
-            'sbp': 'sbp',
-            'dbp': 'dbp'
-        }
+        ed_item = {'id': {
+            'ED_temperature': {'id': 'ED_temperature', 'link_id':'223761', 'label':'Temperature Fahrenheit'}, 
+            'ED_heartrate': {'id': 'ED_heartrate', 'link_id':'220045', 'label':'Heart Rate'},
+            'ED_resprate': {'id': 'ED_resprate', 'link_id':'220210', 'label':'Respiratory Rate'},
+            'ED_o2sat': {'id': 'ED_o2sat', 'link_id':'220277', 'label':'O2 saturation pulseoxymetry'},
+            'ED_sbp': {'id': 'ED_sbp', 'link_id': None, 'label':'sbp'},
+            'ED_dbp': {'id': 'ED_dbp', 'link_id': None, 'label':'dbp'}
+        }}
+        ed_item['label'] = {val['label']:val for val in ed_item['id'].values()}
 
         # 抽取符合条件的患者id
         extract_result = self.on_extract_subjects()
         # 存储cache
         self._hosp_item = hosp_item
         self._icu_item = icu_item
-        self._ed_item = d_ed_item
+        self._ed_item = ed_item
+        self._all_items = {
+            'id': {key:val for d in [icu_item, hosp_item, ed_item] for key, val in d['id'].items()},
+            'label': {key:val for d in [icu_item, hosp_item, ed_item] for key, val in d['label'].items()}
+        }
         self._extract_result = extract_result
         with open(pkl_path, 'wb') as fp:
             pickle.dump({
                 'extract_result': extract_result,
                 'icu_item': icu_item,
                 'hosp_item': self._hosp_item,
-                'ed_item': self._ed_item
+                'ed_item': self._ed_item,
+                'd_item': self._all_items
                 }, fp)
     
-    def _preprocess_phase2(self, from_pkl=True):
-        pkl_path = os.path.join(self._gbl_conf['paths']['cache_dir'], '2_phase2.pkl')
-        if from_pkl and os.path.exists(pkl_path):
+    def _preprocess_phase2(self, pkl_path=None):
+        if os.path.exists(pkl_path):
             with open(pkl_path, 'rb') as fp:
                 load_dict = pickle.load(fp)
                 self._subjects = load_dict['subjects']
@@ -213,9 +228,8 @@ class MIMICIV(Dataset):
             pickle.dump({'subjects': self._subjects}, fp)
         logger.info(f'Phase 2 dumped at {pkl_path}')
 
-    def _preprocess_phase3(self, from_pkl=True):
-        pkl_path = os.path.join(self._gbl_conf['paths']['cache_dir'], '3_subjects.pkl')
-        if from_pkl and os.path.exists(pkl_path):
+    def _preprocess_phase3(self, pkl_path=None):
+        if os.path.exists(pkl_path):
             with open(pkl_path, 'rb') as fp:
                 self._subjects = pickle.load(fp)
             logger.info(f'load pkl for phase 3 from {pkl_path}')
@@ -234,10 +248,10 @@ class MIMICIV(Dataset):
             for row in tqdm(ed_vitalsign.itertuples(), 'Extract vitalsign from MIMIC-IV-ED', total=len(ed_vitalsign)):
                 s_id = row.subject_id
                 for itemid in ['temperature', 'heartrate', 'resprate', 'o2sat', 'sbp', 'dbp', 'rhythm', 'pain']:
-                    if s_id in self._subjects and itemid in collect_ed_set:
+                    if s_id in self._subjects and 'ED_'+itemid in collect_ed_set:
                         self._subjects[s_id].append_dynamic(
                             charttime=ymdhms_converter(row.charttime),
-                            itemid=itemid, 
+                            itemid='ED_'+itemid, 
                             value=getattr(row, itemid)
                         )
             del ed_vitalsign
@@ -283,12 +297,11 @@ class MIMICIV(Dataset):
             pickle.dump(self._subjects, fp)
         logger.info('Dump subjects: Done')
 
-    def _preprocess_phase4(self, from_pkl=True):
+    def _preprocess_phase4(self, p_numeric_subject=None):
         '''
         将所有特征转化为数值型, 并且对于异常值进行处理，最后进行特征筛选
         '''
-        p_numeric_subject = os.path.join(self._gbl_conf['paths']['cache_dir'], '4_numeric_subject.pkl')
-        if from_pkl and os.path.exists(p_numeric_subject):
+        if os.path.exists(p_numeric_subject):
             with open(p_numeric_subject, 'rb') as fp:
                 self._subjects = pickle.load(fp)
             logger.info(f'Load numeric subject data from {p_numeric_subject}')
@@ -310,7 +323,7 @@ class MIMICIV(Dataset):
         # TODO col_abnormal_rate = {}
         value_clip = self._loc_conf['dataset']['value_clip']
         for id_or_label in value_clip:
-            id, label = self.get_id_and_label(id_or_label)
+            id, label = self.fea_id(id_or_label), self.fea_label(id_or_label)
             clip_count = 0
             for s in self._subjects.values():
                 for adm in s.admissions:
@@ -324,14 +337,16 @@ class MIMICIV(Dataset):
             pickle.dump(self._subjects, fp)
         logger.info(f'Numeric subjects dumped at {p_numeric_subject}')
         
-    def _preprocess_phase5(self, from_pkl=True):
+    def _preprocess_phase5(self, p_norm_dict, load_subject_only=False):
         # 提取每个特征的均值和方差，用于归一化和均值填充
-        
-        p_norm_dict = os.path.join(self._gbl_conf['paths']['cache_dir'], '5_norm_dict.pkl')
-        if from_pkl and os.path.exists(p_norm_dict):
+        if os.path.exists(p_norm_dict):
             with open(p_norm_dict, 'rb') as fp:
                 result = pickle.load(fp)
-                self._dynamic_keys, self._static_keys, self._subjects, self._norm_dict = result['dynamic_keys'], result['static_keys'], result['subjects'], result['norm_dict']
+                if not load_subject_only:
+                    self._dynamic_keys, self._static_keys, self._subjects, self._norm_dict = \
+                        result['dynamic_keys'], result['static_keys'], result['subjects'], result['norm_dict']
+                else:
+                    self._subjects = result['subjects']
             logger.info(f'Load norm dict from {p_norm_dict}')
             return
 
@@ -380,13 +395,12 @@ class MIMICIV(Dataset):
             }, fp)
         logger.info(f'Norm dict dumped at {p_norm_dict}')
 
-    def _preprocess_phase6(self, from_pkl=True):
+    def _preprocess_phase6(self, p_final_table):
         '''
         对每个subject生成时间轴对齐的表, tick(hour)是生成的表的间隔
         '''  
-        p_final_table = os.path.join(self._gbl_conf['paths']['cache_dir'], '6_table_final.pkl')
 
-        if from_pkl and os.path.exists(p_final_table):
+        if os.path.exists(p_final_table):
             with open(p_final_table, 'rb') as fp:
                 result = pickle.load(fp)
                 self._data, self._norm_dict, self._idx_dict, self._seqs_len, self._static_keys, self._dynamic_keys = \
@@ -459,17 +473,16 @@ class MIMICIV(Dataset):
         logger.info(f'Aligned table dumped at {p_final_table}')
 
     def _preprocess_phase7(self):
-        '''
-        生成不同版本的数据集, 不同版本的数据集的样本数量/特征数量都可能不同
+        '''生成不同版本的数据集, 不同版本的数据集的样本数量/特征数量都可能不同
         '''
         assert(self._idx_dict is not None)
-        p_version = os.path.join(self._gbl_conf['paths']['cache_dir'], '7_version.pkl')
         version_conf:dict = self._loc_conf['dataset']['version']
 
         for version_name in version_conf.keys():
             logger.info(f'Preprocessing version: {version_name}')
             # 检查是否存在pkl
             p_version = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}.pkl')
+            p_version_data = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}.npz')
             if os.path.exists(p_version):
                 logger.info(f'Skip preprocess existed version: {version_name}')
                 continue
@@ -518,50 +531,41 @@ class MIMICIV(Dataset):
                 'seqs_len': self._seqs_len,
                 'idx_dict': derived_idx_dict,
                 'norm_dict': derived_norm_dict,
-                'data': derived_data_table,
                 'kf': derived_kf_list,
             }
+            np.savez_compressed(p_version_data, derived_data_table.astype(np.float32))
             with open(p_version, 'wb') as fp:
                 pickle.dump(version_dict, fp)
 
-    def get_fea_label(self, key_or_idx):
-        '''输入key/idx得到关于特征的简短描述, 从icu_item中提取'''
-        if isinstance(key_or_idx, int):
-            name = self._total_keys[key_or_idx]
+    def fea_label(self, x:[int, str]):
+        # input must be idx or id
+        if isinstance(x, int): # idx
+            assert(x < len(self._total_keys))
+            id = self._total_keys[x]
+            self._all_items['id'][id]['label']
+        elif x in self._all_items['id']:
+            return self._all_items['id'][x]['label']
         else:
-            name = key_or_idx
-        if self._icu_item['label'].get(name) is not None:
-            return self._icu_item['label'][name]['label']
-        elif self._icu_item['id'].get(name) is not None:
-            return self._icu_item['id'][name]['label']
-        else:
-            logger.warning(f'No fea label for {name}, return name')
-            return name
+            return x
 
-    def label2id(self, label):
-        result = self._icu_item['label'].get(label)
-        if result is not None:
-            return result['id']
+    def fea_id(self, x:[int, str]):
+        if isinstance(x, int): # idx
+            assert(x < len(self._total_keys))
+            return self._total_keys[x] 
+        elif x in self._all_items['label']:
+            return self._all_items['label'][x]['id']
         else:
-            logger.warning(f"label is not in icu item: {label}")
-            return None
+            return x
     
-    def id2label(self, id):
-        result = self._icu_item['id'].get(id)
-        if result is not None:
-            return result['label']
-        else:
-            logger.warning(f"id is not in icu item: {id}")
-            return None
+    def fea_idx(self, x:str):
+        if x in self._all_items['label']:
+            id = self._all_items['label'][x]['id']
+            assert(id in self._idx_dict)
+            return self._idx_dict[id]
+        elif x in self._all_items['id']:
+            assert(x in self._idx_dict)
+            return self._idx_dict[x]
     
-    def get_id_and_label(self, id_or_label:str):
-        if id_or_label in self._icu_item['id']:
-            return id_or_label, self.id2label(id_or_label)
-        elif id_or_label in self._icu_item['label']:
-            return self.label2id(id_or_label), id_or_label
-        else:
-            return None, None
-            
     def register_split(self, train_index, valid_index, test_index):
         self.train_index = train_index
         self.valid_index = valid_index
@@ -607,6 +611,7 @@ class MIMICIV(Dataset):
             self._version_name = version_name
         
         p_version = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}.pkl')
+        p_version_data = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}.npz')
         assert(os.path.exists(p_version))
         with open(p_version, 'rb') as fp:
             version_dict = pickle.load(fp)
@@ -615,10 +620,10 @@ class MIMICIV(Dataset):
         self._dynamic_keys = version_dict['dynamic_keys']
         self._total_keys = version_dict['total_keys']
         self._seqs_len = version_dict['seqs_len']
-        self._data = version_dict['data']
         self._idx_dict = version_dict['idx_dict']
         self._norm_dict = version_dict['norm_dict']
         self._kf_list = version_dict['kf']
+        self._data = np.load(p_version_data)['arr_0']
 
     def enumerate_kf(self):
         return KFoldIterator(self, k=len(self._kf_list))
@@ -989,12 +994,12 @@ class MIMICIVDataset(MIMICIV):
             write_lines.append(f'Static keys: {len(self.static_keys)}')
             write_lines.append(f'Dynamic keys: {len(self.dynamic_keys)}')
             write_lines.append(f'Subjects:{len(self)}')
-            write_lines.append(f'Static feature: {[self.get_fea_label(id) for id in self.static_keys]}')
-            write_lines.append(f'Dynamic feature: {[self.get_fea_label(id) for id in self.dynamic_keys]}')
+            write_lines.append(f'Static feature: {[self.fea_label(id) for id in self.static_keys]}')
+            write_lines.append(f'Dynamic feature: {[self.fea_label(id) for id in self.dynamic_keys]}')
         if params['dynamic_dist']:
             # dynamic feature explore
-            for id in self.dynamic_keys:
-                fea_name = self.get_fea_label(id)
+            for id in tqdm(self.dynamic_keys, 'plot dynamic dist'):
+                fea_name = self.fea_label(id)
                 save_name = tools.remove_slash(str(fea_name))
                 write_lines.append('='*10 + f'{fea_name}({id})' + '='*10)
                 arr_points = []
@@ -1002,11 +1007,10 @@ class MIMICIVDataset(MIMICIV):
                 arr_frequency = []
                 arr_avg_value = []
                 arr_from_sepsis_time = []
-                for s in tqdm(self._subjects.values(), desc=f'id={id}'):
+                for s in self._subjects.values():
                     for adm in s.admissions:
                         if id in adm.keys():
                             dur = adm[id][-1,1] - adm[id][0,1]
-                            
                             sepsis_time = s.nearest_static('sepsis_time', adm[id][0, 1])
                             t_sep = adm[id][0, 1] + adm.admittime - sepsis_time
                             arr_from_sepsis_time.append(t_sep)
@@ -1031,15 +1035,15 @@ class MIMICIVDataset(MIMICIV):
                 # plot distribution
                 titles = ['points', 'duration', 'frequency', 'value', 'from_sepsis']
                 arrs = [arr_points, arr_duration, arr_frequency, arr_avg_value, arr_from_sepsis_time]
-                for title, arr in tqdm(zip(titles, arrs),'plot'):
+                for title, arr in zip(titles, arrs):
                     if np.size(arr) != 0:
                         tools.plot_single_dist(
                             data=arr, data_name=f'{title}: {fea_name}', 
-                            save_path=os.path.join(dist_dir, title, save_name + '.png'), discrete=False, adapt=True)
+                            save_path=os.path.join(dist_dir, title, save_name + '.png'), discrete=False, adapt=True, bins=50)
         if params['static_dist']:
             # static feature explore
             for id in tqdm(self.static_keys, 'generate static feature report'):
-                fea_name = self.get_fea_label(id)
+                fea_name = self.fea_label(id)
                 save_name = tools.remove_slash(str(fea_name))
                 write_lines.append('='*10 + f'{fea_name}({id})' + '='*10)
                 idx = self.idx_dict[str(id)]

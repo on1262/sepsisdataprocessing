@@ -12,6 +12,7 @@ class FeatureExplorer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.container = container
+        self.dataset = container.dataset
         self.gbl_conf = container._conf
         self.dataset = container.dataset
         self.data = self.dataset.data
@@ -27,8 +28,8 @@ class FeatureExplorer:
             self.dataset.make_report(version_name=dataset_version, params=self.params['report_params'])
         if self.params['plot_samples']['enabled']:
             n_sample = self.params['plot_samples']['n_sample']
-            id_list = [self.dataset.get_id_and_label(x)[0] for x in self.params['plot_samples']['features']]
-            id_names = [self.dataset.get_id_and_label(x)[1] for x in self.params['plot_samples']['features']]
+            id_list = [self.dataset.fea_id(x) for x in self.params['plot_samples']['features']]
+            id_names = [self.dataset.fea_label(x) for x in self.params['plot_samples']['features']]
             self.plot_samples(num=n_sample, id_list=id_list, id_names=id_names, out_dir=os.path.join(out_dir, 'samples'))
         if self.params['plot_time_series']['enabled']:
             n_sample = self.params['plot_time_series']['n_sample']
@@ -70,9 +71,9 @@ class FeatureExplorer:
 
     def correlation(self, out_dir, target_id_or_label):
         # plot correlation matrix
-        target_id, target_label = self.container.dataset.get_id_and_label(target_id_or_label)
-        target_index = self.container.dataset.idx_dict[target_id]
-        labels = [self.container.dataset.get_fea_label(id) for id in self.container.dataset._total_keys]
+        target_id, target_label = self.dataset.fea_id(target_id_or_label), self.dataset.fea_label(target_id_or_label)
+        target_index = self.dataset.idx_dict[target_id]
+        labels = [self.dataset.fea_label(id) for id in self.dataset._total_keys]
         corr_mat = tools.plot_correlation_matrix(self.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation_matrix'))
         correlations = []
         for idx in range(corr_mat.shape[1]):
@@ -118,7 +119,7 @@ class FeatureExplorer:
         with open(os.path.join(out_dir, 'interval.txt'), 'w') as fp:
             for key in key_list:
                 interval = count_hist[key]['interval']
-                fp.write(f'\"{key}\", {self.dataset.get_fea_label(key)} mean interval={interval:.1f}\n')
+                fp.write(f'\"{key}\", {self.dataset.fea_label(key)} mean interval={interval:.1f}\n')
         vital_sig = {"220045", "220210", "220277", "220181", "220179", "220180", "223761", "223762", "224685", "224684", "224686", "228640", "224417"}
         med_ind = {key for key in key_list} - vital_sig
         for name in ['vital_sig', 'med_ind']:
@@ -129,7 +130,7 @@ class FeatureExplorer:
                     new_list.append(key)
             counts = np.asarray([count_hist[key]['count'] for key in new_list])
             intervals = np.asarray([count_hist[key]['interval'] for key in new_list])
-            labels = [self.dataset.get_fea_label(key) for key in new_list]
+            labels = [self.dataset.fea_label(key) for key in new_list]
             tools.plot_bar_with_label(counts, labels, f'{name} Count', out_path=os.path.join(out_dir, f"{name}_feature_count.png"))
             tools.plot_bar_with_label(intervals, labels, f'{name} Interval', out_path=os.path.join(out_dir, f"{name}_feature_interval.png"))
 
@@ -174,7 +175,7 @@ class FeatureExplorer:
         n_plot = int(np.ceil(n_sample / n_per_plots))
         fea_idx = self.dataset._idx_dict[fea_name]
         start_idx = 0
-        label = self.dataset.get_fea_label(fea_name)
+        label = self.dataset.fea_label(fea_name)
         for p_idx in range(n_plot):
             stop_idx = min(start_idx + n_per_plots, n_sample)
             mat = self.data[start_idx:stop_idx, fea_idx, :]
