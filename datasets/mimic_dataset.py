@@ -112,7 +112,7 @@ class MIMICIV(Dataset):
  
     def _preprocess_phase1(self, pkl_path=None, dim_files_only=False):
         if os.path.exists(pkl_path):
-            logger.info(f'load .pkl for phase 1 from {pkl_path}')
+            logger.info(f'load cache for phase 1 from {pkl_path}')
             with open(pkl_path, 'rb') as fp:
                 load_dict = pickle.load(fp)
                 if not dim_files_only:
@@ -120,7 +120,7 @@ class MIMICIV(Dataset):
                 self._icu_item = load_dict['icu_item']
                 self._hosp_item = load_dict['hosp_item']
                 self._ed_item = load_dict['ed_item']
-                self._all_items = load_dict('d_item')
+                self._all_items = load_dict['d_item']
             return
     
         logger.info(f'MIMIC-IV: extract dim file')
@@ -187,7 +187,7 @@ class MIMICIV(Dataset):
             with open(pkl_path, 'rb') as fp:
                 load_dict = pickle.load(fp)
                 self._subjects = load_dict['subjects']
-            logger.info(f'load .pkl for phase 2 from {pkl_path}')
+            logger.info(f'load cache for phase 2 from {pkl_path}')
             return
 
         logger.info(f'MIMIC-IV: processing subjects and admissions')
@@ -232,7 +232,7 @@ class MIMICIV(Dataset):
         if os.path.exists(pkl_path):
             with open(pkl_path, 'rb') as fp:
                 self._subjects = pickle.load(fp)
-            logger.info(f'load pkl for phase 3 from {pkl_path}')
+            logger.info(f'load cache for phase 3 from {pkl_path}')
             return
         logger.info(f'MIMIC-IV: processing dynamic data')
         ymdhms_converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
@@ -477,11 +477,11 @@ class MIMICIV(Dataset):
         '''
         assert(self._idx_dict is not None)
         version_conf:dict = self._loc_conf['dataset']['version']
-
+        suffix = '.pkl' if not self._loc_conf['dataset']['compress_cache'] else '.xz' # use lzma compression
         for version_name in version_conf.keys():
             logger.info(f'Preprocessing version: {version_name}')
             # 检查是否存在pkl
-            p_version = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}.pkl')
+            p_version = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}'+suffix)
             p_version_data = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}.npz')
             if os.path.exists(p_version):
                 logger.info(f'Skip preprocess existed version: {version_name}')
@@ -609,8 +609,8 @@ class MIMICIV(Dataset):
             return
         else:
             self._version_name = version_name
-        
-        p_version = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}.pkl')
+        suffix = '.pkl' if not self._loc_conf['dataset']['compress_cache'] else '.xz'
+        p_version = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}'+suffix)
         p_version_data = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}.npz')
         assert(os.path.exists(p_version))
         with open(p_version, 'rb') as fp:
@@ -663,7 +663,7 @@ class MIMICIV(Dataset):
         pass
 
     @abstractmethod
-    def on_build_subject(self, id:int, subject:Subject, row:dict, _extract_result:dict) -> dict:
+    def on_build_subject(self, id:int, subject:Subject, row:dict, _extract_result:dict) -> Subject:
         pass
 
     @abstractmethod
@@ -789,7 +789,7 @@ class MIMICIVDataset(MIMICIV):
         sepsis_result = load_sepsis_patients(sepsis_patient_path)
         return sepsis_result
     
-    def on_build_subject(self, id:int, subject:Subject, row:namedtuple, _extract_result:dict) -> dict:
+    def on_build_subject(self, id:int, subject:Subject, row:namedtuple, _extract_result:dict) -> Subject:
         '''
         subject: Subject()
         row: dict, {column_name:value}

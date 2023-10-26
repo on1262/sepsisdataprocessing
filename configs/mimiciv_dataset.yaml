@@ -36,11 +36,14 @@ dataset:
   validation_proportion: 0.15 # use 0.15*80% samples for validation
   compress_cache: True # compress cache file to speed up loading 
   version:
-    icu_version:
-      data_source: icu
+    explore_version:
       fill_missvalue: avg
       feature_limit: []
-      forbidden_feas: [Weight, BMI, Height (Inches), '225677', '220545', '226730', '226531', Weight (Lbs), '227467', '220339', '227443', '220587', data_source]
+      forbidden_feas: []
+    original_version:
+      fill_missvalue: avg
+      feature_limit: []
+      forbidden_feas: [Weight, BMI, Height (Inches), '225677', '220545', '226730', '226531', Weight (Lbs), '227467', '220339', '227443', '220587', 'dod']
   value_clip:
     Inspired O2 Fraction:
       min: 21
@@ -50,7 +53,7 @@ dataset:
       max: 500
 model:
   feature_explore:
-    dataset_version: icu_version
+    dataset_version: explore_version
     plot_samples:
       enabled: true
       n_sample: 50
@@ -80,7 +83,7 @@ model:
       global_missrate: true
     
   nearest_4cls:
-    dataset_version: icu_version
+    dataset_version: original_version
     window: 16
     centers:
       - 50
