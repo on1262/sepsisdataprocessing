@@ -24,9 +24,11 @@ dataset:
       target_id: ['220224', '223835']
       duration_minmax: [2, 96]
     pass2:
+      # gradually eliminate invalid cols/rows in several iterations
+      # the last value in each list is an approximation of final missrate threshold
       max_col_missrate: [0.9, 0.8, 0.5]
       max_subject_missrate: [0.9, 0.8, 0.5]
-      adm_select_strategy: default
+      adm_select_strategy: default # default always select zero. Another option: random
       # check_sepsis_time: [-10, 30]
   generate_table:
     align_target: ['220224', '223835']

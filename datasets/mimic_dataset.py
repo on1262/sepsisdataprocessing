@@ -22,7 +22,7 @@ class MIMICIV(Dataset):
         self._gbl_conf = GLOBAL_CONF_LOADER['dataset']['mimic-iv']
         self._mimic_dir:str = self._gbl_conf['paths']['mimic_dir']
         self._loc_conf = tools.Config(cache_path=self._gbl_conf['paths']['conf_cache_path'], manual_path=self._gbl_conf['paths']['conf_manual_path'])
-
+        
         # variable for phase 1
         self._extract_result:dict = None
         self._hosp_item:dict = None
@@ -932,7 +932,7 @@ class MIMICIVDataset(MIMICIV):
     def on_build_table(self, key, value, t_start):
         if key == 'sepsis_time' or key == 'dod': # sepsis time 基准变为表格的起始点
             return value - t_start
-      
+    
     def on_feature_engineering(self, tables:list[np.ndarray], norm_dict:dict, static_keys:list, dynamic_keys):
         '''
         特征工程, 增加某些计算得到的特征
