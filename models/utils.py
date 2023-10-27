@@ -12,15 +12,13 @@ def Collect_Fn(data_list:list):
 
 class DynamicLabelGenerator():
     '''
-    生成每个时间点在预测窗口内的四分类标签
-    soft_label: 是否开启软标签
+    生成每个时间点和预测窗口的标签，但是不展开时间轴
     '''
-    def __init__(self, soft_label=False, window=16, centers=list(), smoothing_band=50, limit_idx=[]) -> None:
+    def __init__(self, window=16, centers=list(), smoothing_band=50, limit_idx=[]) -> None:
         assert(len(centers) == 4)
         self.window = window # 向前预测多少个点内的ARDS
         self.centers = centers # 判断ARDS的界限
         self.band = smoothing_band # 平滑程度, 不能超过两个center之间的距离
-        self.soft_label = soft_label # 是否开启软标签
         self.forbidden_idx = []
         self.limit_idx = limit_idx
         # generate idx
@@ -141,8 +139,7 @@ class StaticLabelGenerator():
         self.used_idx = None
 
     def available_idx(self, n_fea=None):
-        '''
-        生成可用的特征序号
+        '''生成可用的特征序号
         '''
         if self.used_idx is not None:
             return self.used_idx
@@ -186,39 +183,3 @@ class StaticLabelGenerator():
                 label[:, c_idx] = \
                     np.logical_and(mat_min > 0.5*(self.centers[c_idx-1]+self.centers[c_idx]), mat_min <= 0.5*(self.centers[c_idx+1]+self.centers[c_idx]))
         return mask[:, 0], {'X': data[:, self.available_idx(n_fea), 0], 'Y': label}
-
-class DropoutLabelGenerator:
-    '''按照给定的缺失率, 将输入的数据进行-1填充'''
-    def __init__(self, dropout, miss_table, value=-1) -> None:
-        self.dropout = dropout
-        self.value = value
-        self.miss_table = np.asarray(miss_table)
-        self.miss_table = np.clip(self.dropout * (self.miss_table / np.mean(self.miss_table)), 0, 1)
-    
-    def __call__(self, data:np.ndarray) -> np.ndarray:
-        '''
-        按照给定的缺失权重处理各个特征, 将data内的数据点变为-1, 返回mask和data
-        data: (batch, n_fea) or (batch, n_fea, seq_len)
-        '''
-        dim = len(data.shape)
-        if dim == 2:
-            data = data[:, :, np.newaxis] # ->(batch, n_fea, seq_len)
-        else:
-            assert(dim == 3)
-        mask = np.ones(data.shape, dtype=bool) # ->(batch, n_fea, seq_len)
-        if self.dropout == 0:
-            if dim == 2:
-                data = data[:, :, 0]
-                mask = mask[:,:,0]
-            return mask, data
-        for idx in range(data.shape[1]):
-            mat = np.ones((mask.shape[0]*mask.shape[2],), dtype=bool)
-            k = round(min(1, self.miss_table[idx])*mask.shape[0]*mask.shape[2])
-            mat[np.random.permutation(mask.shape[0]*mask.shape[2])[:k]] = False
-            mask[:, idx, :] = np.reshape(mat, (mask.shape[0],mask.shape[2]))
-        data = data * mask + self.value * np.logical_not(mask)
-        if dim == 2:
-            data = data[:, :, 0]
-            mask = mask[:,:,0]
-        return mask, data
-

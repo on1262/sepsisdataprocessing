@@ -193,25 +193,29 @@ class MIMICIV(Dataset):
         logger.info(f'MIMIC-IV: processing subjects and admissions')
         # 构建subject
         patients = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'patients.csv'), encoding='utf-8')
-        for row in tqdm(patients.itertuples(), 'construct subject', total=len(patients)):
+        for row in tqdm(patients.itertuples(), 'Construct Subjects', total=len(patients)):
             s_id = row.subject_id
             if s_id in self._extract_result:
-                subject = Subject(row.subject_id, anchor_year=row.anchor_year)
+                subject = Subject(row.subject_id, birth_year=row.anchor_year - row.anchor_age)
                 self._subjects[s_id] = self.on_build_subject(s_id, subject, row, self._extract_result)
 
         logger.info(f'Extract {len(self._subjects)} patients from {len(self._extract_result)} patients in extract_result')
 
+        # 加入admission
+        admissions = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'admissions.csv'), encoding='utf-8')
+        for row in tqdm(admissions.itertuples(), 'Extract Admissions', total=len(admissions)):
+            if row.subject_id in self._subjects:
+                self.on_extract_admission(self._subjects[row.subject_id], source='admission', row=row)
+
         for path, prefix in zip(
             [os.path.join(self._mimic_dir, 'icu', 'icustays.csv'), os.path.join(self._mimic_dir, 'hosp', 'transfers.csv')], 
-            ['icu', 'ed']
+            ['icu', 'transfer']
         ):
             table = pd.read_csv(path, encoding='utf-8')
-            for row in tqdm(table.itertuples(), desc=f'Extract admissions from {prefix.upper()}', total=len(table)):
+            for row in tqdm(table.itertuples(), desc=f'Extract admission information from {prefix.upper()}', total=len(table)):
                 s_id = row.subject_id
                 if s_id in self._subjects:
-                    adm = self.on_extract_admission(source=prefix, row=row)
-                    if adm is not None:
-                        self._subjects[s_id].append_admission(adm)
+                    self.on_extract_admission(self._subjects[s_id], source=prefix, row=row)
             del table
 
         # 患者的基本信息，如身高、体重、血压
@@ -398,7 +402,7 @@ class MIMICIV(Dataset):
     def _preprocess_phase6(self, p_final_table):
         '''
         对每个subject生成时间轴对齐的表, tick(hour)是生成的表的间隔
-        '''  
+        '''
 
         if os.path.exists(p_final_table):
             with open(p_final_table, 'rb') as fp:
@@ -411,7 +415,9 @@ class MIMICIV(Dataset):
         # step1: 插值并生成表格
         tables:list[np.ndarray] = [] # table for all subjects
         collect_keys = set(self._static_keys).union(set(self._dynamic_keys))
-        logger.info(f'Detected {len(collect_keys)} available dynamic features')
+        logger.info(f'Detected {len(self._dynamic_keys)} available dynamic features')
+        logger.info(f'Detected {len(self._static_keys)} available static features')
+
         default_missvalue = float(self._loc_conf['dataset']['generate_table']['default_missing_value'])
         for s_id in tqdm(self._subjects.keys(), desc='Generate aligned table'):
             s = self._subjects[s_id]
@@ -431,7 +437,7 @@ class MIMICIV(Dataset):
             for idx, key in enumerate(self._static_keys):
                 if key in self._subjects[s_id].static_data:
                     value = self._subjects[s_id].nearest_static(key, t_start)
-                    static_data[idx] = self.on_build_table(key, value, t_start)
+                    static_data[idx] = self.on_build_table(self._subjects[s_id], key, value, t_start)
             individual_table[:len(self._static_keys), :] = static_data[:, None]
 
             # 插值dynamic data
@@ -804,10 +810,9 @@ class MIMICIVDataset(MIMICIV):
             当sepsis_time<0的时候, 表明sepsis发生得早, 对于一些模型, sepsis time不能太小, 可以用来筛选数据
         '''
         ymd_convertor = tools.TimeConverter(format="%Y-%m-%d", out_unit='hour')
+        subject.append_static(0, 'age', -1)
         for ele_dict in _extract_result[id]: # dict(list(dict))
             sepsis_time = ele_dict['sepsis_time']
-
-            # TODO self._subjects[s_id].append_static(sepsis_time, 'age', row['anchor_age']) 每次入院的年龄是有可能变化的
             # TODO dod的处理不好
             subject.append_static(sepsis_time, 'gender', row.gender)
             if row.dod is not None and isinstance(row.dod, str):
@@ -823,29 +828,36 @@ class MIMICIVDataset(MIMICIV):
             subject.append_static(sepsis_time, 'renal', ele_dict['renal'])
         return subject
     
-    def on_extract_admission(self, source, row:namedtuple):
+    def on_extract_admission(self, subject:Subject, source:str, row:namedtuple):
         ymdhms_converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
-        if source == 'icu':
-            return Admission(
-                unique_id=int(row.hadm_id*1e8+row.stay_id),
-                admittime=ymdhms_converter(row.intime), 
-                dischtime=ymdhms_converter(row.outtime),
-                label='icu',
+        if source == 'admission': # 覆盖最全面，最开始进行筛选
+            admittime = ymdhms_converter(row.admittime)
+            dischtime = ymdhms_converter(row.dischtime)
+            if dischtime < admittime:
+                return
+            adm = Admission(
+                unique_id=int(row.hadm_id*1e8),
+                admittime=admittime, 
+                dischtime=dischtime
             )
-        elif source == 'ed':
-            if row.careunit != 'Emergency Department':
-                return None
-            else:
-                if not np.isnan(row.hadm_id):
-                    unique_id = int(row.hadm_id*1e8+row.transfer_id)
-                else:
-                    unique_id = int(row.transfer_id*1e8+row.transfer_id) # transfer中某些情况没有分配admission
-                return Admission(
-                    unique_id=unique_id,
-                    admittime=ymdhms_converter(row.intime), 
-                    dischtime=ymdhms_converter(row.outtime),
-                    label='ed'
-                )
+            discretizer = self._loc_conf['dataset']['category_to_numeric']
+            subject.append_admission(adm)
+            for name, val in zip(
+                ['insurance', 'language', 'race', 'marital_status'],
+                [row.insurance, row.language, row.race, row.marital_status]
+            ):  
+                subject.append_static(admittime, name, discretizer[name][val] if val in discretizer[name] else discretizer[name]['Default'])
+            
+            subject.append_static(admittime, 'hosp_expire', row.hospital_expire_flag)
+        elif source == 'icu':
+            pass
+        elif source == 'transfer':
+            if not np.isnan(row.hadm_id):
+                adm = subject.find_admission(int(row.hadm_id*1e8))
+                if adm is not None:
+                    discretizer = self._loc_conf['dataset']['category_to_numeric']
+                    careunit = discretizer['careunit'][row.careunit] if row.careunit in discretizer['careunit'] else discretizer['careunit']['Default']
+                    adm.append_dynamic('careunit', ymdhms_converter(row.intime), careunit)
         else:
             assert(0)
 
@@ -929,9 +941,16 @@ class MIMICIVDataset(MIMICIV):
                 adm.dynamic_data.pop(key)
         return invalid_count
 
-    def on_build_table(self, key, value, t_start):
-        if key == 'sepsis_time' or key == 'dod': # sepsis time 基准变为表格的起始点
+    def on_build_table(self, subject:Subject, key, value, t_start):
+        if key == 'sepsis_time': # sepsis time 基准变为表格的起始点
             return value - t_start
+        elif key == 'dod':
+            return np.floor(value - t_start) // (24*365) # 经过多少年死亡
+        elif key == 'age':
+            age = subject.admissions[0].admittime // (24*365) - subject.birth_year
+            return age
+        else:
+            return value
     
     def on_feature_engineering(self, tables:list[np.ndarray], norm_dict:dict, static_keys:list, dynamic_keys):
         '''

@@ -4,6 +4,13 @@ dataset:
     ed: True # link mimic-iv-ED dataset
     hosp: True
     icu: True
+  category_to_numeric:
+    insurance: { Medicare: 1, Medicaid: 2, Other: 0, Default: 0}
+    language: {ENGLISH: 1, Default: 0}
+    marital_status: {WIDOWED: 1, SINGLE: 2, MARRIED: 3, DIVORCED: 4, Default: 0}
+    race: {WHITE: 1, Default: 0}
+    careunit: {'Emergency Department': 1, 'Medicine': 2, 'Emergency Department Observation': 3, 'Default': 0}
+
   miss_dict_reference:
     PF_ratio: ['220224', '223835']
     PPD:
@@ -56,33 +63,32 @@ dataset:
 model:
   feature_explore:
     dataset_version: explore_version
-    plot_samples:
+    plot_chart_vis:
       enabled: true
+      plot_transfer_careunit: true
+    plot_samples:
+      enabled: false
       n_sample: 50
       features:
         - Arterial O2 pressure
         - Inspired O2 Fraction
     plot_time_series:
-      enabled: true
+      enabled: false
       names:
         - PF_ratio
       n_sample: 400
       n_per_plots: 40
     correlation:
-      enabled: true
+      enabled: false
       target: PF_ratio
-    miss_mat: true
-    first_ards_time: false
-    feature_count: true
-    generate_report: true
+    miss_mat: false
+    first_ards_time: true
+    feature_count: false
+    generate_report: false
     report_params:
       basic: true
-      dynamic_dist: true
-      static_dist: true
-      hit_table:
-        enabled: true
-        min_thres: 0.5
-      global_missrate: true
+      dynamic_dist: false
+      static_dist: false
     
   nearest_4cls:
     dataset_version: original_version

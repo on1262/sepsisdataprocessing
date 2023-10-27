@@ -71,3 +71,4 @@ def cal_label_weight(n_cls, mask, label):
     weight = weight / np.sum(weight)
     logger.info(f'4cls weight: {weight}')
     return weight
+

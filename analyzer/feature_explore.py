@@ -6,6 +6,7 @@ import numpy as np
 from tqdm import tqdm
 import seaborn as sns
 import os
+from os.path import join as osjoin
 import pandas as pd
 
 class FeatureExplorer:
@@ -21,11 +22,13 @@ class FeatureExplorer:
         '''输出mimic-iv数据集的统计特征, 独立于模型和研究方法'''
         logger.info('Analyzer: Feature explore')
         dataset_version = self.params['dataset_version']
-        out_dir = os.path.join(self.params['paths']['out_dir'], f'explore_{dataset_version}')
+        out_dir = osjoin(self.params['paths']['out_dir'], f'feature_explore_{dataset_version}')
         tools.reinit_dir(out_dir, build=True)
         # random plot sample time series
         if self.params['generate_report']:
             self.dataset.make_report(version_name=dataset_version, params=self.params['report_params'])
+        if self.params['plot_chart_vis']['enabled']:
+            self.plot_chart_vis(out_dir=osjoin(out_dir, 'chart_vis'))
         if self.params['plot_samples']['enabled']:
             n_sample = self.params['plot_samples']['n_sample']
             id_list = [self.dataset.fea_id(x) for x in self.params['plot_samples']['features']]
@@ -45,6 +48,23 @@ class FeatureExplorer:
         if self.params['feature_count']:
             self.feature_count(out_dir)
     
+    def plot_chart_vis(self, out_dir):
+        tools.reinit_dir(out_dir)
+        if self.params['plot_chart_vis']['plot_transfer_careunit']:
+            transfer_path = osjoin(self.params['paths']['mimic_dir'], 'hosp', 'transfers.csv')
+            table = pd.read_csv(transfer_path, engine='c', encoding='utf-8')
+            record = {}
+            for row in tqdm(table.itertuples(), 'plot chart: transfers'):
+                r = 'empty' if not isinstance(row.careunit, str) else row.careunit
+                if not r in record:
+                    record[r] = 1
+                else:
+                    record[r] += 1
+            # sort and plot careunit types
+            x = sorted(list(record.keys()), key=lambda x:record[x], reverse=True)
+            y = np.asarray([record[k] for k in x])
+            tools.plot_bar_with_label(y, x, f'hosp/transfer.careunit Count', out_path=os.path.join(out_dir, f"transfer_careunit.png"))
+
     def first_ards_time(self, out_dir):
         '''打印首次呼衰出现的时间分布'''
         times = []
@@ -83,7 +103,7 @@ class FeatureExplorer:
             fp.write(f"Target feature: {target_label}")
             for idx in range(corr_mat.shape[1]):
                 fp.write(f'Correlation with target: {correlations[idx][0]} \t{correlations[idx][1]}\n')
-        
+    
     def miss_mat(self, out_dir):
         '''计算行列缺失分布并输出'''
         na_table = np.ones((len(self.dataset.subjects), len(self.dataset._dynamic_keys)), dtype=bool)
@@ -133,7 +153,6 @@ class FeatureExplorer:
             labels = [self.dataset.fea_label(key) for key in new_list]
             tools.plot_bar_with_label(counts, labels, f'{name} Count', out_path=os.path.join(out_dir, f"{name}_feature_count.png"))
             tools.plot_bar_with_label(intervals, labels, f'{name} Interval', out_path=os.path.join(out_dir, f"{name}_feature_interval.png"))
-
 
     def plot_samples(self, num, id_list:list, id_names:list, out_dir):
         '''随机抽取num个样本生成id_list中特征的时间序列, 在非对齐的时间刻度下表示'''

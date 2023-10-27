@@ -15,17 +15,16 @@ class Admission:
     admittime: 起始时间
     dischtime: 结束时间
     '''
-    def __init__(self, unique_id:int, admittime:float, dischtime:float, label=['ed', 'icu']) -> None:
+    def __init__(self, unique_id:int, admittime:float, dischtime:float) -> None:
         self.dynamic_data = {} # dict(fea_name:ndarray(value, time))
         assert(admittime < dischtime)
-        self.label = label # ed or icu
-        self.unique_id = unique_id # hadm_id+stay_id or hadm_id+transfer_id, 16 digits
+        self.unique_id = unique_id # 16 digits
         self.admittime = admittime
         self.dischtime = dischtime
-        self.data_updated = False
+        self._data_updated = False
     
     def append_dynamic(self, itemid, time:float, value):
-        assert(not self.data_updated)
+        assert(not self._data_updated)
         if self.dynamic_data.get(itemid) is None:
             self.dynamic_data[itemid] = [(value, time)]
         else:
@@ -37,8 +36,8 @@ class Admission:
         
     def update_data(self):
         '''绝对时间变为相对时间，更改动态特征的格式'''
-        if not self.data_updated:
-            self.data_updated = True
+        if not self._data_updated:
+            self._data_updated = True
             for key in self.dynamic_data:
                 if isinstance(self.dynamic_data[key], list):
                     arr = np.asarray(sorted(self.dynamic_data[key], key=lambda x:x[1]))
@@ -67,9 +66,9 @@ class Subject:
     static data: dict(feature name: (value, charttime))
     dyanmic data: admissions->(id, chart time, value)
     '''
-    def __init__(self, subject_id, anchor_year:int) -> None:
+    def __init__(self, subject_id, birth_year:int) -> None:
         self.subject_id = subject_id
-        self.anchor_year = anchor_year
+        self.birth_year = birth_year
         self.static_data:dict[str, np.ndarray] = {} # dict(fea_name:value)
         self.admissions:list[Admission] = []
     
@@ -116,6 +115,11 @@ class Subject:
         for adm in self.admissions:
             adm.update_data()
 
+    def find_admission(self, unique_id:int):
+        for adm in self.admissions:
+            if adm.unique_id == unique_id:
+                return adm
+        return None
     def del_empty_admission(self):
         # 删除空的admission
         new_adm = []
