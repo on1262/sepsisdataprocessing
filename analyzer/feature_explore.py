@@ -22,7 +22,7 @@ class FeatureExplorer:
         '''输出mimic-iv数据集的统计特征, 独立于模型和研究方法'''
         logger.info('Analyzer: Feature explore')
         dataset_version = self.params['dataset_version']
-        out_dir = osjoin(self.params['paths']['out_dir'], f'feature_explore_{dataset_version}')
+        out_dir = osjoin(self.params['paths']['out_dir'], f'feature_explore[{dataset_version}]')
         tools.reinit_dir(out_dir, build=True)
         # random plot sample time series
         if self.params['generate_report']:

@@ -735,6 +735,12 @@ class MIMICIVDataset(MIMICIV):
                             dur_min, dur_max = rule['duration_minmax']
                             if not (dur > dur_min and dur < dur_max):
                                 continue
+                        if 'check_sepsis_time' in rule:
+                            t_min, t_max = rule['check_sepsis_time']
+                            sepsis_time = subjects[s_id].nearest_static('sepsis_time', start_time)
+                            time_delta = sepsis_time - (adm.admittime + start_time)
+                            if not (time_delta > t_min and time_delta < t_max):
+                                continue
                     if flag != 0:
                         retain_adms.append(idx)
                 subjects[s_id].admissions = [subjects[s_id].admissions[idx] for idx in retain_adms]
@@ -813,7 +819,6 @@ class MIMICIVDataset(MIMICIV):
         subject.append_static(0, 'age', -1)
         for ele_dict in _extract_result[id]: # dict(list(dict))
             sepsis_time = ele_dict['sepsis_time']
-            # TODO dod的处理不好
             subject.append_static(sepsis_time, 'gender', row.gender)
             if row.dod is not None and isinstance(row.dod, str):
                 subject.append_static(sepsis_time, 'dod', ymd_convertor(row.dod))
@@ -942,12 +947,18 @@ class MIMICIVDataset(MIMICIV):
         return invalid_count
 
     def on_build_table(self, subject:Subject, key, value, t_start):
+        admittime = subject.admissions[0].admittime
         if key == 'sepsis_time': # sepsis time 基准变为表格的起始点
-            return value - t_start
+            return value - (t_start+admittime)
         elif key == 'dod':
-            return np.floor(value - t_start) // (24*365) # 经过多少年死亡
+            if abs(value+1.0)<1e-3:
+                return -1
+            else:
+                delta_year = np.floor(value / (24*365) - ((t_start+admittime) / (24*365))) # 经过多少年死亡, 两个都是timestamp，不需要加上1970
+                assert(-100 < delta_year < 100)
+                return delta_year
         elif key == 'age':
-            age = subject.admissions[0].admittime // (24*365) - subject.birth_year
+            age = (admittime + t_start) // (24*365) + 1970 - subject.birth_year # admittime从1970年开始计时
             return age
         else:
             return value
@@ -981,11 +992,16 @@ class MIMICIVDataset(MIMICIV):
                     assert(0)
             tables[t_idx] = np.concatenate([table, addi_table], axis=0)
             norm_data.append(addi_table)
-        # update norm dict
+        # update norm dict for additional features
         norm_data = np.concatenate(norm_data, axis=-1)
         for idx, key in enumerate(addi_dynamic):
             mean, std = np.mean(norm_data[idx, :]), np.std(norm_data[idx, :])
             norm_dict[key] = {'mean': mean, 'std': std}
+        # update norm dict for specific features
+        for idx, key in enumerate(['dod', 'sepsis_time', 'age']):
+            norm_data = np.asarray([table[index_dict[key], 0] for table in tables]).flatten()
+            norm_data = norm_data[np.abs(norm_data+1.0)>1e-3] # pick valid data
+            norm_dict[key] = {'mean': norm_data.mean(), 'std': norm_data.std()}
         return {
             'tables': tables,
             'norm_dict': norm_dict,
@@ -1073,7 +1089,7 @@ class MIMICIVDataset(MIMICIV):
                 write_lines.append(f'min: {np.min(static_data):.3f}')
                 tools.plot_single_dist(
                     data=static_data, data_name=f'{fea_name}', 
-                    save_path=os.path.join(dist_dir, 'static_value', save_name + '.png'), discrete=False, adapt=True)
+                    save_path=os.path.join(dist_dir, 'static_value', save_name + '.png'), discrete=False, adapt=True, bins=50)
         # write report
         with open(out_path, 'w', encoding='utf-8') as fp:
             for line in write_lines:
