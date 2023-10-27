@@ -30,7 +30,7 @@ class BaselineNearestClsAnalyzer:
         pred = np.zeros((len(self.dataset), self.dataset.data.shape[-1], len(self.centers)))
         for idx, data in tqdm(enumerate(self.dataset), desc='testing', total=len(self.dataset)):
             np_data = data['data']
-            pred[idx, :, :] = tools.label_smoothing(self.centers, np_data[self.target_idx, :], band=50)
+            pred[idx, :, :] = tools.label_4cls(self.centers, np_data[self.target_idx, :], smooth_band=50)
         return pred
 
     def run(self):
@@ -45,7 +45,7 @@ class BaselineNearestClsAnalyzer:
         metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         metric_startstep = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
         # step 3: generate labels
-        generator = mlib.DynamicLabelGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
+        generator = mlib.DynamicDataGenerator(window=self.params['window'], centers=self.params['centers'], smoothing_band=self.params['smoothing_band'])
         mask, label = generate_labels(self.dataset, self.dataset.data, generator, out_dir)
         # step 4: train and predict
         for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()): 
