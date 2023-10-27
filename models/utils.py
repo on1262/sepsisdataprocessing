@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import tools
 import compress_pickle as pickle
-from os.path import exists
+from os.path import exists, join as osjoin
 from abc import abstractmethod
 
 def Collect_Fn(data_list:list):
@@ -21,7 +21,7 @@ class Normalization():
         # restore de-norm data
         # in_data: (..., n_selected_fea, seqs_len)
         means, stds = self.means[selected_idx], self.stds[selected_idx] + 1e-4
-        out = in_data * self.stds + self.means
+        out = in_data * stds + means
         return out
 
     def __call__(self, in_data, selected_idx) -> Any:
@@ -31,30 +31,30 @@ class Normalization():
         return out
 
 class DataGenerator():
-    def __init__(self, n_fea, limit_idx=[], forbidden_idx=[], p_cache_file=None) -> None:
-        self._avail_idx = [idx for idx in range(n_fea) if idx in limit_idx and idx not in forbidden_idx]
-        self.p_cache_file = p_cache_file
+    def __init__(self, n_fea, limit_idx=[], forbidden_idx=[], cache_dir=None) -> None:
+        if len(limit_idx) == 0:
+            self._avail_idx = [idx for idx in range(n_fea) if idx not in forbidden_idx]
+        else:
+            self._avail_idx = [idx for idx in range(n_fea) if idx in limit_idx and idx not in forbidden_idx]
+        self.cache_dir = cache_dir
 
     @property
     def avail_idx(self):
         return self._avail_idx
     
-    def load_cache(self):
-        if self.p_cache_file is not None and exists(self.p_cache_file):
-            return pickle.load(self.p_cache_file)
+    def load_cache(self, cache_name):
+        if self.cache_dir is not None and exists(osjoin(self.cache_dir, cache_name + '.lzma')):
+            return pickle.load(osjoin(self.cache_dir, cache_name + '.lzma'))
         else:
             return None
     
-    def save_cache(self, obj, force=False):
-        if self.p_cache_file is not None:
-            if exists(self.p_cache_file) and not force:
+    def save_cache(self, cache_name, obj, force=False):
+        if self.cache_dir is not None:
+            if exists(osjoin(self.cache_dir, cache_name + '.lzma')) and not force:
                 return
             else:
-                pickle.dump(obj, self.p_cache_file)
+                pickle.dump(obj, osjoin(self.cache_dir, cache_name + '.lzma'))
     
-    @abstractmethod
-    def __call__(self, _data:np.ndarray, seq_lens:list) -> Any:
-        pass
 
 class LabelGenerator():
     def __init__(self) -> None:
@@ -119,35 +119,38 @@ class DynamicDataGenerator(DataGenerator):
     '''
     生成每个时间点和预测窗口的标签，但是不展开时间轴
     '''
-    def __init__(self, window_points, n_fea, label_generator: LabelGenerator, target_idx, limit_idx=[], forbidden_idx=[], norm:Normalization=None, p_cache_file=None) -> None:
-        super().__init__(n_fea, limit_idx, forbidden_idx, p_cache_file)
+    def __init__(self, window_points, n_fea, label_generator: LabelGenerator, target_idx, 
+                 limit_idx=[], forbidden_idx=[], norm:Normalization=None, cache_dir=None) -> None:
+        super().__init__(n_fea, limit_idx, forbidden_idx, cache_dir)
         self.norm = norm
         self.target_idx = target_idx
         self.window = window_points # 向前预测多少个点内的ARDS
         self.label_gen = label_generator
     
-    def __call__(self, _data:np.ndarray, seq_lens:np.ndarray) -> np.ndarray:
+    def __call__(self, cache_name:str, _data:np.ndarray, seq_lens:np.ndarray) -> dict:
         '''
         data: (batch, n_fea, seq_lens)
         mask: (batch, seq_lens)
         return: 
             mask(batch, seq_lens), label(batch, seq_lens, n_cls)
         '''
-        cache = self.load_cache()
+        cache = self.load_cache(cache_name)
         if cache is not None:
             return cache
 
-        mask = tools.make_mask(_data.shape[[0,2]], seq_lens) # (batch, seq_lens)
+        mask = tools.make_mask((_data.shape[0], _data.shape[2]), seq_lens) # (batch, seq_lens)
         data = _data.copy()
         target = data[:, self.target_idx, :]
         data = data[:, self.avail_idx, :]
         # 将target按照时间顺序平移
         invalid_flag = target.max()
-        for idx in range(target.shape[1]-1): # 最后一个格子预测一格
-            stop = min(data.shape[1], idx+self.window)
+        for idx in range(target.shape[1]-1): # 最后一格被屏蔽掉
+            stop = min(target.shape[1], idx+self.window)
             mat = mask[:, idx+1:stop] * target[:, idx+1:stop] + np.logical_not(mask[:, idx+1:stop]) * (invalid_flag+1) # seq_len的最后一个格子是无效的
             mat_min = np.min(mat, axis=1) # (batch,)
+            target[:, idx] = mat_min
             mask[mat_min > invalid_flag+0.5, idx] = False # mask=False的部分会在mat被赋值data_max+1, 如果一个时序全都是无效部分, 就要被去掉
+        mask[:, -1] = False
         # 将target转化为标签
         label = self.label_gen(target) * mask[..., None]
         if self.norm is not None:
@@ -155,7 +158,7 @@ class DynamicDataGenerator(DataGenerator):
 
         result =  {'data': data, 'mask': mask, 'label': label}
         # save cache
-        self.save_cache(result, force=False)
+        self.save_cache(cache_name, result, force=False)
         return result
     
 class SliceDataGenerator(DataGenerator):
@@ -170,14 +173,14 @@ class SliceDataGenerator(DataGenerator):
         self.label_gen = label_generator
         self.slice_len = None
     
-    def __call__(self, _data:np.ndarray, seq_lens:np.ndarray) -> np.ndarray:
+    def __call__(self, cache_name:str, _data:np.ndarray, seq_lens:np.ndarray) -> dict:
         '''
         data: (batch, n_fea, seq_lens)
         mask: (batch, seq_lens)
         return: 
             label(n_slice, dim_target)
         '''
-        cache = self.load_cache()
+        cache = self.load_cache(cache_name)
         if cache is not None:
             self.slice_len = cache['slice_len']
             return cache
@@ -193,7 +196,9 @@ class SliceDataGenerator(DataGenerator):
             stop = min(data.shape[1], idx+self.window)
             mat = mask[:, idx+1:stop] * target[:, idx+1:stop] + np.logical_not(mask[:, idx+1:stop]) * (invalid_flag+1) # seq_len的最后一个格子是无效的
             mat_min = np.min(mat, axis=1) # (batch,)
+            target[:, idx] = mat_min
             mask[mat_min > invalid_flag+0.5, idx] = False # mask=False的部分会在mat被赋值data_max+1, 如果一个时序全都是无效部分, 就要被去掉
+        mask[:, -1] = False
         # 将target转化为标签
         label = self.label_gen(target) * mask[..., None]
         if self.norm is not None:
@@ -203,7 +208,7 @@ class SliceDataGenerator(DataGenerator):
         data, mask, label = self.make_slice(data), self.make_slice(mask), self.make_slice(np.transpose(label, (0, 2, 1))).transpose((0, 2, 1))
         result = {'data': data, 'mask': mask, 'label': label, 'slice_len': self.slice_len}
         # save cache
-        self.save_cache(result, force=False)
+        self.save_cache(cache_name, result, force=False)
         return result
     
     def make_slice(self, x:np.ndarray):
@@ -242,14 +247,14 @@ class StaticDataGenerator(DataGenerator):
         self.start_point = start_point
         self.label_gen = label_generator
     
-    def __call__(self, _data:np.ndarray, seq_lens:np.ndarray) -> np.ndarray:
+    def __call__(self, cache_name:str, _data:np.ndarray, seq_lens:np.ndarray) -> dict:
         '''
         data: (batch, n_fea, seq_lens)
         mask: (batch, seq_lens)
         return: 
             mask(new_batch, window), label(new_batch, n_cls), data(new_batch, avail_idx, window)
         '''
-        cache = self.load_cache()
+        cache = self.load_cache(cache_name)
         if cache is not None:
             return cache
 
@@ -273,5 +278,5 @@ class StaticDataGenerator(DataGenerator):
 
         result =  {'data': data, 'mask': mask, 'label': label}
         # save cache
-        self.save_cache(result, force=False)
+        self.save_cache(cache_name, result, force=False)
         return result

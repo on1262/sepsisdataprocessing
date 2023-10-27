@@ -84,15 +84,16 @@ model:
     miss_mat: false
     first_ards_time: true
     feature_count: false
-    generate_report: false
+    generate_report: true
     report_params:
       basic: true
-      dynamic_dist: false
-      static_dist: false
+      dynamic_dist: true
+      static_dist: true
     
   nearest_4cls:
     dataset_version: original_version
     window: 16
+    soft_label: false
     centers:
       - 50
       - 150

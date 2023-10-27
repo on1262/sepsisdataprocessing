@@ -454,7 +454,7 @@ class MIMICIV(Dataset):
         index_dict = {key:val for val, key in enumerate(total_keys)} # used for finding index
         
         # step2: 时间轴长度对齐, 生成seqs_len, 进行某些特征的最后处理
-        seqs_len = [d.shape[1] for d in tables]
+        seqs_len = np.asarray([d.shape[1] for d in tables], dtype=np.int64)
         max_len = max(seqs_len)
         for t_idx in tqdm(range(len(tables)), desc='Padding tables'):
             if seqs_len[t_idx] == max_len:

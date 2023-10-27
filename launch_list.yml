@@ -1,5 +1,5 @@
 ---
 
 analyzer_params: [
-  feature_explore
+  nearest_4cls
 ]
