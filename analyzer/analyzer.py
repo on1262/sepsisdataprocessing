@@ -4,7 +4,7 @@ import os
 from tools import logger as logger
 from .container import DataContainer
 from .feature_explore import FeatureExplorer
-from .method_nearest_cls import BaselineNearestClsAnalyzer
+from .method_nearest_cls import BaselineNearest4ClsAnalyzer
 from datasets import MIMICIVDataset
 
 
@@ -16,7 +16,7 @@ class Analyzer:
         '''
         self.container = DataContainer(dataset)
         self.analyzer_dict = {
-            'nearest_4cls': BaselineNearestClsAnalyzer,
+            'nearest_4cls': BaselineNearest4ClsAnalyzer,
             'feature_explore': FeatureExplorer,
         }
         if params is not None:
@@ -26,7 +26,6 @@ class Analyzer:
                         self.run_sub_analyzer(name, label)
                         break
 
-        
     def run_sub_analyzer(self, analyzer_name, label):
         logger.info(f'Run Analyzer: {analyzer_name}')
         params = self.container.get_model_params(analyzer_name)

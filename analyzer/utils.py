@@ -5,27 +5,6 @@ import tools
 import os
 
 
-def generate_labels(dataset, data, generator, out_dir):
-    '''生成标签的通用代码'''
-    dataset.mode('all')
-    pkl_path = os.path.join(out_dir, 'dataset_derived.pkl')
-    if os.path.exists(pkl_path):
-        logger.info(f'Load derived data set from {pkl_path}')
-        with open(pkl_path, 'rb') as fp:
-            mask, label = pickle.load(fp)
-    else:
-        logger.info('Generating label')
-        mask = tools.make_mask((data.shape[0], data.shape[2]), dataset.seqs_len) # -> (batch, seq_lens)
-        mask, label = generator(data, mask)
-    return mask, label
-
-def detect_adm_data(id:str, subjects:dict):
-    '''直接打印某个id的输出'''
-    for s_id, s in subjects.items():
-        for adm in s.admissions:
-            logger.info(adm[id][:,0])
-            input()
-
 def map_func(a:np.ndarray):
     '''
     将4分类的结果map到2分类的结果
@@ -71,3 +50,4 @@ def cal_label_weight(n_cls, mask, label):
     weight = weight / np.sum(weight)
     logger.info(f'4cls weight: {weight}')
     return weight
+

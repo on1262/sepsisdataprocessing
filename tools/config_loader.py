@@ -1,16 +1,16 @@
-import json
+import yaml
 import os
 
 
 '''
-ConfigLoader: load and process global configs from a single json file
+ConfigLoader: load and process global configs from a single yaml file
     work directory will be appended if 'work_dir' in the keys of dict
 '''
 class ConfigLoader():
     def __init__(self, glob_conf_path:str) -> None:
         self.glob_conf_path = glob_conf_path
         with open(self.glob_conf_path, 'r',encoding='utf-8') as fp:
-            self.glob_conf = json.load(fp)
+            self.glob_conf = yaml.load(fp, Loader=yaml.SafeLoader)
         # append work_dir to every values under 'paths'
         if 'work_dir' in self.glob_conf.keys():
             self.process_path(self.glob_conf['work_dir'], self.glob_conf)
@@ -28,6 +28,6 @@ class ConfigLoader():
     
 
 
-GLOBAL_CONF_LOADER = ConfigLoader('./configs/global_config.json')
+GLOBAL_CONF_LOADER = ConfigLoader('./configs/global_config.yaml')
         
         

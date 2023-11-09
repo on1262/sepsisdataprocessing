@@ -1,11 +1,11 @@
 mimic-iv-2.2.zip
-documents/
+__pycache__
 data/
 outputs/
 *.pyc
-*.png
 *.pt
 *.log
 catboost_info/
 nohup.out
 simhei.ttf
+generate_requirements.sh

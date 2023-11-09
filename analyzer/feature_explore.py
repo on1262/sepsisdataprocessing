@@ -6,12 +6,14 @@ import numpy as np
 from tqdm import tqdm
 import seaborn as sns
 import os
+from os.path import join as osjoin
 import pandas as pd
 
 class FeatureExplorer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.container = container
+        self.dataset = container.dataset
         self.gbl_conf = container._conf
         self.dataset = container.dataset
         self.data = self.dataset.data
@@ -20,15 +22,17 @@ class FeatureExplorer:
         '''输出mimic-iv数据集的统计特征, 独立于模型和研究方法'''
         logger.info('Analyzer: Feature explore')
         dataset_version = self.params['dataset_version']
-        out_dir = os.path.join(tools.GLOBAL_CONF_LOADER['analyzer'][self.container.dataset.name()]['paths']['out_dir'], f'explore_{dataset_version}')
+        out_dir = osjoin(self.params['paths']['out_dir'], f'feature_explore[{dataset_version}]')
         tools.reinit_dir(out_dir, build=True)
         # random plot sample time series
         if self.params['generate_report']:
             self.dataset.make_report(version_name=dataset_version, params=self.params['report_params'])
+        if self.params['plot_chart_vis']['enabled']:
+            self.plot_chart_vis(out_dir=osjoin(out_dir, 'chart_vis'))
         if self.params['plot_samples']['enabled']:
             n_sample = self.params['plot_samples']['n_sample']
-            id_list = [self.dataset.get_id_and_label(x)[0] for x in self.params['plot_samples']['features']]
-            id_names = [self.dataset.get_id_and_label(x)[1] for x in self.params['plot_samples']['features']]
+            id_list = [self.dataset.fea_id(x) for x in self.params['plot_samples']['features']]
+            id_names = [self.dataset.fea_label(x) for x in self.params['plot_samples']['features']]
             self.plot_samples(num=n_sample, id_list=id_list, id_names=id_names, out_dir=os.path.join(out_dir, 'samples'))
         if self.params['plot_time_series']['enabled']:
             n_sample = self.params['plot_time_series']['n_sample']
@@ -44,6 +48,23 @@ class FeatureExplorer:
         if self.params['feature_count']:
             self.feature_count(out_dir)
     
+    def plot_chart_vis(self, out_dir):
+        tools.reinit_dir(out_dir)
+        if self.params['plot_chart_vis']['plot_transfer_careunit']:
+            transfer_path = osjoin(self.params['paths']['mimic_dir'], 'hosp', 'transfers.csv')
+            table = pd.read_csv(transfer_path, engine='c', encoding='utf-8')
+            record = {}
+            for row in tqdm(table.itertuples(), 'plot chart: transfers'):
+                r = 'empty' if not isinstance(row.careunit, str) else row.careunit
+                if not r in record:
+                    record[r] = 1
+                else:
+                    record[r] += 1
+            # sort and plot careunit types
+            x = sorted(list(record.keys()), key=lambda x:record[x], reverse=True)
+            y = np.asarray([record[k] for k in x])
+            tools.plot_bar_with_label(y, x, f'hosp/transfer.careunit Count', out_path=os.path.join(out_dir, f"transfer_careunit.png"))
+
     def first_ards_time(self, out_dir):
         '''打印首次呼衰出现的时间分布'''
         times = []
@@ -70,12 +91,9 @@ class FeatureExplorer:
 
     def correlation(self, out_dir, target_id_or_label):
         # plot correlation matrix
-        if target_id_or_label in self.container.dataset.additional_feas:
-            target_id, target_label = target_id_or_label, target_id_or_label
-        else:
-            target_id, target_label = self.container.dataset.get_id_and_label(target_id_or_label)
-        target_index = self.container.dataset.idx_dict[target_id]
-        labels = [self.container.dataset.get_fea_label(id) for id in self.container.dataset.total_keys]
+        target_id, target_label = self.dataset.fea_id(target_id_or_label), self.dataset.fea_label(target_id_or_label)
+        target_index = self.dataset.idx_dict[target_id]
+        labels = [self.dataset.fea_label(id) for id in self.dataset._total_keys]
         corr_mat = tools.plot_correlation_matrix(self.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation_matrix'))
         correlations = []
         for idx in range(corr_mat.shape[1]):
@@ -85,15 +103,15 @@ class FeatureExplorer:
             fp.write(f"Target feature: {target_label}")
             for idx in range(corr_mat.shape[1]):
                 fp.write(f'Correlation with target: {correlations[idx][0]} \t{correlations[idx][1]}\n')
-        
+    
     def miss_mat(self, out_dir):
         '''计算行列缺失分布并输出'''
-        na_table = np.ones((len(self.dataset.subjects), len(self.dataset.dynamic_keys)), dtype=bool)
+        na_table = np.ones((len(self.dataset.subjects), len(self.dataset._dynamic_keys)), dtype=bool)
         for r_id, s_id in enumerate(self.dataset.subjects):
             for adm in self.dataset.subjects[s_id].admissions:
                 # TODO 替换dynamic keys到total keys
                 adm_key = set(adm.keys())
-                for c_id, key in enumerate(self.dataset.dynamic_keys):
+                for c_id, key in enumerate(self.dataset._dynamic_keys):
                     if key in adm_key:
                         na_table[r_id, c_id] = False
         # 行缺失
@@ -121,7 +139,7 @@ class FeatureExplorer:
         with open(os.path.join(out_dir, 'interval.txt'), 'w') as fp:
             for key in key_list:
                 interval = count_hist[key]['interval']
-                fp.write(f'\"{key}\", {self.dataset.get_fea_label(key)} mean interval={interval:.1f}\n')
+                fp.write(f'\"{key}\", {self.dataset.fea_label(key)} mean interval={interval:.1f}\n')
         vital_sig = {"220045", "220210", "220277", "220181", "220179", "220180", "223761", "223762", "224685", "224684", "224686", "228640", "224417"}
         med_ind = {key for key in key_list} - vital_sig
         for name in ['vital_sig', 'med_ind']:
@@ -132,10 +150,9 @@ class FeatureExplorer:
                     new_list.append(key)
             counts = np.asarray([count_hist[key]['count'] for key in new_list])
             intervals = np.asarray([count_hist[key]['interval'] for key in new_list])
-            labels = [self.dataset.get_fea_label(key) for key in new_list]
+            labels = [self.dataset.fea_label(key) for key in new_list]
             tools.plot_bar_with_label(counts, labels, f'{name} Count', out_path=os.path.join(out_dir, f"{name}_feature_count.png"))
             tools.plot_bar_with_label(intervals, labels, f'{name} Interval', out_path=os.path.join(out_dir, f"{name}_feature_interval.png"))
-
 
     def plot_samples(self, num, id_list:list, id_names:list, out_dir):
         '''随机抽取num个样本生成id_list中特征的时间序列, 在非对齐的时间刻度下表示'''
@@ -175,9 +192,9 @@ class FeatureExplorer:
             tools.reinit_dir(write_dir)
         n_sample = min(n_sample, self.data.shape[0])
         n_plot = int(np.ceil(n_sample / n_per_plots))
-        fea_idx = self.dataset.idx_dict[fea_name]
+        fea_idx = self.dataset._idx_dict[fea_name]
         start_idx = 0
-        label = self.dataset.get_fea_label(fea_name)
+        label = self.dataset.fea_label(fea_name)
         for p_idx in range(n_plot):
             stop_idx = min(start_idx + n_per_plots, n_sample)
             mat = self.data[start_idx:stop_idx, fea_idx, :]

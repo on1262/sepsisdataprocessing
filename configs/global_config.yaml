@@ -1,0 +1,17 @@
+---
+work_dir: '.'
+dataset:
+  mimic-iv:
+    paths:
+      mimic_dir: data/mimic-iv
+      cache_dir: data/mimic-iv/cache
+      conf_cache_path: configs/mimiciv_cache.yaml
+      conf_manual_path: configs/mimiciv_dataset.yaml
+      sepsis_patient_path: data/mimic-iv/sepsis_result/sepsis3.csv
+      out_dir: outputs/mimic-iv
+
+analyzer:
+  data_container:
+    ards_threshold: 300
+    n_fold: 5
+    seed: 100

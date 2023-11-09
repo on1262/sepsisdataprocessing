@@ -1,4 +1,7 @@
-# MIMIC-IV data processing pipeline
+
+![Pipeline Overview](document/general_pipeline.png)
+
+# MIMIC-IV Data Processing Pipeline
 
 ## 架构
 
@@ -117,6 +120,7 @@ preprocess version: 生成数据集的不同版本
 
 **step1: build postgresql**
 
+```
 createdb mimiciv
 
 cd ~/mimic-code/mimic-iv/buildmimic/postgres
@@ -125,8 +129,10 @@ psql -d mimiciv -f create.sql
 
 psql -d mimiciv -v ON_ERROR_STOP=1 -v mimic_data_dir=/path/to/mimic-iv -f load.sql
 
+```
 **step2: build concepts**
 
+```
 cd ~/mimic-code/mimic-iv/concepts_postgres
 
 psql -d mimiciv
@@ -135,9 +141,14 @@ psql -d mimiciv
 
 \i postgres-make-concepts.sql
  
+```
 **step3: extract csv**
 
+```
+
 \copy (SELECT * FROM mimiciv_derived.sepsis3) TO '~/sepsis3.csv' WITH CSV HEADER; -- 提取出csv文件
+
+```
 
 ## 特征加工 & 新增特征
 

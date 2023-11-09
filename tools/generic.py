@@ -1,5 +1,5 @@
 import numpy as np
-import json
+import yaml
 import datetime
 from sklearn import random as sk_random
 import pandas as pd
@@ -61,7 +61,6 @@ def assert_no_na(dataset:pd.DataFrame):
                 logger.error(f'assert_na: NA in feature:{col}')
                 assert(0)
 
-
 class Config:
     '''
         加载配置表
@@ -73,10 +72,10 @@ class Config:
         self.manual_path = manual_path
         self.configs = {}
         with open(manual_path, 'r', encoding='utf-8') as fp:
-            manual_conf = json.load(fp)
+            manual_conf = yaml.load(fp, Loader=yaml.SafeLoader)
         if os.path.exists(cache_path):
             with open(cache_path, 'r', encoding='utf-8') as fp:
-                self.configs = json.load(fp)
+                self.configs = yaml.load(fp, Loader=yaml.SafeLoader)
         for key in manual_conf.keys(): # 覆盖
             self.configs[key] = manual_conf[key]
 
@@ -85,7 +84,7 @@ class Config:
     
     def dump(self):
         with open(self.manual_path, 'w', encoding='utf-8') as fp:
-            json.dump(self.configs, fp)
+            yaml.dump(self.configs, fp)
 
 class TimeConverter:
     '''
@@ -124,37 +123,6 @@ def make_mask(m_shape, seq_lens) -> np.ndarray:
     else:
         assert(0)
     return mask
-
-def label_smoothing(centers:list, nums:np.ndarray, band=50):
-    '''
-    标签平滑
-    centers: 每个class的中心点, 需要是递增的, n_cls = len(centers)
-    nums: 输入(in_shape,) 可以是任意的
-    band: 在两个class之间进行线性平滑, band是需要平滑的总宽度
-        当输入在band外时(靠近各个中心或者超过两侧), 是硬标签, 只有在band内才是软标签
-    return: (..., len(centers)) 其中 (...) = nums.shape
-    '''
-    num_classes = len(centers)
-    smoothed_labels = np.zeros((nums.shape + (num_classes,)))
-    for i in range(num_classes-1):
-        center_i = centers[i]
-        center_j = centers[i+1]
-        lower = 0.5*(center_i + center_j) - band/2
-        upper = 0.5*(center_i + center_j) + band/2
-        mask = np.logical_and(nums > lower, nums <= upper)
-        hard_i = np.logical_and(nums >= center_i, nums <= lower)
-        hard_j = np.logical_and(nums < center_j, nums > upper)
-        if mask.any() and band > 0:
-            diff = (nums - center_i) / (center_j - center_i)
-            smooth_i = 1 - diff
-            smooth_j = diff
-            smoothed_labels[..., i][mask] = smooth_i[mask]
-            smoothed_labels[..., i+1][mask] = smooth_j[mask]
-        smoothed_labels[..., i][hard_i] = 1
-        smoothed_labels[..., i+1][hard_j] = 1
-    smoothed_labels[..., 0][nums <= centers[0]] = 1
-    smoothed_labels[..., -1][nums > centers[-1]] = 1
-    return smoothed_labels
 
 
 def find_best(path_dir, prefix='best'):
