@@ -67,23 +67,16 @@ class Config:
         cache_path: 自动配置
         manual_path: 手动配置
     '''
-    def __init__(self, cache_path, manual_path) -> None:
-        self.cache_path = cache_path
-        self.manual_path = manual_path
-        self.configs = {}
-        with open(manual_path, 'r', encoding='utf-8') as fp:
-            manual_conf = yaml.load(fp, Loader=yaml.SafeLoader)
-        if os.path.exists(cache_path):
-            with open(cache_path, 'r', encoding='utf-8') as fp:
-                self.configs = yaml.load(fp, Loader=yaml.SafeLoader)
-        for key in manual_conf.keys(): # 覆盖
-            self.configs[key] = manual_conf[key]
+    def __init__(self, conf_path) -> None:
+        self.conf_path = conf_path
+        with open(conf_path, 'r', encoding='utf-8') as fp:
+            self.configs = yaml.load(fp, Loader=yaml.SafeLoader)
 
     def __getitem__(self, idx):
         return self.configs.copy()[idx]
     
     def dump(self):
-        with open(self.manual_path, 'w', encoding='utf-8') as fp:
+        with open(self.conf_path, 'w', encoding='utf-8') as fp:
             yaml.dump(self.configs, fp)
 
 class TimeConverter:

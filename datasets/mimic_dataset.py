@@ -19,9 +19,9 @@ class MIMICIV(Dataset):
     def __init__(self):
         super().__init__()
         # configs
-        self._gbl_conf = GLOBAL_CONF_LOADER['dataset']['mimic-iv']
-        self._mimic_dir:str = self._gbl_conf['paths']['mimic_dir']
-        self._loc_conf = tools.Config(cache_path=self._gbl_conf['paths']['conf_cache_path'], manual_path=self._gbl_conf['paths']['conf_manual_path'])
+        self._paths = GLOBAL_CONF_LOADER['paths']['mimic-iv']
+        self._mimic_dir:str = self._paths['mimic_dir']
+        self._loc_conf = tools.Config(self._paths['conf_manual_path'])
         
         # variable for phase 1
         self._extract_result:dict = None
@@ -89,14 +89,14 @@ class MIMICIV(Dataset):
     def _load_data(self):
         '''Basic load manager. Eliminate unnecessary IO consumption.
         '''
-        cache_dir = self._gbl_conf['paths']['cache_dir']
+        cache_dir = self._paths['cache_dir']
         if not os.path.exists(cache_dir):
             tools.reinit_dir(cache_dir, build=True)
-        suffix = '.pkl' if not self._loc_conf['dataset']['compress_cache'] else '.xz' # use lzma compression
+        suffix = '.pkl' if not self._loc_conf['compress_cache'] else '.xz' # use lzma compression
         # create pkl names for each phase
         pkl_paths = [os.path.join(cache_dir, name + suffix) for name in ['1_phase1', '2_phase2', '3_subjects', '4_numeric_subject', '5_norm_dict', '6_table_final']]
-        version_files = [os.path.join(cache_dir, f'7_version_{version_name}' + suffix) for version_name in self._loc_conf['dataset']['version'].keys()] + \
-                [os.path.join(cache_dir, f'7_version_{version_name}.npz') for version_name in self._loc_conf['dataset']['version'].keys()]
+        version_files = [os.path.join(cache_dir, f'7_version_{version_name}' + suffix) for version_name in self._loc_conf['version'].keys()] + \
+                [os.path.join(cache_dir, f'7_version_{version_name}.npz') for version_name in self._loc_conf['version'].keys()]
         bare_mode = np.all([os.path.exists(p) for p in pkl_paths] + [os.path.exists(p) for p in version_files]) # 仅当所有文件都存在时才进行载入加速
         
         if bare_mode:
@@ -246,7 +246,7 @@ class MIMICIV(Dataset):
         collect_ed_set = set([id for id in self._ed_item.keys() if self.on_select_feature(id=id, row=None, source='ed')])
         collect_hosp_set = set([id for id, row in self._hosp_item.items() if self.on_select_feature(id=id, row=row, source='hosp')])
         
-        if self._loc_conf['dataset']['data_linkage']['ed']:
+        if self._loc_conf['data_linkage']['ed']:
             # 采集ED内的数据
             ed_vitalsign = pd.read_csv(os.path.join(self._mimic_dir, 'ed', 'vitalsign.csv'), encoding='utf-8')
             for row in tqdm(ed_vitalsign.itertuples(), 'Extract vitalsign from MIMIC-IV-ED', total=len(ed_vitalsign)):
@@ -260,7 +260,7 @@ class MIMICIV(Dataset):
                         )
             del ed_vitalsign
 
-        if self._loc_conf['dataset']['data_linkage']['hosp']:
+        if self._loc_conf['data_linkage']['hosp']:
             total_size = 10000000 * 12 # 大概需要10分钟
             hosp_chunksize = 10000000
             hosp_labevents = pd.read_csv(
@@ -277,7 +277,7 @@ class MIMICIV(Dataset):
                         self._subjects[s_id].append_dynamic(charttime=charttime, itemid=itemid, value=valuenum)
             del hosp_labevents
 
-        if self._loc_conf['dataset']['data_linkage']['icu']:
+        if self._loc_conf['data_linkage']['icu']:
             # 采集icu内的动态数据
             total_size = 10000000 * 32
             icu_events_chunksize = 10000000
@@ -321,11 +321,11 @@ class MIMICIV(Dataset):
         logger.warning(f'Convert to numeric: find {invalid_count} invalid values in dynamic data')
         
         # 第一轮样本筛选
-        self._subjects = self.on_remove_invalid_pass1(rule=self._loc_conf['dataset']['remove_rule']['pass1'], subjects=self._subjects)
+        self._subjects = self.on_select_admissions(rule=self._loc_conf['remove_rule']['pass1'], subjects=self._subjects)
 
         # 进行特征的上下界约束
         # TODO col_abnormal_rate = {}
-        value_clip = self._loc_conf['dataset']['value_clip']
+        value_clip = self._loc_conf['value_clip']
         for id_or_label in value_clip:
             id, label = self.fea_id(id_or_label), self.fea_label(id_or_label)
             clip_count = 0
@@ -355,7 +355,7 @@ class MIMICIV(Dataset):
             return
 
         # 进一步筛选admission
-        self._subjects = self.on_remove_invalid_pass2(self._loc_conf['dataset']['remove_rule']['pass2'], self._subjects)
+        self._subjects = self.on_remove_missing_data(self._loc_conf['remove_rule']['pass2'], self._subjects)
 
         # 在pass2后，能够确定最终的static/dyanmic features
         self._static_keys = sorted(np.unique([k for s in self._subjects.values() for k in s.static_data.keys()]))
@@ -418,16 +418,16 @@ class MIMICIV(Dataset):
         logger.info(f'Detected {len(self._dynamic_keys)} available dynamic features')
         logger.info(f'Detected {len(self._static_keys)} available static features')
 
-        default_missvalue = float(self._loc_conf['dataset']['generate_table']['default_missing_value'])
+        default_missvalue = float(self._loc_conf['generate_table']['default_missing_value'])
         for s_id in tqdm(self._subjects.keys(), desc='Generate aligned table'):
             s = self._subjects[s_id]
             adm = s.admissions[0]
             
             t_start, t_end = None, None
-            for id in self._loc_conf['dataset']['generate_table']['align_target']:
+            for id in self._loc_conf['generate_table']['align_target']:
                 t_start = max(adm[id][0,1], t_start) if t_start is not None else adm[id][0,1]
                 t_end = min(adm[id][-1,1], t_end) if t_end is not None else adm[id][-1,1]
-            t_step = self._loc_conf['dataset']['generate_table']['delta_t_hour']
+            t_step = self._loc_conf['generate_table']['delta_t_hour']
             ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
             # 生成表本身, 缺失值为-1
             individual_table = np.ones((len(collect_keys), ticks.shape[0]), dtype=np.float32) * default_missvalue
@@ -482,13 +482,13 @@ class MIMICIV(Dataset):
         '''生成不同版本的数据集, 不同版本的数据集的样本数量/特征数量都可能不同
         '''
         assert(self._idx_dict is not None)
-        version_conf:dict = self._loc_conf['dataset']['version']
-        suffix = '.pkl' if not self._loc_conf['dataset']['compress_cache'] else '.xz' # use lzma compression
+        version_conf:dict = self._loc_conf['version']
+        suffix = '.pkl' if not self._loc_conf['compress_cache'] else '.xz' # use lzma compression
         for version_name in version_conf.keys():
             logger.info(f'Preprocessing version: {version_name}')
             # 检查是否存在pkl
-            p_version = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}'+suffix)
-            p_version_data = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}.npz')
+            p_version = os.path.join(self._paths['cache_dir'], f'7_version_{version_name}'+suffix)
+            p_version_data = os.path.join(self._paths['cache_dir'], f'7_version_{version_name}.npz')
             if os.path.exists(p_version):
                 logger.info(f'Skip preprocess existed version: {version_name}')
                 continue
@@ -526,7 +526,7 @@ class MIMICIV(Dataset):
             derived_kf_list = []
             for data_index, test_index in derived_kf.split(X=list(range(derived_data_table.shape[0]))): 
                 # encode: train, valid, test
-                valid_num = round(len(data_index)*self._loc_conf['dataset']['validation_proportion'])
+                valid_num = round(len(data_index)*self._loc_conf['validation_proportion'])
                 train_index, valid_index = data_index[valid_num:], data_index[:valid_num]
                 derived_kf_list.append({'train':train_index, 'valid':valid_index, 'test':test_index})
             
@@ -548,7 +548,10 @@ class MIMICIV(Dataset):
         if isinstance(x, int): # idx
             assert(x < len(self._total_keys))
             id = self._total_keys[x]
-            self._all_items['id'][id]['label']
+            if id in self._all_items['id']:
+                return self._all_items['id'][id]['label']
+            else:
+                return id
         elif x in self._all_items['id']:
             return self._all_items['id'][x]['label']
         else:
@@ -615,9 +618,9 @@ class MIMICIV(Dataset):
             return
         else:
             self._version_name = version_name
-        suffix = '.pkl' if not self._loc_conf['dataset']['compress_cache'] else '.xz'
-        p_version = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}'+suffix)
-        p_version_data = os.path.join(self._gbl_conf['paths']['cache_dir'], f'7_version_{version_name}.npz')
+        suffix = '.pkl' if not self._loc_conf['compress_cache'] else '.xz'
+        p_version = os.path.join(self._paths['cache_dir'], f'7_version_{version_name}'+suffix)
+        p_version_data = os.path.join(self._paths['cache_dir'], f'7_version_{version_name}.npz')
         assert(os.path.exists(p_version))
         with open(p_version, 'rb') as fp:
             version_dict = pickle.load(fp)
@@ -681,11 +684,11 @@ class MIMICIV(Dataset):
         pass
 
     @abstractmethod
-    def on_remove_invalid_pass1(self, rule:dict, subjects:dict[int, Subject]):
+    def on_select_admissions(self, rule:dict, subjects:dict[int, Subject]):
         pass
 
     @abstractmethod
-    def on_remove_invalid_pass2(self, rule:dict, subjects:dict[int, Subject]):
+    def on_remove_missing_data(self, rule:dict, subjects:dict[int, Subject]):
         pass
 
     @abstractmethod
@@ -709,7 +712,7 @@ class MIMICIVDataset(MIMICIV):
     def __init__(self):
         super().__init__()
 
-    def on_remove_invalid_pass1(self, rule:dict, subjects:dict[int, Subject]):
+    def on_select_admissions(self, rule:dict, subjects:dict[int, Subject]):
         '''
         remove pass1: 检查是否为空、有无target特征
         '''
@@ -758,7 +761,7 @@ class MIMICIVDataset(MIMICIV):
         logger.info(f'remove_pass1: Deleted {len(pop_list)}/{len(pop_list)+len(subjects)} subjects')
         return subjects
 
-    def on_remove_invalid_pass2(self, rule:dict, subjects: dict[int, Subject]) -> dict[int, Subject]:
+    def on_remove_missing_data(self, rule:dict, subjects: dict[int, Subject]) -> dict[int, Subject]:
         '''
         按照传入的配置去除无效特征
         '''
@@ -797,7 +800,7 @@ class MIMICIVDataset(MIMICIV):
         return subjects
 
     def on_extract_subjects(self) -> dict:
-        sepsis_patient_path = self._gbl_conf['paths']['sepsis_patient_path']
+        sepsis_patient_path = self._paths['sepsis_patient_path']
         sepsis_result = load_sepsis_patients(sepsis_patient_path)
         return sepsis_result
     
@@ -845,7 +848,7 @@ class MIMICIVDataset(MIMICIV):
                 admittime=admittime, 
                 dischtime=dischtime
             )
-            discretizer = self._loc_conf['dataset']['category_to_numeric']
+            discretizer = self._loc_conf['category_to_numeric']
             subject.append_admission(adm)
             for name, val in zip(
                 ['insurance', 'language', 'race', 'marital_status'],
@@ -860,7 +863,7 @@ class MIMICIVDataset(MIMICIV):
             if not np.isnan(row.hadm_id):
                 adm = subject.find_admission(int(row.hadm_id*1e8))
                 if adm is not None:
-                    discretizer = self._loc_conf['dataset']['category_to_numeric']
+                    discretizer = self._loc_conf['category_to_numeric']
                     careunit = discretizer['careunit'][row.careunit] if row.careunit in discretizer['careunit'] else discretizer['careunit']['Default']
                     adm.append_dynamic('careunit', ymdhms_converter(row.intime), careunit)
         else:
@@ -1014,8 +1017,8 @@ class MIMICIVDataset(MIMICIV):
         # switch version
         self.load_version(version_name)
         self.mode('all')
-        out_path = os.path.join(self._gbl_conf['paths']['out_dir'], f'dataset_report_{version_name}.txt')
-        dist_dir = os.path.join(self._gbl_conf['paths']['out_dir'], 'report_dist')
+        out_path = os.path.join(self._paths['out_dir'], f'dataset_report_{version_name}.txt')
+        dist_dir = os.path.join(self._paths['out_dir'], 'report_dist')
         dir_names = ['points', 'duration', 'frequency', 'value', 'from_sepsis', 'static_value']
         tools.reinit_dir(dist_dir, build=True)
         for name in dir_names:

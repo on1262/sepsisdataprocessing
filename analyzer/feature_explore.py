@@ -51,7 +51,7 @@ class FeatureExplorer:
     def plot_chart_vis(self, out_dir):
         tools.reinit_dir(out_dir)
         if self.params['plot_chart_vis']['plot_transfer_careunit']:
-            transfer_path = osjoin(self.params['paths']['mimic_dir'], 'hosp', 'transfers.csv')
+            transfer_path = osjoin(self.params['paths']['mimic-iv']['mimic_dir'], 'hosp', 'transfers.csv')
             table = pd.read_csv(transfer_path, engine='c', encoding='utf-8')
             record = {}
             for row in tqdm(table.itertuples(), 'plot chart: transfers'):

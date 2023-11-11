@@ -1,5 +1,6 @@
 ---
 
 analyzer_params: [
-  feature_explore
+  # catboost_dynamic
+  cross_validation
 ]

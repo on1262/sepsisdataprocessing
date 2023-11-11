@@ -247,7 +247,7 @@ class MultiClassMetric:
             self.acc_std.append(np.mean(k_accs))
         self.acc_std = np.std(self.acc_std)
 
-    def add_prediction(self, _prediction:np.ndarray, _gt:np.ndarray, _mask:np.ndarray):
+    def add_prediction(self, _prediction:np.ndarray, _gt:np.ndarray, _mask:np.ndarray=None):
         '''
         添加若干条记录, mask=True代表有效值
         prediction: (..., n_cls)
@@ -255,15 +255,20 @@ class MultiClassMetric:
         mask: (...) 必须和前两者保持一致
         '''
         assert(len(_prediction.shape) >= 2)
-        assert(_prediction.shape == _gt.shape and _prediction.shape[:-1] == _mask.shape)
+        assert(_prediction.shape == _gt.shape)
         expand_len = 1
         for x in (_prediction.shape[:-1]):
             expand_len *= x
         prediction = np.reshape(_prediction, (expand_len, self.n_cls))
         gt = np.reshape(_gt, (expand_len, self.n_cls))
-        mask = np.reshape(_mask, (expand_len, ))
-        self.records['pred'].append(prediction[mask, :])
-        self.records['gt'].append(gt[mask, :])
+        if _mask is not None:
+            mask = np.reshape(_mask, (expand_len, ))
+            _prediction.shape[:-1] == _mask.shape
+            self.records['pred'].append(prediction[mask, :])
+            self.records['gt'].append(gt[mask, :])
+        else:
+            self.records['pred'].append(prediction)
+            self.records['gt'].append(gt)
         self.calculated = False
 
     def confusion_matrix(self, comment:str=''):

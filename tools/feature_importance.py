@@ -11,14 +11,17 @@ import sys
 
 
 class TreeFeatureImportance():
-    def __init__(self, fea_names) -> None:
+    def __init__(self, fea_names, n_approx=2000) -> None:
         self.fea_names = fea_names
+        self.n_approx = n_approx
         # register
         self.records = []
 
-    def add_record(self, model, valid_X):
+    def add_record(self, model, valid_X:np.ndarray):
         explainer = shap.Explainer(model)
-        shap_values = explainer(valid_X)
+        n_in = min(valid_X.shape[0], self.n_approx)
+        permutation = np.random.permutation(valid_X.shape[0])[:n_in]
+        shap_values = explainer(valid_X[permutation])
         self.records.append((shap_values.base_values, shap_values.data, shap_values.values)) # (sample, n_fea)
 
     def update_record(self):

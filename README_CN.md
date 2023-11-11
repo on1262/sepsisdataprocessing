@@ -3,34 +3,33 @@
 
 # MIMIC-IV Data Processing Pipeline
 
-<center> [中文版本](README_CN.md) | [English Version](README.md) </center>
+[中文版本](README_CN.md) | [English Version](README_ENG.md)
 
-## Structure
+## 架构
 
-The framework consists of three main parts: dataset dataset, model model, and analyzer analyzer. dataset abstracts the original data into torch.dataset interface; model computes outputs on batch inputs; and analyzer is similar to trainer to provide K-fold, metrics computation, plotting, and other tasks. Splitting model and analyzer makes it more convenient for a single analyzer to call multiple models for integrated learning, and for a single model to be called by multiple analzyers. The rest of the tools section includes common tool methods, and the configs section is for fields that need to be configured, such as paths, parameters for data cleansing, and so on.
+该框架主要包括三个部分：数据集dataset、模型model、分析器analyzer。dataset将原数据抽象为torch.dataset接口；model对批次输入计算输出；analyzer类似trainer，提供K-fold、指标计算、绘图等工作。将model和analyzer拆分，使得一个analyzer调用多个model进行集成学习、一个model被多个analzyer调用等情况更加方便。其余的tools部分包括共用的工具方法，configs部分为需要配置的字段，例如路径、数据清洗的参数等。
 
-analyzer: trainer/visualization scripts/...
-1. analyzer: runs the analyzer sequentially and needs to be registered when a new analyzer is added.
-2. container: store model-independent parameters
-3. feature_explore: generates an exploratory report of the dataset, with configurable generation parameters
-4. utils: utility methods
+analyzer: 分析模块
+1. analyzer: 按照序列运行anlayzer，添加新analyzer时需要注册
+2. container: 存放与模型无关的参数
+3. feature_explore: 生成数据集的探查报告，可配置生成参数
+3. utils: 工具方法
 
-configs: Configuration files for each dataset.
-1. global_config: Configuration path
-2. config_manual: Manual configuration, can override the automatically generated configuration.
-3. config_cache: Automatically generated configuration file, should not be modified.
+configs: 每个数据集对应的配置文件
+1. global_config: 配置路径
+2. config_manual: 手动配置, 能够覆盖自动生成的配置
+3. config_cache: 自动生成的配置文件, 不应被修改
 
-Other modules:
-- data: dataset files
-- datasets: dataset abstraction, including data extraction/cleaning/reorganisation
-- libs: third-party libraries and related code
-- models: models
-- outputs: output images/analysis tables, etc.
-- tools: tool classes
-- main.py: main entry, interfaces with the launcher via parameter configuration.
+其他模块：
+- data: 数据集文件
+- datasets: 数据集抽象, 包括数据提取/清洗/重新组织
+- libs: 第三方库和相关代码
+- models: 模型
+- outputs: 输出图片/分析表等
+- tools: 工具类
+- main.py: 主入口, 通过参数配置和launcher对接
 
-## Deployment
-
+## 部署方法
 
 按照以下步骤部署：
 1. 在`python=3.10.11`环境下配置conda环境，并安装所需的packages：`pip install -r requirements.txt`
@@ -149,7 +148,7 @@ psql -d mimiciv
 
 ```
 
-\copy (SELECT * FROM mimiciv_derived.sepsis3) TO '~/sepsis3.csv' WITH CSV HEADER; -- 提取出csv文件
+\copy (SELECT * FROM mimiciv_derived.sepsis3) TO '~/sepsis3.csv' WITH CSV HEADER;
 
 ```
 
