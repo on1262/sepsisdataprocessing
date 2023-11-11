@@ -5,8 +5,7 @@ import os
 
 class DataContainer():
     '''存放数据和一些与模型无关的内容'''
-    def __init__(self, dataset:MIMICIVDataset):
-        self.dataset = dataset
+    def __init__(self):
         self._conf = tools.GLOBAL_CONF_LOADER['analyzer']['data_container'] # 这部分是global, 对外界不可见
         self.n_fold = self._conf['n_fold']
         self.seed = self._conf['seed']

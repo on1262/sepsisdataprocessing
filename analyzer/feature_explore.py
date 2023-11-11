@@ -8,14 +8,16 @@ import seaborn as sns
 import os
 from os.path import join as osjoin
 import pandas as pd
+from datasets.mimic_dataset import MIMICIVDataset
+
 
 class FeatureExplorer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.container = container
-        self.dataset = container.dataset
+        self.dataset = MIMICIVDataset()
+        self.dataset.load_version(params['dataset_version'])
         self.gbl_conf = container._conf
-        self.dataset = container.dataset
         self.data = self.dataset.data
 
     def run(self):

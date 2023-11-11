@@ -4,16 +4,19 @@ import os
 from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
-from models.utils import SliceDataGenerator, LabelGenerator_4cls, unroll
+from models.utils import SliceDataGenerator, LabelGenerator_4cls
 from catboost import Pool, CatBoostClassifier
 from analyzer.utils import map_func, cal_label_weight
+from datasets.mimic_dataset import MIMICIVDataset
+
 
 
 class CatboostDynamicAnalyzer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
-        self.dataset = container.dataset
+        self.dataset = MIMICIVDataset()
+        self.dataset.load_version(params['dataset_version'])
         self.model_name = self.params['analyzer_name']
         self.target_idx = self.dataset.idx_dict['PF_ratio']
 
@@ -39,7 +42,7 @@ class CatboostDynamicAnalyzer:
         # step 2: train and predict
         for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()):
             train_result = generator(f'{idx}_train', self.dataset.data[train_index, :, :], self.dataset.seqs_len[train_index])
-            X_train, train_mask, Y_train = train_result['data'], train_result['mask'], train_result['label']
+            X_train, Y_train = train_result['data'], train_result['label']
 
             valid_result = generator(f'{idx}_train', self.dataset.data[valid_index, :, :], self.dataset.seqs_len[valid_index])
             X_valid, Y_valid = valid_result['data'], valid_result['label']

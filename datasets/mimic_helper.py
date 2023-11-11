@@ -178,3 +178,20 @@ def load_sepsis_patients(csv_path:str) -> dict:
     df.apply(build_dict, axis=1)
     logger.info(f'Load {len(sepsis_dict.keys())} sepsis subjects based on sepsis3.csv')
     return sepsis_dict
+
+
+class KFoldIterator:
+    def __init__(self, dataset, k):
+        self._current = -1
+        self._k = k
+        self._dataset = dataset
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self._current += 1
+        if self._current < self._k:
+            return self._dataset.set_kf_index(self._current)
+        else:
+            raise StopIteration

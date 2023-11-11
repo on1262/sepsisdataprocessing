@@ -9,7 +9,6 @@ cross_validation:
     Arterial O2 pressure: dX_PaO2（mmHg）
     Inspired O2 Fraction: dX_FiO2(%)
     PF_ratio: dX_PaO2（mmHg） / FiO2（%）
-  dataset_version: original_version
   window: 48
   smoothing_band: 50
   loss_function: MultiClass

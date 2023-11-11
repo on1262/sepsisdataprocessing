@@ -5,6 +5,7 @@ from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
 from models.utils import DynamicDataGenerator, LabelGenerator_4cls
+from datasets.mimic_dataset import MIMICIVDataset
 from analyzer.utils import map_func
 
 
@@ -12,7 +13,8 @@ class BaselineNearest4ClsAnalyzer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
-        self.dataset = container.dataset
+        self.dataset = MIMICIVDataset()
+        self.dataset.load_version(params['dataset_version'])
         self.model_name = self.params['analyzer_name']
         self.target_idx = self.dataset.idx_dict['PF_ratio']
 

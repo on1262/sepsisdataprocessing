@@ -8,13 +8,19 @@ paths:
       conf_manual_path: configs/mimiciv_dataset.yaml
       sepsis_patient_path: data/mimic-iv/sepsis_result/sepsis3.csv
       out_dir: outputs/mimic-iv
+  mimic-iv-raw:
+      mimic_dir: data/mimic-iv
+      cache_dir: data/mimic-iv-raw/cache
+      conf_manual_path: configs/mimiciv_dataset_raw.yaml
+      sepsis_patient_path: data/mimic-iv/sepsis_result/sepsis3.csv
+      out_dir: outputs/mimic-iv-raw
   cv:
       conf_manual_path: configs/cv_dataset.yml
       data_dir: data/cv/单病种数据导出.csv
       cache_dir: data/cv/cache
       out_dir: outputs/cv
 
-      
+
 analyzer:
   data_container:
     n_fold: 5
