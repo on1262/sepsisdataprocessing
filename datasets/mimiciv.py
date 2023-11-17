@@ -8,11 +8,10 @@ from tools import GLOBAL_CONF_LOADER
 from tools import logger
 from tqdm import tqdm
 from sklearn.model_selection import KFold
-from scipy.interpolate import interp1d
 from abc import abstractmethod
 from datetime import datetime
 from random import choice
-from .mimic_helper import Subject, KFoldIterator
+from .mimic_helper import Subject, KFoldIterator, interp
 
 class MIMICIV(Dataset):
     def __init__(self, dataset_name):
@@ -85,6 +84,9 @@ class MIMICIV(Dataset):
     def subjects(self):
         return self._subjects
 
+    def check_nan(self, x:np.ndarray):
+        assert(not np.any(np.isnan(x)))
+    
     def _load_data(self):
         '''Basic load manager. Eliminate unnecessary IO consumption.
         '''
@@ -339,7 +341,21 @@ class MIMICIV(Dataset):
         with open(p_numeric_subject, 'wb') as fp:
             pickle.dump(self._subjects, fp)
         logger.info(f'Numeric subjects dumped at {p_numeric_subject}')
-        
+    
+    def _verify_subjects(self, subjects:dict[Subject]):
+        try:
+            for s in tqdm(subjects.values(), 'verify subjects'):
+                adm = s.admissions[0]
+                for v in s.static_data.values():
+                    self.check_nan(v)
+                for v in adm.dynamic_data.values():
+                    self.check_nan(v)
+        except Exception as e:
+            logger.error('Verify nan failed, error trace:')
+            print(e)
+            
+            
+
     def _preprocess_phase5(self, p_norm_dict, load_subject_only=False):
         # 提取每个特征的均值和方差，用于归一化和均值填充
         if os.path.exists(p_norm_dict):
@@ -355,7 +371,7 @@ class MIMICIV(Dataset):
 
         # 进一步筛选admission
         self._subjects = self.on_remove_missing_data(self._loc_conf['remove_rule']['pass2'], self._subjects)
-
+        self._verify_subjects(self.subjects)
         # 在pass2后，能够确定最终的static/dyanmic features
         self._static_keys = sorted(np.unique([k for s in self._subjects.values() for k in s.static_data.keys()]))
         self._dynamic_keys = sorted(np.unique([k for s in self._subjects.values() for k in s.admissions[0].keys()]))
@@ -438,17 +454,23 @@ class MIMICIV(Dataset):
                     value = self._subjects[s_id].nearest_static(key, t_start)
                     static_data[idx] = self.on_build_table(self._subjects[s_id], key, value, t_start)
             individual_table[:len(self._static_keys), :] = static_data[:, None]
-
+            self.check_nan(individual_table)
             # 插值dynamic data
             for idx, key in enumerate(self._dynamic_keys):
                 if key in adm.keys():
-                    interp = interp1d(x=adm[key][:, 1], y=adm[key][:, 0], kind='previous', fill_value="extrapolate") # TODO need test
-                    individual_table[len(self._static_keys)+idx, :] = interp(x=ticks)
+                    self.check_nan(adm[key])
+                    if adm[key].shape[0] == 1:
+                        individual_table[len(self._static_keys)+idx, :] = adm[key][0, 0]
+                    else:
+                        individual_table[len(self._static_keys)+idx, :] = interp(fx=adm[key][:, 1], fy=adm[key][:, 0], x=ticks)
+                    self.check_nan(individual_table)
             if individual_table.size > 0:
+                self.check_nan(individual_table)
                 tables.append(individual_table)
         result = self.on_feature_engineering(tables, self._norm_dict, self._static_keys, self._dynamic_keys) # 特征工程
         tables, self._norm_dict, static_keys, dynamic_keys = result['tables'], result['norm_dict'], result['static_keys'], result['dynamic_keys']
-        
+        for table in tables:
+            self.check_nan(table)
         total_keys = static_keys + dynamic_keys
         index_dict = {key:val for val, key in enumerate(total_keys)} # used for finding index
         
@@ -461,7 +483,8 @@ class MIMICIV(Dataset):
             padding = -np.ones((len(total_keys), max_len - seqs_len[t_idx]))
             tables[t_idx] = np.concatenate([tables[t_idx], padding], axis=1)
         tables = np.stack(tables, axis=0) # (n_sample, n_fea, seqs_len)
-
+        # verify tables
+        self.check_nan(tables)
         self._data = tables
         self._idx_dict = index_dict
         self._seqs_len = seqs_len
@@ -513,6 +536,7 @@ class MIMICIV(Dataset):
 
             derived_data_table = derived_data_table[:, avail_idx, :]
             if version_conf[version_name].get('fill_missvalue') == 'avg': # 填充缺失值
+                logger.info('Fill missing data with average value')
                 for key, idx in derived_idx_dict.items():
                     for s_idx in range(derived_data_table.shape[0]): # iter subject
                         arr = derived_data_table[s_idx, idx, :self._seqs_len[s_idx]]

@@ -672,29 +672,20 @@ class MIMICIV_Raw_Dataset(MIMICIV):
         '''
         特征工程, 增加某些计算得到的特征
         '''
-        addi_dynamic = ['shock_index', 'MAP', 'PPD', 'PF_ratio']
+        addi_dynamic = ['PF_ratio']
         dynamic_keys += addi_dynamic # NOTE: 如果对static keys添加特征，需要重新排序table
         collect_keys = static_keys + dynamic_keys
         index_dict = {key:val for val, key in enumerate(collect_keys)} # used for finding index
         norm_data = []
         for t_idx, table in enumerate(tables):
-            addi_table = np.zeros((len(addi_dynamic), table.shape[1]))
+            addi_table = -np.ones((len(addi_dynamic), table.shape[1]))
             for idx, name in enumerate(addi_dynamic):
                 if name == 'PF_ratio':
-                    addi_table[idx, :] = np.clip(table[index_dict['220224'], :] / (table[index_dict['223835'], :]*0.01), 0, 500)
-                elif name == 'shock_index':
-                    if np.all(table[index_dict['systolic pressure'], :] > 0):
-                        addi_table[idx, :] = table[index_dict['220045'], :] / table[index_dict['systolic pressure'], :]
-                    else:
-                        addi_table[idx, :] = -1 # missing value
-                        # logger.warning('feature_engineering: skip shock_index with zero sbp')
-                elif name == 'MAP':
-                    addi_table[idx, :] = (table[index_dict['systolic pressure'], :] + 2*table[index_dict['diastolic pressure'], :]) / 3
-                elif name == 'PPD':
-                    addi_table[idx, :] = table[index_dict['systolic pressure'], :] - table[index_dict['diastolic pressure'], :]
+                    addi_table[idx, :] = table[index_dict['220224'], :] / (np.clip(table[index_dict['223835'], :]*0.01, 0.21, 1.0))
                 else:
                     logger.error(f'Invalid feature name:{name}')
                     assert(0)
+            self.check_nan(addi_table)
             tables[t_idx] = np.concatenate([table, addi_table], axis=0)
             norm_data.append(addi_table)
         # update norm dict for additional features
@@ -736,65 +727,6 @@ class MIMICIV_Raw_Dataset(MIMICIV):
             write_lines.append(f'Subjects:{len(self)}')
             write_lines.append(f'Static feature: {[self.fea_label(id) for id in self.static_keys]}')
             write_lines.append(f'Dynamic feature: {[self.fea_label(id) for id in self.dynamic_keys]}')
-        if params['dynamic_dist']:
-            # dynamic feature explore
-            for id in tqdm(self.dynamic_keys, 'plot dynamic dist'):
-                fea_name = self.fea_label(id)
-                save_name = tools.remove_slash(str(fea_name))
-                write_lines.append('='*10 + f'{fea_name}({id})' + '='*10)
-                arr_points = []
-                arr_duration = []
-                arr_frequency = []
-                arr_avg_value = []
-                arr_from_sepsis_time = []
-                for s in self._subjects.values():
-                    for adm in s.admissions:
-                        if id in adm.keys():
-                            dur = adm[id][-1,1] - adm[id][0,1]
-                            sepsis_time = s.nearest_static('sepsis_time', adm[id][0, 1])
-                            t_sep = adm[id][0, 1] + adm.admittime - sepsis_time
-                            arr_from_sepsis_time.append(t_sep)
-                            arr_points.append(adm[id].shape[0])
-                            arr_duration.append(dur)
-                            if dur > 1e-3: # TODO 只有一个点无法计算
-                                arr_frequency.append(arr_points[-1] / arr_duration[-1])
-                            else:
-                                arr_frequency.append(0)
-                            arr_avg_value.append(adm[id][:,0].mean())
-                arr_points, arr_duration, arr_frequency, arr_avg_value = \
-                    np.asarray(arr_points), np.asarray(arr_duration), np.asarray(arr_frequency), np.asarray(arr_avg_value)
-                arr_from_sepsis_time = np.asarray(arr_from_sepsis_time)
-                if np.size(arr_points) != 0:
-                    write_lines.append(f'average points per admission: {arr_points.mean():.3f}')
-                if np.size(arr_duration) != 0:
-                    write_lines.append(f'average duration(hour) per admission: {arr_duration.mean():.3f}')
-                if np.size(arr_frequency) != 0:
-                    write_lines.append(f'average frequency(point/hour) per admission: {arr_frequency.mean():.3f}')
-                if np.size(arr_avg_value) != 0:
-                    write_lines.append(f'average avg value per admission: {arr_avg_value.mean():.3f}')
-                # plot distribution
-                titles = ['points', 'duration', 'frequency', 'value', 'from_sepsis']
-                arrs = [arr_points, arr_duration, arr_frequency, arr_avg_value, arr_from_sepsis_time]
-                for title, arr in zip(titles, arrs):
-                    if np.size(arr) != 0:
-                        tools.plot_single_dist(
-                            data=arr, data_name=f'{title}: {fea_name}', 
-                            save_path=os.path.join(dist_dir, title, save_name + '.png'), discrete=False, adapt=True, bins=50)
-        if params['static_dist']:
-            # static feature explore
-            for id in tqdm(self.static_keys, 'generate static feature report'):
-                fea_name = self.fea_label(id)
-                save_name = tools.remove_slash(str(fea_name))
-                write_lines.append('='*10 + f'{fea_name}({id})' + '='*10)
-                idx = self.idx_dict[str(id)]
-                static_data = self.data[:, idx, 0]
-                write_lines.append(f'mean: {static_data.mean():.3f}')
-                write_lines.append(f'std: {static_data.std():.3f}')
-                write_lines.append(f'max: {np.max(static_data):.3f}')
-                write_lines.append(f'min: {np.min(static_data):.3f}')
-                tools.plot_single_dist(
-                    data=static_data, data_name=f'{fea_name}', 
-                    save_path=os.path.join(dist_dir, 'static_value', save_name + '.png'), discrete=False, adapt=True, bins=50)
         # write report
         with open(out_path, 'w', encoding='utf-8') as fp:
             for line in write_lines:

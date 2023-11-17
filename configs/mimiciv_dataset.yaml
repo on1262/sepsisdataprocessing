@@ -47,6 +47,10 @@ version:
     fill_missvalue: none # do not fill miss value in feature explore status
     feature_limit: []
     forbidden_feas: []
+  no_fill_version:
+    fill_missvalue: none
+    feature_limit: []
+    forbidden_feas: [Weight, BMI, Height (Inches), '225677', '220545', '226730', '226531', Weight (Lbs), '227467', '220339', '227443', '220587', 'dod']
   original_version:
     fill_missvalue: avg
     feature_limit: []

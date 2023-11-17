@@ -1,5 +1,4 @@
 from analyzer import Analyzer
-from datasets import MIMICIVDataset
 import yaml
 
 with open('./launch_list.yml', 'r', encoding='utf-8') as fp:

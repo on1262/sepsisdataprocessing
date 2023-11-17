@@ -66,6 +66,32 @@ feature_explore:
     dynamic_dist: true
     static_dist: true
 
+feature_explore_raw:
+  dataset_version: raw_version
+  plot_chart_vis:
+    enabled: true
+    plot_transfer_careunit: true
+  plot_samples:
+    enabled: false
+    n_sample: 50
+    features:
+      - Arterial O2 pressure
+      - Inspired O2 Fraction
+  plot_time_series:
+    enabled: false
+    names:
+      - PF_ratio
+    n_sample: 400
+    n_per_plots: 40
+  miss_mat: true
+  feature_count: true
+  generate_report: true
+  correlation: true
+  report_params:
+    basic: true
+    dynamic_dist: true
+    static_dist: true
+
 catboost_dynamic:
   dataset_version: original_version
   window: 48

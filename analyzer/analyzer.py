@@ -7,7 +7,7 @@ from .method_catboost_dynamic import CatboostDynamicAnalyzer
 from .feature_explore import FeatureExplorer
 from .method_nearest_cls import BaselineNearest4ClsAnalyzer
 from .cross_validation import CV_Analyzer
-from datasets import MIMICIVDataset
+from .feature_explore_raw import FeatureExplorerRaw
 
 
 class Analyzer:
@@ -22,11 +22,12 @@ class Analyzer:
             'catboost_dynamic': CatboostDynamicAnalyzer,
             'feature_explore': FeatureExplorer,
             'cross_validation': CV_Analyzer,
+            'feature_explore_raw': FeatureExplorerRaw
         }
         if params is not None:
             for name in params:
                 for label in self.analyzer_dict.keys():
-                    if label in name:
+                    if label == name:
                         self.run_sub_analyzer(name, label)
                         break
 

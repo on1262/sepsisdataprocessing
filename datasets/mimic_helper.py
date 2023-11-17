@@ -8,6 +8,28 @@ from tools import logger
 from sklearn.model_selection import KFold
 import math
 
+def interp(fx:np.ndarray, fy:np.ndarray, x:np.ndarray):
+    # fx, fy: (N,)
+    # x: dim=1
+    assert(fx.shape[0] == fy.shape[0] and len(fx.shape) == len(fy.shape) and len(fx.shape) == 1 and fx.shape[0] >= 1)
+    assert(len(x.shape) == 1)
+    if fx.shape[0] >= 2 and (not np.all(fx[:-1] < fx[1:])): # sort x, remove duplicated fx
+        idx = sorted(list(range(fx.shape[0])), key=lambda x:fx[x])
+        fx, fy = fx[idx], fy[idx]
+        duplicate = np.zeros_like(fx, dtype=bool)
+        duplicate[1:] = (fx[:-1] == fx[1:])
+        if np.any(duplicate):
+            fx = fx[duplicate == False]
+            fy = fy[duplicate == False]
+    elif fx.shape[0] == 1: # constant extrapolation
+        return np.ones_like(x) * fy[0]
+    
+    result = np.ones_like(x) * fy[0]
+    for idx, px in enumerate(fx):
+        result[x >= px] = fy[idx] # very slow
+    return result
+        
+
 class Admission:
     '''
     代表一段连续的、环境较稳定的住院经历，原subject/admission/stay/transfer的四级结构被精简到subject/admission的二级结构
