@@ -62,3 +62,5 @@ value_clip:
   Arterial O2 pressure:
     min: 0
     max: 500
+  
+  

@@ -161,11 +161,11 @@ def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
         plt.savefig(out_path)
     plt.close()
 
-def plot_bool_matrix(data:np.ndarray, title:str, xlabel:str, ylabel:str, aspect='equal', save_path=None):
-
+def plot_density_matrix(data:np.ndarray, title:str, xlabel:str, ylabel:str, aspect='equal', save_path=None):
     plt.figure(figsize=(10, 10))
     plt.title(title)
-    plt.imshow(data * 255, cmap='grey', aspect=aspect) # auto for square picture, equal for original aspect ratio
+    plt.imshow(data, cmap='jet', aspect=aspect) # auto for square picture, equal for original aspect ratio
+    plt.colorbar()
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.savefig(save_path)

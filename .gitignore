@@ -9,7 +9,7 @@ catboost_info/
 nohup.out
 simhei.ttf
 generate_requirements.sh
+test_plot/
+launch_list.yml
 
-# cross validation dataset
-analyzer/cross_validation.py
-datasets/cv_dataset
+

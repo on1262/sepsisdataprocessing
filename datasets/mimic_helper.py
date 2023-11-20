@@ -155,23 +155,6 @@ class Subject:
             if not adm.empty():
                 return False
         return True
-    
-def reduce_peak(x: np.ndarray):
-    '''
-    清除x中的异常峰
-    x: 1d ndarray
-    '''
-    window_size = 3  # Size of the sliding window
-    threshold = 1.4  # Anomaly threshold at (thredhold-1)% higher than nearby points
-    for i in range(len(x)):
-        left_window_size = min(window_size, i)
-        right_window_size = min(window_size, len(x) - i - 1)
-        window = x[i - left_window_size: i + right_window_size + 1]
-        
-        avg_value = (np.sum(window) - x[i]) / (len(window)-1)
-        if x[i] >= avg_value * threshold and x[i] > 110:
-            x[i] = avg_value
-    return x
 
 def load_sepsis_patients(csv_path:str) -> dict:
     '''

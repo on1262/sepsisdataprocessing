@@ -121,6 +121,9 @@ class FeatureExplorer:
         col_nas = na_table.mean(axis=0)
         tools.plot_single_dist(row_nas, f"Row miss rate", os.path.join(out_dir, "row_miss_rate.png"), discrete=False, adapt=True)
         tools.plot_single_dist(col_nas, f"Column miss rate", os.path.join(out_dir, "col_miss_rate.png"), discrete=False, adapt=True)
+        # save raw/col miss rate to file
+        tools.save_pkl(row_nas, os.path.join(out_dir, "row_missrate.pkl"))
+        tools.save_pkl(col_nas, os.path.join(out_dir, "col_missrate.pkl"))
 
     def feature_count(self, out_dir):
         '''打印vital_sig中特征出现的次数和最短间隔排序'''

@@ -9,6 +9,7 @@ import os
 from os.path import join as osjoin
 import pandas as pd
 from datasets.mimic_dataset import MIMICIV_Raw_Dataset
+from scipy.signal import convolve2d
 
 
 class FeatureExplorerRaw:
@@ -43,6 +44,8 @@ class FeatureExplorerRaw:
                 self.plot_time_series_samples(name, n_sample=n_sample, n_per_plots=n_per_plots, write_dir=os.path.join(out_dir, f"time_series_{name}"))
         if self.params['correlation']:
             self.correlation(out_dir)
+        if self.params['abnormal_dist']['enabled']:
+            self.abnormal_dist(out_dir)
         if self.params['miss_mat']:
             self.miss_mat(out_dir)
         if self.params['feature_count']:
@@ -65,7 +68,36 @@ class FeatureExplorerRaw:
             y = np.asarray([record[k] for k in x])
             tools.plot_bar_with_label(y, x, f'hosp/transfer.careunit Count', out_path=os.path.join(out_dir, f"transfer_careunit.png"))
 
+    def abnormal_dist(self, out_dir):
+        limit:dict = self.params['abnormal_dist']['value_limitation']
+        limit_names = list(limit.keys())
+        abnormal_table = np.zeros((len(limit_names), 2)) # True=miss
+        idx_dict = {name:idx for idx, name in enumerate(limit_names)}
+        for s_id in self.dataset.subjects:
+            adm = self.dataset.subjects[s_id].admissions[0]
+            for key in adm.dynamic_data:
+                name = self.dataset.fea_label(key)
+                if name in limit.keys():
+                    is_abnormal = np.any(
+                        np.logical_or(adm.dynamic_data[key][:, 0] < limit[name]['min'], adm.dynamic_data[key][:, 0] > limit[name]['max'])
+                    )
+                    abnormal_table[idx_dict[name], 0] += (1 if is_abnormal else 0)
+                    abnormal_table[idx_dict[name], 1] += 1
+        abnormal_table = abnormal_table[:, 0] / np.maximum(abnormal_table[:, 1], 1e-3) # avoid nan
+        # sort table
+        limit_names = sorted(limit_names, key=lambda x:abnormal_table[limit_names.index(x)], reverse=True)
+        abnormal_table = np.sort(abnormal_table)[::-1]
+        # bar plot
+        plt.figure(figsize=(10,10))
+        ax = sns.barplot(x=np.asarray(limit_names), y=abnormal_table)
+        ax.set_xticklabels(limit_names, rotation=45, ha='right')
+        ax.bar_label(ax.containers[0], fontsize=10, fmt=lambda x:f'{x:.4f}')
+        plt.subplots_adjust(bottom=0.3)
+        plt.savefig(osjoin(out_dir, 'abnormal.png'))
+        plt.close()
 
+
+    
     def correlation(self, out_dir):
         # plot correlation matrix
         labels = [self.dataset.fea_label(id) for id in self.dataset._total_keys]
@@ -82,19 +114,24 @@ class FeatureExplorerRaw:
                 for c_id, key in enumerate(self.dataset._dynamic_keys):
                     if key in adm_key:
                         na_table[r_id, c_id] = False
-        # 行缺失
+        
         row_nas = na_table.mean(axis=1)
         col_nas = na_table.mean(axis=0)
         tools.plot_single_dist(row_nas, f"Row miss rate", os.path.join(out_dir, "row_miss_rate.png"), discrete=False, adapt=True)
         tools.plot_single_dist(col_nas, f"Column miss rate", os.path.join(out_dir, "col_miss_rate.png"), discrete=False, adapt=True)
+        # save raw/col miss rate to file
+        tools.save_pkl(row_nas, os.path.join(out_dir, "row_missrate.pkl"))
+        tools.save_pkl(col_nas, os.path.join(out_dir, "col_missrate.pkl"))
+
         # plot matrix
         row_idx = sorted(list(range(row_nas.shape[0])), key=lambda x:row_nas[x])
         col_idx = sorted(list(range(col_nas.shape[0])), key=lambda x:col_nas[x])
-        na_table = na_table[row_idx, :][:, col_idx]
-        tools.plot_bool_matrix(na_table, 'Missing distribution for subjects and features [miss=white]', xlabel='features', ylabel='subjects',
+        na_table = na_table[row_idx, :][:, col_idx] # (n_subjects, n_feature)
+        # apply conv to get density
+        conv_kernel = np.ones((5,5)) / 25
+        na_table = np.clip(convolve2d(na_table, conv_kernel, boundary='symm'), 0, 1.0)
+        tools.plot_density_matrix(1.0-na_table, 'Missing distribution for subjects and features [miss=white]', xlabel='features', ylabel='subjects',
                                aspect='auto', save_path=os.path.join(out_dir, "miss_mat.png"))
-
-
 
     def feature_count(self, out_dir):
         '''打印vital_sig中特征出现的次数和最短间隔排序'''

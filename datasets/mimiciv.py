@@ -244,8 +244,8 @@ class MIMICIV(Dataset):
 
         # 决定捕捉哪些特征
         collect_icu_set = set([id for id, row in self._icu_item['id'].items() if self.on_select_feature(id=id, row=row, source='icu')])
-        collect_ed_set = set([id for id in self._ed_item.keys() if self.on_select_feature(id=id, row=None, source='ed')])
-        collect_hosp_set = set([id for id, row in self._hosp_item.items() if self.on_select_feature(id=id, row=row, source='hosp')])
+        collect_ed_set = set([id for id in self._ed_item['id'].keys() if self.on_select_feature(id=id, row=None, source='ed')])
+        collect_hosp_set = set([id for id, row in self._hosp_item['id'].items() if self.on_select_feature(id=id, row=row, source='hosp')])
         
         if self._loc_conf['data_linkage']['ed']:
             # 采集ED内的数据
@@ -342,7 +342,7 @@ class MIMICIV(Dataset):
             pickle.dump(self._subjects, fp)
         logger.info(f'Numeric subjects dumped at {p_numeric_subject}')
     
-    def _verify_subjects(self, subjects:dict[Subject]):
+    def _verify_subjects(self, subjects:dict[int, Subject]):
         try:
             for s in tqdm(subjects.values(), 'verify subjects'):
                 adm = s.admissions[0]
@@ -354,8 +354,6 @@ class MIMICIV(Dataset):
             logger.error('Verify nan failed, error trace:')
             print(e)
             
-            
-
     def _preprocess_phase5(self, p_norm_dict, load_subject_only=False):
         # 提取每个特征的均值和方差，用于归一化和均值填充
         if os.path.exists(p_norm_dict):

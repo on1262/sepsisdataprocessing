@@ -3,7 +3,7 @@ import yaml
 import datetime
 from sklearn import random as sk_random
 import pandas as pd
-import re
+import pickle
 import os, sys
 import missingno as msno
 import hashlib
@@ -30,6 +30,15 @@ def set_chinese_font():
     logger.info("Set Chinese Font in Matplotlib")
     from matplotlib import pyplot as plt
     plt.rcParams['font.family'] = ['Arial Unicode MS']
+
+def save_pkl(obj, path):
+    with open(path, 'wb') as f:
+        pickle.dump(obj, f)
+
+def load_pkl(path):
+    with open(path, 'rb') as f:
+        result = pickle.load(f)
+    return result
 
 #  清空文件
 def clear_file(name):
