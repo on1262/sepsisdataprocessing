@@ -133,15 +133,12 @@ class LabelGenerator_regression(LabelGenerator):
         return target[..., None]
 
 class DynamicDataGenerator(DataGenerator):
-    '''
-    生成每个时间点和预测窗口的标签，但是不展开时间轴
-    '''
     def __init__(self, window_points, n_fea, label_generator: LabelGenerator, target_idx, 
                  limit_idx=[], forbidden_idx=[], norm:Normalization=None, cache_dir=None) -> None:
         super().__init__(n_fea, limit_idx, forbidden_idx, cache_dir)
         self.norm = norm
         self.target_idx = target_idx
-        self.window = window_points # 向前预测多少个点内的ARDS
+        self.window = window_points # how many points we should look forward
         self.label_gen = label_generator
     
     def __call__(self, cache_name:str, _data:np.ndarray, seq_lens:np.ndarray) -> dict:
@@ -159,7 +156,6 @@ class DynamicDataGenerator(DataGenerator):
         data = _data.copy()
         target = data[:, self.target_idx, :]
         data = data[:, self.avail_idx, :]
-        # 将target按照时间顺序平移
         invalid_flag = target.max()
         for idx in range(target.shape[1]-1): # 最后一格被屏蔽掉
             stop = min(target.shape[1], idx+self.window)

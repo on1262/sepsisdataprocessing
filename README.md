@@ -174,6 +174,28 @@ Input:
 
 Output: updated tables, norm_dict, static_keys, dynamic_keys
 
+## Introduction to Data generator
+
+`model & task specific processing` is not always solved by pipelines, e.g. different models require different normalisation methods, temporal and non-temporal tasks require different data organisation formats. We provide multiple generators to generate different data formats and labels.
+
+Overall, there are three DataGenerators and two LabelGenerators, which are under `models/utils`, and users can easily develop new generators.We provide several sample algorithms to illustrate how different generators can be used for different tasks.
+
+### label generator
+
+**LabelGenerator_4cls**: Expand an arbitrarily sized array of targets into a new dimension, divided into four categories of a predefined size, for classification prediction.
+
+**LabelGenerator_regression**: no processing, can be modified for other tasks.
+
+### data generator
+
+Different data generators and label generators can be combined in any way, see the example algorithm: `analyzer/method_nearest_cls`.
+
+**DynamicDataGenerator**: For each data point, searches forward through a prediction window and calculates the lowest value within the window as the prediction target. It also takes available features, similar to `dataset version`, and can be normalised. The end result is still a 3D structure and the timeline is not expanded. It can be used for RNN algorithms such as LSTM.
+
+**SliceDataGenerator**: computed in the same way as `DynamicDataGenerator`, but the timeline of the final data will be unfolded into the form of (n_sequence, n_feature), and invalid data will be eliminated. For non-temporal methods such as GBDT
+
+**StaticDataGenerator**: for each sequence, generates a large prediction window to predict the endgame situation using features from the first moment. One sample is generated for each sequence.
+
 
 ## More help
 

@@ -25,11 +25,11 @@ configs: 每个数据集对应的配置文件
 其他模块：
 - data: 数据集文件
 - datasets: 数据集抽象, 包括数据提取/清洗/重新组织
-- libs: 第三方库和相关代码
 - models: 模型
 - outputs: 输出文件夹
 - tools: 工具类
-- main.py: 主入口, 通过参数配置和launcher对接
+- main.py: 主入口
+- launch_list.yml 配置程序启动后运行哪些analyzer
 
 ## 部署方法
 
@@ -78,7 +78,7 @@ configs: 每个数据集对应的配置文件
 2. 当某个时间点存在历史数据时，选用最近的历史可用数据，不受因果性影响
 3. 当插值起始时间早于该特征已知的历史数据时，用第一个数据点填充空缺的部分。
 
-**preprocess_phase7**: 按照`configs/mimic_dataset/version`生成同一个数据集的不同衍生版本，用户可以在配置中自定义特征的限制范围和排除范围，指定缺失值的处理方法，目前支持`avg`均值填充和`none`缺省（-1）填充。不同版本可以分别用于数据探查和模型训练。
+**preprocess_phase7**: 按照`configs/mimic_dataset/version`生成同一个数据集的不同衍生版本，用户可以在配置中自定义特征的限制范围和排除范围，指定缺失值的处理方法，目前支持`avg`均值填充和`none`缺省（-1）填充。不同版本可以分别用于数据探查和模型训练。这一阶段也会设置固定的K-fold，保持训练的稳定性
 
 ### MIMICIV derived dataset介绍
 
@@ -175,6 +175,27 @@ configs: 每个数据集对应的配置文件
 
 输出：更新后的tables, norm_dict, static_keys, dynamic_keys
 
+## Data generator介绍
+
+`model & task specific processing`不总是能被pipeline解决，例如，不同模型需要不同的归一化方法、时序和非时序任务需要不同的数据组织格式。我们提供了多种generator生成不同的数据格式和标签
+
+总的来说，有3种DataGenerator和两种LabelGenerator，它们在`models/utils`下，用户可以很方便地开发新的Generator。我们提供了几种示例算法，说明不同的generator是如何用于不同任务的。
+
+### label generator
+
+**LabelGenerator_4cls**：将任意大小的target数组拓展一个新的维度，按照事先设定的大小划分为四个类别，用于分类预测
+
+**LabelGenerator_regression**: 不进行任何处理，可以修改用于其他任务
+
+### data generator
+
+不同的data generator和label generator可以任意组合，参考示例算法: `analyzer/method_nearest_cls`
+
+**DynamicDataGenerator**: 对每个数据点，向前搜索一个预测窗口，并计算窗口内的最低值作为预测目标。它也会采集可用的特征，和`dataset version`类似，并且可以进行归一化。最终结果依然是一个三维结构，时间轴不会被展开。可以用于LSTM等RNN算法。
+
+**SliceDataGenerator**：按照`DynamicDataGenerator`的方式计算，但是最终数据的时间轴会被展开，成为(n_sequence, n_feature)的形式，无效数据会被剔除。用于GBDT等非时序方法
+
+**StaticDataGenerator**：对每个序列，生成一个大预测窗口，用第一时刻的特征预测终局情况。每个序列生成一个样本。
 
 ## 更多帮助
 
