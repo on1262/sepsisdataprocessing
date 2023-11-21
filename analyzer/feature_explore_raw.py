@@ -8,7 +8,7 @@ import seaborn as sns
 import os
 from os.path import join as osjoin
 import pandas as pd
-from datasets.mimic_dataset import MIMICIV_Raw_Dataset
+from datasets.mimic_raw_dataset import MIMICIV_Raw_Dataset
 from scipy.signal import convolve2d
 
 

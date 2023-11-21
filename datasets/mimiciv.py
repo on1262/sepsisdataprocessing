@@ -303,16 +303,12 @@ class MIMICIV(Dataset):
         logger.info('Dump subjects: Done')
 
     def _preprocess_phase4(self, p_numeric_subject=None):
-        '''
-        将所有特征转化为数值型, 并且对于异常值进行处理，最后进行特征筛选
-        '''
         if os.path.exists(p_numeric_subject):
             with open(p_numeric_subject, 'rb') as fp:
                 self._subjects = pickle.load(fp)
             logger.info(f'Load numeric subject data from {p_numeric_subject}')
             return
         
-        # 整理admissions的格式，并转换动态特征
         for s_id in tqdm(self._subjects, desc='update data'):
             self._subjects[s_id].update_data()
 
@@ -321,10 +317,8 @@ class MIMICIV(Dataset):
             invalid_count += self.on_convert_numeric(s)
         logger.warning(f'Convert to numeric: find {invalid_count} invalid values in dynamic data')
         
-        # 第一轮样本筛选
         self._subjects = self.on_select_admissions(rule=self._loc_conf['remove_rule']['pass1'], subjects=self._subjects)
 
-        # 进行特征的上下界约束
         # TODO col_abnormal_rate = {}
         value_clip = self._loc_conf['value_clip']
         for id_or_label in value_clip:
@@ -355,7 +349,6 @@ class MIMICIV(Dataset):
             print(e)
             
     def _preprocess_phase5(self, p_norm_dict, load_subject_only=False):
-        # 提取每个特征的均值和方差，用于归一化和均值填充
         if os.path.exists(p_norm_dict):
             with open(p_norm_dict, 'rb') as fp:
                 result = pickle.load(fp)

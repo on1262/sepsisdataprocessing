@@ -9,7 +9,8 @@ from .utils import cal_label_weight
 from catboost import CatBoostClassifier, Pool
 from os.path import join as osjoin
 from datasets.cv_dataset import CrossValidationDataset
-from datasets.mimic_dataset import MIMICIVDataset, MIMICIV_Raw_Dataset
+from datasets.mimic_dataset import MIMICIVDataset
+from datasets.mimic_raw_dataset import MIMICIV_Raw_Dataset
 
 
 
