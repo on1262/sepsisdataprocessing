@@ -1,0 +1,163 @@
+---
+cross_validation:
+  alignment_dict:
+    gender: 性别
+    PH (Arterial): dX_PH
+    age: 年龄
+    Respiratory Rate (Total): dX_tX_呼吸频率
+    O2 saturation pulseoxymetry: dX_tX_SPO2
+    Arterial O2 pressure: dX_PaO2（mmHg）
+    Inspired O2 Fraction: dX_FiO2(%)
+    PF_ratio: dX_PaO2（mmHg） / FiO2（%）
+  window: 48
+  smoothing_band: 50
+  loss_function: MultiClass
+  iterations: 300
+  depth: 5
+  learning_rate: 0.03
+  centers:
+    - 50
+    - 150
+    - 250
+    - 350
+  class_names:
+    - Severe
+    - Moderate
+    - Mild
+    - No_ARDS
+  feature_limit:
+    - gender
+    - '223830'
+    - '224690'
+    - age
+    - '220277'
+    - '220224'
+    - '223835'
+    - PF_ratio
+  forbidden_feas: []
+  slice_len: 192
+
+feature_explore:
+  dataset_version: explore_version
+  plot_chart_vis:
+    enabled: false
+    plot_transfer_careunit: false
+  plot_samples:
+    enabled: false
+    n_sample: 50
+    features:
+      - Arterial O2 pressure
+      - Inspired O2 Fraction
+  plot_time_series:
+    enabled: false
+    names:
+      - PF_ratio
+    n_sample: 400
+    n_per_plots: 40
+  correlation:
+    enabled: false
+    target: PF_ratio
+  miss_mat: true
+  first_ards_time: false
+  feature_count: true
+  generate_report: false
+  report_params:
+    basic: true
+    dynamic_dist: false
+    static_dist: false
+
+feature_explore_raw:
+  dataset_version: raw_version
+  plot_chart_vis:
+    enabled: false
+    plot_transfer_careunit: false
+  plot_samples:
+    enabled: false
+    n_sample: 50
+    features:
+      - Arterial O2 pressure
+      - Inspired O2 Fraction
+  plot_time_series:
+    enabled: false
+    names:
+      - PF_ratio
+    n_sample: 400
+    n_per_plots: 40
+  abnormal_dist:
+    enabled: true
+    value_limitation:
+      Inspired O2 Fraction:
+        min: 21
+        max: 100
+      Arterial O2 pressure:
+        min: 0
+        max: 500
+      Respiratory Rate:
+        min: 1
+        max: 120
+      Arterial O2 Saturation:
+        min: 50
+        max: 100
+      O2 saturation pulseoxymetry:
+        min: 50
+        max: 100
+      Daily Weight:
+        min: 30
+        max: 200
+      
+      
+  miss_mat: false
+  feature_count: false
+  generate_report: false
+  correlation: false
+  report_params:
+    basic: true
+    dynamic_dist: false
+    static_dist: false
+
+catboost_dynamic:
+  dataset_version: original_version
+  window: 48
+  soft_label: false
+  smoothing_band: 50
+  loss_function: MultiClass
+  iterations: 300
+  depth: 5
+  learning_rate: 0.03
+  centers:
+    - 50
+    - 150
+    - 250
+    - 350
+  class_names:
+    - Severe
+    - Moderate
+    - Mild
+    - No_ARDS
+  feature_limit:
+    - gender
+    - '223830'
+    - '224690'
+    - age
+    - '220277'
+    - '220224'
+    - '223835'
+    - PF_ratio
+  forbidden_feas: []
+  slice_len: 192
+
+nearest_4cls:
+  dataset_version: original_version
+  window: 16
+  soft_label: false
+  centers:
+    - 50
+    - 150
+    - 250
+    - 350
+  class_names:
+    - Severe
+    - Moderate
+    - Mild
+    - No_ARDS
+  smoothing_band: 50

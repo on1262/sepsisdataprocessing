@@ -9,6 +9,7 @@ import pandas as pd
 from collections.abc import Iterable
 import os, sys
 import random
+from tqdm import tqdm
 import subprocess
 import missingno as msno
 from .generic import reinit_dir, remove_slash
@@ -160,6 +161,16 @@ def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
         plt.savefig(out_path)
     plt.close()
 
+def plot_density_matrix(data:np.ndarray, title:str, xlabel:str, ylabel:str, aspect='equal', save_path=None):
+    plt.figure(figsize=(10, 10))
+    plt.title(title)
+    plt.imshow(data, cmap='jet', aspect=aspect) # auto for square picture, equal for original aspect ratio
+    plt.colorbar()
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.savefig(save_path)
+    plt.close()
+
 
 def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True, adapt=False, **kwargs):
     '''
@@ -189,19 +200,38 @@ def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=Tr
     plt.close()
 
 
-def plot_correlation_matrix(data:np.ndarray, fea_names:list, save_path=None):
+def plot_correlation_matrix(data:np.ndarray, fea_names:list, invalid_flag=-1, corr_thres=-1, save_path=None):
     '''
     生成相关矩阵
     data: (sample, n_fea)
     fea_names: (n_fea)
+    percent_corr: 只打印相关性大于阈值的特征，我们对多重共线性特征更感兴趣
     '''
     assert(len(fea_names) == data.shape[1])
     fig_size = int(8+len(fea_names)*0.2)
-    mat = np.corrcoef(x=data, rowvar=False)
+    mat = np.zeros((data.shape[1], data.shape[1]))
+    for i in tqdm(range(data.shape[1]), 'plot correlation'):
+        for j in range(data.shape[1]):
+            if i < j:
+                idx_i = np.logical_and(data[:, i] != invalid_flag, np.logical_not(np.isnan(data[:, i])))
+                idx_j = np.logical_and(data[:, j] != invalid_flag, np.logical_not(np.isnan(data[:, j])))
+                avail_idx = np.logical_and(idx_i, idx_j) # availble subject index
+                if np.sum(avail_idx) < 100:
+                    continue
+                vi = data[avail_idx, i]
+                vj = data[avail_idx, j]
+                coef = np.corrcoef(vi, vj) # (2,2)
+                if not np.isnan(coef[0,1]):
+                    mat[j, i] = coef[0,1]
+    
+    if corr_thres > 0:
+        valid_idx = np.logical_or((np.abs(mat).max(axis=0) >= corr_thres), (np.abs(mat).max(axis=1) >= corr_thres))
+        mat = mat[valid_idx, :][:, valid_idx]
+        fea_names = [name for idx, name in enumerate(fea_names) if valid_idx[idx]]
     f, ax = plt.subplots(figsize=(fig_size, fig_size))
     mask = np.triu(np.ones_like(mat, dtype=bool))
     cmap = sns.diverging_palette(230, 20, as_cmap=True)
-    sns.heatmap(mat, mask=mask, cmap=cmap, vmax=1, center=0, annot = False, xticklabels=fea_names, yticklabels=fea_names,
+    sns.heatmap(mat, mask=mask, cmap=cmap, vmax=1, center=0, annot=False, xticklabels=fea_names, yticklabels=fea_names,
                 square=True, linewidths=.5, cbar_kws={"shrink": .5})
     plt.xticks(rotation=90)
     plt.yticks(rotation=0)

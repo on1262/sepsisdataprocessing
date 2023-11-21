@@ -35,15 +35,13 @@ def create_final_result(out_dir):
                         final_f.write('\n')
     logger.info(f'Final result saved at ' + os.path.join(out_dir, 'final_result.log'))
 
-def cal_label_weight(n_cls, mask, label):
+def cal_label_weight(n_cls, label:np.ndarray):
     '''
     获取n_cls反比于数量的权重
-    label: (batch, seq_lens, n_cls)
-    mask: (batch, seq_lens)
+    label: (..., n_cls)
     return: (n_cls,)
     '''
-    hard_label = np.argmax(label, axis=-1)
-    hard_label = hard_label[:][mask[:]]
+    hard_label = np.argmax(label, axis=-1).flatten()
     weight = np.asarray([np.mean(hard_label == c) for c in range(n_cls)])
     logger.info(f'4cls Label proportion: {weight}')
     weight = 1 / weight

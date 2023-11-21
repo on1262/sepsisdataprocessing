@@ -12,6 +12,23 @@ def Collect_Fn(data_list:list):
     result['length'] = np.asarray([d['length'] for d in data_list], dtype=np.int32)
     return result
 
+def unroll(x:np.ndarray, mask:np.ndarray):
+    # x: (batch, n_fea, seqs_len) or (batch, seqs_len) or (batch, seqs_len, n_cls)
+    # mask: (batch, seqs_len)
+    assert(len(x.shape) <= 3 and len(mask.shape) == 2)
+    if len(x.shape) == 2:
+        return x.flatten()[mask.flatten()]
+    elif x.shape[2] == mask.shape[1]:
+        batch, n_fea, seqs_len = x.shape
+        x = np.transpose(x, (0, 2, 1)).reshape((batch*seqs_len, n_fea))
+        return x[mask.flatten(), :]
+    elif x.shape[1] == mask.shape[1]:
+        batch, seqs_len, n_cls = x.shape
+        x = x.reshape((batch*seqs_len, n_cls))
+        return x[mask.flatten(), :]
+    else:
+        assert(0)
+
 class Normalization():
     def __init__(self, norm_dict:dict, total_keys:list) -> None:
         self.means = np.asarray([norm_dict[key]['mean'] for key in total_keys])
@@ -116,15 +133,12 @@ class LabelGenerator_regression(LabelGenerator):
         return target[..., None]
 
 class DynamicDataGenerator(DataGenerator):
-    '''
-    生成每个时间点和预测窗口的标签，但是不展开时间轴
-    '''
     def __init__(self, window_points, n_fea, label_generator: LabelGenerator, target_idx, 
                  limit_idx=[], forbidden_idx=[], norm:Normalization=None, cache_dir=None) -> None:
         super().__init__(n_fea, limit_idx, forbidden_idx, cache_dir)
         self.norm = norm
         self.target_idx = target_idx
-        self.window = window_points # 向前预测多少个点内的ARDS
+        self.window = window_points # how many points we should look forward
         self.label_gen = label_generator
     
     def __call__(self, cache_name:str, _data:np.ndarray, seq_lens:np.ndarray) -> dict:
@@ -142,7 +156,6 @@ class DynamicDataGenerator(DataGenerator):
         data = _data.copy()
         target = data[:, self.target_idx, :]
         data = data[:, self.avail_idx, :]
-        # 将target按照时间顺序平移
         invalid_flag = target.max()
         for idx in range(target.shape[1]-1): # 最后一格被屏蔽掉
             stop = min(target.shape[1], idx+self.window)
@@ -163,10 +176,10 @@ class DynamicDataGenerator(DataGenerator):
     
 class SliceDataGenerator(DataGenerator):
     '''
-    生成每个时间点和预测窗口的标签，但是不展开时间轴
+    生成每个时间点和预测窗口的标签, 并进行展开
     '''
-    def __init__(self, window_points, n_fea, label_generator: LabelGenerator, target_idx, limit_idx=[], forbidden_idx=[], norm:Normalization=None, p_cache_file=None) -> None:
-        super().__init__(n_fea, limit_idx, forbidden_idx, p_cache_file)
+    def __init__(self, window_points, n_fea, label_generator: LabelGenerator, target_idx, limit_idx=[], forbidden_idx=[], norm:Normalization=None, cache_dir=None) -> None:
+        super().__init__(n_fea, limit_idx, forbidden_idx, cache_dir)
         self.norm = norm
         self.target_idx = target_idx
         self.window = window_points # 向前预测多少个点内的ARDS
@@ -185,7 +198,7 @@ class SliceDataGenerator(DataGenerator):
             self.slice_len = cache['slice_len']
             return cache
 
-        mask = tools.make_mask(_data.shape[[0,2]], seq_lens) # (batch, seq_lens)
+        mask = tools.make_mask((_data.shape[0], _data.shape[2]), seq_lens) # (batch, seq_lens)
         data = _data.copy()
         target = data[:, self.target_idx, :]
         data = data[:, self.avail_idx, :]
@@ -193,7 +206,7 @@ class SliceDataGenerator(DataGenerator):
         # 将target按照时间顺序平移
         invalid_flag = target.max()
         for idx in range(target.shape[1]-1): # 最后一个格子预测一格
-            stop = min(data.shape[1], idx+self.window)
+            stop = min(data.shape[2], idx+self.window)
             mat = mask[:, idx+1:stop] * target[:, idx+1:stop] + np.logical_not(mask[:, idx+1:stop]) * (invalid_flag+1) # seq_len的最后一个格子是无效的
             mat_min = np.min(mat, axis=1) # (batch,)
             target[:, idx] = mat_min
@@ -205,35 +218,15 @@ class SliceDataGenerator(DataGenerator):
             data = self.norm(data, self.avail_idx)
 
         # 转化为slice
-        data, mask, label = self.make_slice(data), self.make_slice(mask), self.make_slice(np.transpose(label, (0, 2, 1))).transpose((0, 2, 1))
+        data, label = unroll(data, mask), unroll(label, mask)
         result = {'data': data, 'mask': mask, 'label': label, 'slice_len': self.slice_len}
         # save cache
         self.save_cache(cache_name, result, force=False)
         return result
-    
-    def make_slice(self, x:np.ndarray):
-        '''
-        input: (batch, n_fea, seq_len) or (batch, seq_len)
-        output: (batch*slice_len, n_fea) or (batch*slice_len,)
-        '''
-        x_dim = len(x.shape)
-        if x_dim == 2: # for mask (batch, seq_len)
-            x = x[:, None, :]
-        x = np.transpose(x, (0, 2, 1)) # (batch, seq_len, n_fea)
-        x = x.reshape((x.shape[0]*x.shape[1], x.shape[2])) # 这样reshape不会破坏最后一维, 还原后等于原来的矩阵
-        if x_dim == 2:
-            return x[:, 0]
-        else:
-            return x
 
     def restore_from_slice(self, x:np.ndarray):
         '''make_slice的反向操作, 保证顺序不会更改'''
-        if isinstance(x, list):
-            return tuple([self.restore_from_slice(data) for data in x])
-        else:
-            batch = x.shape[0] // self.slice_len
-            x = x.reshape((batch, self.slice_len, x.shape[1])) # 这样reshape不会破坏最后一维, 还原后等于原来的矩阵
-            return x
+        pass
 
 class StaticDataGenerator(DataGenerator):
     '''
@@ -276,7 +269,7 @@ class StaticDataGenerator(DataGenerator):
         if self.norm is not None:
             data = self.norm(data, self.avail_idx)
 
-        result =  {'data': data, 'mask': mask, 'label': label}
+        result = {'data': data, 'mask': mask, 'label': label}
         # save cache
         self.save_cache(cache_name, result, force=False)
         return result

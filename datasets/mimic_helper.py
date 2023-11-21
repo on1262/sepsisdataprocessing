@@ -8,6 +8,28 @@ from tools import logger
 from sklearn.model_selection import KFold
 import math
 
+def interp(fx:np.ndarray, fy:np.ndarray, x:np.ndarray):
+    # fx, fy: (N,)
+    # x: dim=1
+    assert(fx.shape[0] == fy.shape[0] and len(fx.shape) == len(fy.shape) and len(fx.shape) == 1 and fx.shape[0] >= 1)
+    assert(len(x.shape) == 1)
+    if fx.shape[0] >= 2 and (not np.all(fx[:-1] < fx[1:])): # sort x, remove duplicated fx
+        idx = sorted(list(range(fx.shape[0])), key=lambda x:fx[x])
+        fx, fy = fx[idx], fy[idx]
+        duplicate = np.zeros_like(fx, dtype=bool)
+        duplicate[1:] = (fx[:-1] == fx[1:])
+        if np.any(duplicate):
+            fx = fx[duplicate == False]
+            fy = fy[duplicate == False]
+    elif fx.shape[0] == 1: # constant extrapolation
+        return np.ones_like(x) * fy[0]
+    
+    result = np.ones_like(x) * fy[0]
+    for idx, px in enumerate(fx):
+        result[x >= px] = fy[idx] # very slow
+    return result
+        
+
 class Admission:
     '''
     代表一段连续的、环境较稳定的住院经历，原subject/admission/stay/transfer的四级结构被精简到subject/admission的二级结构
@@ -133,23 +155,6 @@ class Subject:
             if not adm.empty():
                 return False
         return True
-    
-def reduce_peak(x: np.ndarray):
-    '''
-    清除x中的异常峰
-    x: 1d ndarray
-    '''
-    window_size = 3  # Size of the sliding window
-    threshold = 1.4  # Anomaly threshold at (thredhold-1)% higher than nearby points
-    for i in range(len(x)):
-        left_window_size = min(window_size, i)
-        right_window_size = min(window_size, len(x) - i - 1)
-        window = x[i - left_window_size: i + right_window_size + 1]
-        
-        avg_value = (np.sum(window) - x[i]) / (len(window)-1)
-        if x[i] >= avg_value * threshold and x[i] > 110:
-            x[i] = avg_value
-    return x
 
 def load_sepsis_patients(csv_path:str) -> dict:
     '''
@@ -178,3 +183,20 @@ def load_sepsis_patients(csv_path:str) -> dict:
     df.apply(build_dict, axis=1)
     logger.info(f'Load {len(sepsis_dict.keys())} sepsis subjects based on sepsis3.csv')
     return sepsis_dict
+
+
+class KFoldIterator:
+    def __init__(self, dataset, k):
+        self._current = -1
+        self._k = k
+        self._dataset = dataset
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self._current += 1
+        if self._current < self._k:
+            return self._dataset.set_kf_index(self._current)
+        else:
+            raise StopIteration

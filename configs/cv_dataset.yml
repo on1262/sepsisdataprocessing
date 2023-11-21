@@ -1,0 +1,17 @@
+---
+extract_cols:
+  - 性别
+  - 出生年月
+  - 体重（kg）
+  - 身高（cm）
+  - 入住ICU日期
+  - '#dX_tX_最高呼吸频率（次/min）'
+  - '#dX_tX_最低呼吸频率（次/min）'
+  - '#dX_tX_最高心率（次/min）'
+  - '#dX_tX_最低心率（次/min）'
+  - '#dX_tX_最高SPO2（%）'
+  - '#dX_tX_最低SPO2（%）'
+  - '#dX_tX_最高体温（℃）'
+  - '#dX_PaO2（mmHg）'
+  - '#dX_PH'
+  - '#dX_PaO2（mmHg） / FiO2（%）'

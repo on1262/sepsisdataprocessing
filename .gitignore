@@ -9,3 +9,7 @@ catboost_info/
 nohup.out
 simhei.ttf
 generate_requirements.sh
+test_plot/
+launch_list.yml
+
+

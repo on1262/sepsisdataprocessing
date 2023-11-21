@@ -1,173 +1,202 @@
-
-![Pipeline Overview](document/general_pipeline.png)
+![Pipeline Overview](documents/general_pipeline.png)
 
 # MIMIC-IV Data Processing Pipeline
 
-## 架构
+**[中文版本](README_CN.md) | [English Version](README.md)**
 
-该框架主要包括三个部分：数据集dataset、模型model、分析器analyzer。dataset将原数据抽象为torch.dataset接口；model对批次输入计算输出；analyzer类似trainer，提供K-fold、指标计算、绘图等工作。将model和analyzer拆分，使得一个analyzer调用多个model进行集成学习、一个model被多个analzyer调用等情况更加方便。其余的tools部分包括共用的工具方法，configs部分为需要配置的字段，例如路径、数据清洗的参数等。
+The MIMIC-IV dataset is widely used in various medical researches, however, the original dataset has not undergone data cleaning. This framework provides a highly configurable Pipeline for MIMIC-IV, aiming at minimal encapsulation, high flexibility, and easy extensibility. The code for data processing is low coupled and can be easily merged with the processing code for other datasets. The framework itself provides a default processing flow, and at the same time, the framework provides user-defined configurations at both the configuration file and calling interface levels, which can meet complex user-defined requirements.
 
-analyzer: 分析模块
-1. analyzer: 按照序列运行anlayzer，添加新analyzer时需要注册
-2. container: 存放与模型无关的参数
-3. feature_explore: 生成数据集的探查报告，可配置生成参数
-3. utils: 工具方法
+## Architecture
 
-configs: 每个数据集对应的配置文件
-1. global_config: 配置路径
-2. config_manual: 手动配置, 能够覆盖自动生成的配置
-3. config_cache: 自动生成的配置文件, 不应被修改
+The framework consists of three main parts: dataset dataset, model model, and analyzer analyzer. dataset abstracts the original data into torch.dataset interface; model computes outputs on batch inputs; and analyzer is similar to trainer, providing K-fold, metrics computation, plotting, and other tasks. Splitting model and analyzer makes it more convenient for a single analyzer to call multiple models for integrated learning, and for a single model to be called by multiple analzyers. The rest of the tools section includes common tools and methods, and the configs section is for fields that need to be configured, such as paths, parameters for data cleansing, and so on.
 
-其他模块：
-- data: 数据集文件
-- datasets: 数据集抽象, 包括数据提取/清洗/重新组织
-- libs: 第三方库和相关代码
-- models: 模型
-- outputs: 输出图片/分析表等
-- tools: 工具类
-- main.py: 主入口, 通过参数配置和launcher对接
+analyzer: the analyzer module
+1. analyser: runs the analyser in a sequence and needs to be registered when adding a new analyser.
+2. container: store parameters that are not related to the model
+3. feature_explore: generates an exploratory report of the dataset, with configurable generation parameters
+3. utils: utility methods
 
-## 部署方法
+configs: Configuration files for each dataset.
+1. global_config: configuration path
+2. mimiciv_dataset: corresponds to `dataset/mimic_dataset.py`, by default it is configured for extracting patients with oxygenation indices and corresponding features from Sepsis patients, it is recommended to modify the downstream tasks on this dataset.
+3. mimiciv_dataset_raw: corresponds to `dataset/mimic_raw_dataset.py`, provides a minimally processed dataset for data probing
 
-按照以下步骤部署：
-1. 在`python=3.10.11`环境下配置conda环境，并安装所需的packages：`pip install -r requirements.txt`
-2. 第一步中关于pytorch的cuda版本问题参考下一小节
-3. 将MIMIC-IV数据集解压至`data/mimic-iv`文件夹下, 子文件夹有`hosp`,`icu`等
-4. 将生成的`sepsis3.csv`存放在`data/mimic-iv/sepsis_result`下
-5. 运行`python -u main.py`，生成整个数据集需要一个半小时左右，第一次运行会生成数据集探查结果和一个实例模型的预测结果
+other modules:
+- data: dataset file
+- datasets: dataset abstractions, including data extraction/cleaning/reorganisation
+- libs: third-party libraries and related code
+- models: models
+- outputs: output folder
+- tools: tool classes
+- main.py: main entry, interfaces with the launcher via parameters
 
-安装Pytorch对应的CUDA版本：
-1. 新建并进入一个conda虚拟环境
-2. 输入`nvidia-smi` 查看服务器安装的CUDA版本
-3. 按照 https://pytorch.org/get-started/previous-versions/ 选择linux下的对应版本的安装命令，pytorch对应的CUDA版本可以落后于服务器的CUDA版本
-4. 检查是否安装成功： https://blog.csdn.net/qq_45032341/article/details/105196680
-5. 如果安装了不同于`requirements.txt`中的pytorch版本，将对应的行删掉，避免重复安装
-6. 这个框架本身对第三方库的版本没有严格限制
+## Deployment method
 
-## MIMIC-IV数据集
+Follow the steps below to deploy:
+1. Configure the conda environment under `python=3.10.11` and install the required packages: `pip install -r requirements.txt`.
+2. In the first step, refer to the next subsection for the cuda version of pytorch.
+3. Extract the MIMIC-IV dataset to the `data/mimic-iv` folder, with sub-folders `hosp`, `icu`, etc.
+4. (Optional) If there is a MIMIC-IV-ED file, extract it to the `ed` subfolder.
+5. store the generated `sepsis3.csv` under `data/mimic-iv/sepsis_result`.
+6. Run `python -u main.py` to generate it all at once.
 
-框架本身可以支持多个数据集，且对一个数据集可以产生多个“版本”（version），不同版本的数据集可以有不同的特征数量和处理方法，便于特征筛选和不同数据集的对照设计
+Install the corresponding CUDA version of Pytorch:
+1. Create and enter a new conda virtual environment.
+2. Type `nvidia-smi` to see which CUDA version is installed on the server.
+3. Follow the installation command at https://pytorch.org/get-started/previous-versions/ to select the corresponding version under linux, the CUDA version of pytorch can be behind the CUDA version of the server.
+4. Check if the installation was successful: https://blog.csdn.net/qq_45032341/article/details/105196680
+5. If you installed a different version of pytorch than the one in `requirements.txt`, delete the corresponding line to avoid duplicate installations.
+6. The framework itself has no strict restrictions on the versions of third-party libraries.
 
-**subjects、admissions和stays**
+## MIMIC-IV datasets
 
-在hosp/transfer记录中可以看到一个subjects往往对应多个admissions，而且在Emergency Department的情况较多，还有病人在手术室的情况。
+We divide the processing of the dataset into two parts: `dataset specific processing`, which deals with issues arising from the internal structure of the dataset, and `model & task specific processing`, which does different processing for different downstream tasks. The code in `datasets/mimiciv/MIMICIV` is used for `dataset specific processing`, and in general the user does not need to modify its contents.
 
-在icu/icu_stays中，admission和stay的比值为0.905:1，两者几乎是一对一的关系。相比hosp/transfer表，icu_stays记录的只是在ICU内的一部分，并且合并了连续的病房转移。即一个stay id对应一个或多个transfer id，但存在许多transfer id在stay id的范围外，包括急诊室、手术室的情况。同样地，并非所有admission都包括ICU内的情况，不是所有admission都拥有stay id
+`model & task specific processing` is done by derived classes and `data_generator`. `datasets/mimic_dataset/MIMICIVDataset` is a derived class of `MIMICIV`, which enables flexible processing of different downstream tasks by overriding abstract methods starting with `on_`, and the user needs to modify this code for different research needs. Each derived class of `MIMICIV` has a separate configuration file in `config`, which can be modified to adjust the behaviour of `MIMICIV` without modifying the code.
 
-在数据清洗过程中，只抽取ICU和Emergency Department两个部分的内容，所有stays/transfers都被看作独立的admissions。一个患者存在多段住院经历，将会被看作多个样本。
+### Introduction to the MIMICIV processing flow
 
-**mimic_dataset/MIMICIV**
+This part of the processing corresponds to `dataset specific processing`, in most cases users do not need to modify the contents of it, but only need to understand the general processing flow and the definition of the interface. According to the principle of minimal encapsulation, only `@property` is used to distinguish between internal and external visible properties, and `@abstractmethod` is used to indicate which methods need to be overridden by derived classes.
 
-对MIMIC数据集进行比较底层的处理，包含三个phase：
+**Data access**: `MIMICIV`'s data processing is divided into 7 stages (phases), and the processed data from each stage is stored in cache under `data/mimic-iv/cache` (or under `data/mimic-iv-raw/cache` in the case of `mimic_raw`), once Once all the data is processed, only the cache corresponding to the final result is loaded each time it is instantiated, removing unnecessary IO operations, at which point `Bare Mode Enabled` is displayed. In addition, in order to save space, the cache is compressed using the lzma algorithm, the compression time will be greater than that of the pickle direct storage, but it has almost no effect on reading, if you need to save the compression time, modify `configs/mimic_dataset/compress_cache` to `False
 
-phase1: 抽取sepsis患者ID和指标与编号的映射文件
-- 载入sepsis3筛选结果（见sepsis3.csv生成）
-- 载入hosptial lab item和ICU lab item编号表
-- sepsis发生时间定义为 min(antibiotic_time, culture_time)
+**preprocess_phase1**: load `hosp`, `icu` item mapping tables, create corresponding mapping tables for `ed`, no need to actually read ED data. Afterwards call `on_extract_subjects` to introduce the list of subjects and external data to be filtered.
 
-phase2: 抽取subject列表，补充患者的基本信息
-- 按照sepsis3 result，抽取patients中的患者，构建subject dict，并添加基本信息
-- 从icu_stays抽取ICU内患者信息，构建admissions
-- 从transfers中抽取ED患者信息，构建admissions
-- 从omr中抽取患者的静态指标，补充到subject中
+**preprocess_phase2**: read the basic information of the patient according to the subject_id list, this phase calls `on_build_subject`, `on_extract_admission` successively.
 
-phase3: 读取icu_events，记录动态特征
-- 配置需要采集的指标，只有数值型的指标会被提取
-- 提取icu_events表
-- 清理不符合标准的admission和subject
+**preprocess_phase3**: Traverses all available data from MIMIC-IV and extracts the required data. There are three data sources (`icu`, `ed`, `hosp`) via `configs/mimic_dataset/data_linkage` it is possible to configure which data sources do not need to be read. Simply exclude which features are not needed before data extraction via `on_select_feature`
 
-**mimic_dataset/MIMICIV_Dataset**
+**preprocess_phase4**: Converts the data to numeric, filters the available samples, and finally constrains the outliers to be within the normal range according to `configs/mimic_dataset/value_clip`. In the first two processes, `on_convert_numeric`, `on_select_admissions` will be called in turn.
 
-MIMIC-IV数据集的上层抽象，转化为一个dim=3的矩阵
+**preprocess_phase5**: further removes features and samples with high missing rates, generating per-feature statistics that are generated before the timeline alignment and are therefore unaffected by interpolation and missing padding. This step will call `on_remove_missing_data`
 
-preprocess to numeric: 将载入信息化为数值型
-- 类别特征到数值映射到转化（目前只做了gender）
-- 将不规范存储到特征转化为数值型（舒张压、收缩压）
-- 约束特征上下界取值
+**preprocess_phase6**: Interpolation and alignment of unevenly sampled data, generation of a 3D array `(n_subject, n_feature, n_sequence)` at regular intervals, with different lengths of sequences filling in the end with `-1`, and finally feature engineering. This stage calls `on_build_table`, `on_feature_engineering` in turn
 
-preprocess norm: 获取归一化信息
-- 为每个特征计算均值和方差
+Interpolation considers three cases:
+1. the head and tail of an admittance are determined by `configs/mimic_dataset/align_target`, looking for the earliest and latest points in time at which the target features are both present. The interpolation interval is determined by `configs/mimic_dataset/delta_t_hour`.
+2. when historical data exists at a given point in time, the most recent historical available data is used, regardless of causality
+3. when the interpolation start time is earlier than the known historical data for that feature, the first data point is used to fill in the gaps.
 
-preprocess table: 制作最终的数据集矩阵
-- 布局：[static feature, dynamic feature, additional feature]
-- 序列的起始时间是max(sepsis time, admittime)
-- 特征工程新增特征
-- 线性插值，没有数据的列或者时刻填充-1
+**preprocess_phase7**: Generate different derived versions of the same dataset according to `configs/mimic_dataset/version`, user can customise the restriction and exclusion ranges of features in the configuration, specify the handling of missing values, currently supports `avg` mean fill and `none` default (- 1) padding. Different versions can be used for data exploration and model training respectively.
 
-preprocess version: 生成数据集的不同版本
-- feature_limit: 数据集的特征只能在给定的范围中，空表示没有限制
-- forbidden feature: 不能包含给定的特征，可以用于高相关度剔除
-- data source: 选择数据集中包含的样本来自于ICU还是ED
-- 生成K-Fold样本划分
+### Introduction to MIMICIV derived dataset
 
-## sepsis3.csv 生成
+This section corresponds to the functions in `datasets/mimic_dataset`, and it is recommended that the user modifies only the necessary parts and specifies the input and output formats of the interface. This framework has few checks for user-defined behaviour, which may cause the rest of the Pipeline to report errors if user-modified parts introduce new problems (e.g., generating NaNs).
 
-提取的sepsis3表格有**32971**个行，**25596**个患者，包含的列有：
-- subject_id
-- stay_id
-- antibiotic_time
-- culture_time
-- suspected_infection_time
-- sofa_time
-- sofa_score
-- respiration
-- coagulation
-- liver
-- cardiovascular
-- cns
-- renal
-- sepsis3
+**on_extract_subjects**
 
-**step1: build postgresql**
+Output: dict[key=int(subject_id), value=object(extra_data)]
+1. subject_id needs to cover all patients captured, and can be linked to other data pipelines, e.g. by reading the derivation table of `mimic-code`.
+2. `extra_data` contains additional data corresponding to the subject, in an unrestricted format, and is only processed by the user in `on_build_subject
 
-```
-createdb mimiciv
+**on_build_subject**
 
-cd ~/mimic-code/mimic-iv/buildmimic/postgres
+Creating an instance of Subject
 
-psql -d mimiciv -f create.sql
+Inputs:
+1. subject_id: int
+2. subject: Subject type, add new data via `append_static` method
+3. row: rows of `hosp/patients.csv` corresponding to subject, including `gender`, `dod`, etc.
+4. _extract_result: the data extracted in `on_extract_subjects`
 
-psql -d mimiciv -v ON_ERROR_STOP=1 -v mimic_data_dir=/path/to/mimic-iv -f load.sql
+Output: subject, which is a reference, essentially adding content via the `append_static` method
 
-```
-**step2: build concepts**
+**on_extract_admission**
 
-```
-cd ~/mimic-code/mimic-iv/concepts_postgres
+Adding Admission instances to subjects
 
-psql -d mimiciv
+Inputs:
+1. subject: Subject
+2. source: str, values can be (`admission`, `icu`, `transfer`) extracted from `hosp/admission.csv`, `icu/icu_stays.csv`, `hosp/transfers.csv` respectively
+3. row: namedtuple, rows from table corresponding to `source`
 
-\i postgres-functions.sql -- only needs to be run once
+No output, add data via `Subject.append_static()` and `Admission.append_dyanmic()`
 
-\i postgres-make-concepts.sql
- 
-```
-**step3: extract csv**
+**on_select_feature**
 
-```
+Inputs:
+1. id: int, subject_id
+2. source: str, can be (`icu`, `hosp`, `ed`) from `icu/d_items.csv`, `hosp/d_labitems.csv`, `ed` has built-in formatting
+3. row: dict, the meaning of key refer to `source` corresponding to the meaning of each column in the source file
+   - source=`icu`, key=[`id`, `label`, `category`, `type`, `low`, `high`]
+   - source=`hosp`, key=[`id`, `label`, `fluid`, `category`]
+   - source=`ed`, key=[`id`, `link_id`, `label`] where `link_id` links the ED's basic vitals to the ICU to vitals, not as a separate column
 
-\copy (SELECT * FROM mimiciv_derived.sepsis3) TO '~/sepsis3.csv' WITH CSV HEADER; -- 提取出csv文件
+Output: bool, False means the feature is not selected, True means it is. Note that this stage only removes unwanted features, selected features are further filtered
 
-```
+**on_convert_numeric**
 
-## 特征加工 & 新增特征
+It is not recommended to rewrite this method, the example should be modelled to rewrite only what is in the judgement statement
 
-新增特征：
-- PF_ratio: PaO2/FiO2
-- MAP(平均动脉压): (SBP(收缩压) + 2*DBP(舒张压))/3
-- shock_index(休克指数): HR(心率) / SBP(收缩压)
-- PPD(pulse pressure difference,脉压差): SBP - DBP
-- sepsis time: 相对于起始时刻的sepsis发生时间（小时）
+`Subject.static_data`: dict[key=str, value=list[tuple(value, time)]], modifies the values of non-numeric features to make all features numeric
 
-data source: 样本对应的admission的来源位置
-- icu: 样本对应的stay id在ICU stays内
-- ed: 样本对应的transfer id在Emergency Department内
+**on_select_admissions(remove_invalid_pass1)**
 
-## dataset report & feature explorer
+Filter the available samples according to the conditions, it is not recommended to rewrite the whole method, the filtering conditions should be modified according to the task needs
 
-阐明一些特殊概念：
-- config/miss_dict：新增特征计算缺失值时需要指定参与计算的特征，取输入特征缺失情况的交集
-- global miss rate: 不受remove rule version2影响，可以看作所有sepsis患者的缺失情况，以subject为最小单位，覆盖static+dynamic feature
-- hit table：按照remove rule去除不合适的患者后，剩下群体中的特征覆盖率（覆盖率=1-缺失率），以admission为最小单位，并且覆盖dynamic feature+additional feature
-    - 预处理阶段会按照hit table去除覆盖率较小的特征，阈值为`remove_rule/min_cover_rate`
-- miss mat: 去除不合适的患者后，剩余群体中的特征缺失情况分布
+Inputs.
+1. rule: dict, from `configs/mimiciv_dataset/remove_rule/pass1
+2. subjects: dict[subject_id: int, Subject]
+
+Default filter conditions are used to filter Sepsis patients and need to be satisfied in all:.
+1. whether all the features in `target_id` are included, if not, the temporal labels cannot be generated in some tasks
+2. whether the time length satisfies the condition, too short sequences can not be used for prediction, too long sequences will affect the size of the table after padding.
+3. filter condition on `Sepsis time`, not needed in non-Sepsis tasks
+
+**on_remove_missing_data(remove_invalid_pass2)**
+
+Further filtering of available samples and features, unless necessary, it is recommended to modify only the missrate in the configuration file and not the code
+
+The default algorithm performs multi-step iterations to remove highly missing features and samples at the same time, the iteration steps are determined by the length of the `max_col_missrate` and `max_subject_missrate` lists in the config file, the missrate at the end of the list is the final missrate
+
+The `adm_select_strategy` has two choices, `random` which means randomly selecting one of the available admissions for each subject, and `default` which means selecting the first valid admission by default.
+
+**on_build_table**
+
+Modify the values of certain features, which are often time dependent, when determining the start time of the sequence
+
+Inputs.
+1. subject: Subject
+2. key: str, the id of the currently modified feature
+3. value: float: original value
+4. t_start: float, the start time of the current sequence from the admit time, is a positive number
+
+Output: new_value: float, the new value of the current feature
+
+**on_feature_engineering**
+
+After interpolation, new features are computed based on existing features. It is not recommended to rewrite the whole method, you can modify a part of the judgement statement. Note that the original feature needs to be considered missing (-1), if the original feature is missing, the new feature should also be set to -1
+
+Input:
+1. tables: list[np.ndarray[n_features, n_sequences]], tabulated data without padding
+2. norm_dict: dict[key='mean' or 'std', value=float], store the statistics of the features, new features need to update it
+3. static_keys, dynamic_keys: list[str], new features require updating them
+
+Output: updated tables, norm_dict, static_keys, dynamic_keys
+
+## Introduction to Data generator
+
+`model & task specific processing` is not always solved by pipelines, e.g. different models require different normalisation methods, temporal and non-temporal tasks require different data organisation formats. We provide multiple generators to generate different data formats and labels.
+
+Overall, there are three DataGenerators and two LabelGenerators, which are under `models/utils`, and users can easily develop new generators.We provide several sample algorithms to illustrate how different generators can be used for different tasks.
+
+### label generator
+
+**LabelGenerator_4cls**: Expand an arbitrarily sized array of targets into a new dimension, divided into four categories of a predefined size, for classification prediction.
+
+**LabelGenerator_regression**: no processing, can be modified for other tasks.
+
+### data generator
+
+Different data generators and label generators can be combined in any way, see the example algorithm: `analyzer/method_nearest_cls`.
+
+**DynamicDataGenerator**: For each data point, searches forward through a prediction window and calculates the lowest value within the window as the prediction target. It also takes available features, similar to `dataset version`, and can be normalised. The end result is still a 3D structure and the timeline is not expanded. It can be used for RNN algorithms such as LSTM.
+
+**SliceDataGenerator**: computed in the same way as `DynamicDataGenerator`, but the timeline of the final data will be unfolded into the form of (n_sequence, n_feature), and invalid data will be eliminated. For non-temporal methods such as GBDT
+
+**StaticDataGenerator**: for each sequence, generates a large prediction window to predict the endgame situation using features from the first moment. One sample is generated for each sequence.
+
+
+## More help
+
+[How to generate Sepsis3.csv](documents/processing.md)
