@@ -125,7 +125,7 @@ class LabelGenerator_4cls(LabelGenerator):
         smoothed_labels[..., -1][nums > centers[-1]] = 1
         return smoothed_labels
 
-class LabelGenerator_regression(LabelGenerator):
+class LabelGenerator_origin(LabelGenerator):
     def __init__(self) -> None:
         super().__init__()
 
@@ -178,7 +178,17 @@ class SliceDataGenerator(DataGenerator):
     '''
     生成每个时间点和预测窗口的标签, 并进行展开
     '''
-    def __init__(self, window_points, n_fea, label_generator: LabelGenerator, target_idx, limit_idx=[], forbidden_idx=[], norm:Normalization=None, cache_dir=None) -> None:
+    def __init__(self, 
+                 window_points, 
+                 n_fea, 
+                 label_generator: LabelGenerator, 
+                 label_func,
+                 target_idx, 
+                 limit_idx=[], 
+                 forbidden_idx=[], 
+                 norm:Normalization=None, 
+                 cache_dir=None
+    ) -> None:
         super().__init__(n_fea, limit_idx, forbidden_idx, cache_dir)
         self.norm = norm
         self.target_idx = target_idx

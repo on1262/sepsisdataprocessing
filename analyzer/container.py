@@ -1,4 +1,4 @@
-from datasets import MIMICIVDataset
+from datasets import MIMICIV_ARDS_Dataset
 import tools
 import os
 

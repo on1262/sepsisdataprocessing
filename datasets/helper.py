@@ -7,28 +7,34 @@ from tools import GLOBAL_CONF_LOADER
 from tools import logger
 from sklearn.model_selection import KFold
 import math
+from tqdm import tqdm
 
-def interp(fx:np.ndarray, fy:np.ndarray, x:np.ndarray):
-    # fx, fy: (N,)
+def interp(fx:np.ndarray, fy:np.ndarray, x_start:float, interval:float, n_bins:int, missing=-1, fill_bin=['avg', 'latest']):
+    # fx, (N,), N >= 1, sample time for each data point (irrgular)
+    # fy: same size as fx, sample value for each data point
     # x: dim=1
     assert(fx.shape[0] == fy.shape[0] and len(fx.shape) == len(fy.shape) and len(fx.shape) == 1 and fx.shape[0] >= 1)
-    assert(len(x.shape) == 1)
-    if fx.shape[0] >= 2 and (not np.all(fx[:-1] < fx[1:])): # sort x, remove duplicated fx
-        idx = sorted(list(range(fx.shape[0])), key=lambda x:fx[x])
-        fx, fy = fx[idx], fy[idx]
-        duplicate = np.zeros_like(fx, dtype=bool)
-        duplicate[1:] = (fx[:-1] == fx[1:])
-        if np.any(duplicate):
-            fx = fx[duplicate == False]
-            fy = fy[duplicate == False]
-    elif fx.shape[0] == 1: # constant extrapolation
-        return np.ones_like(x) * fy[0]
+    assert(interval > 0 and n_bins > 0)
+    assert(fill_bin in ['avg', 'latest'])
+    result = np.ones((n_bins)) * missing
     
-    result = np.ones_like(x) * fy[0]
-    for idx, px in enumerate(fx):
-        result[x >= px] = fy[idx] # very slow
+    for idx in range(n_bins):
+        t_bin_start = x_start + (idx - 1) * interval
+        t_bin_end = x_start + idx * interval
+        valid_mask = np.logical_and(fx > t_bin_start, fx <= t_bin_end) # (start, end]
+        if np.any(valid_mask): # have at least one point
+            if fill_bin == 'avg':
+                result[idx] = np.mean(fy[valid_mask])
+            elif fill_bin == 'latest':
+                result[idx] = fy[valid_mask][-1]
+            else:
+                assert(0)
+        else: # no point in current bin
+            if idx == 0:
+                result[idx] = missing
+            else:
+                result[idx] = result[idx-1] # history is always available
     return result
-        
 
 class Admission:
     '''
@@ -109,7 +115,7 @@ class Subject:
             else:
                 self.static_data[name].append((value, charttime))
     
-    def nearest_static(self, key, time=None):
+    def latest_static(self, key, time=None):
         '''返回与输入时间最接近的静态特征取值'''
         if key not in self.static_data.keys():
             return -1
@@ -117,14 +123,12 @@ class Subject:
         if not isinstance(self.static_data[key], np.ndarray): # single value
             return self.static_data[key]
         else:
-            nearest_idx, delta = 0, np.inf
             assert(time is not None)
             for idx in range(self.static_data[key].shape[0]):
-                new_delta = np.abs(time-self.static_data[key][idx, 1])
-                if new_delta < delta:
-                    delta = new_delta
-                    nearest_idx = idx
-            return self.static_data[key][nearest_idx, 0]
+                if time >= self.static_data[key][idx, 1]:
+                    return self.static_data[key][idx, 0]
+                
+            return -1 # input time is too early
 
     def append_dynamic(self, charttime:float, itemid, value):
         '''添加一个动态特征到合适的admission中'''
@@ -156,35 +160,6 @@ class Subject:
                 return False
         return True
 
-def load_sepsis_patients(csv_path:str) -> dict:
-    '''
-    从csv中读取按照mimic-iv pipeline生成的sepsis3.0表格
-    sepsis_dict: dict(int(subject_id):list(occur count, elements))
-        element: [sepsis_time(float), stay_id, sofa_score, respiration, liver, cardiovascular, cns, renal]
-        多次出现会记录多个sepsis_time
-    '''
-    converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
-    sepsis_dict = {}
-
-    def extract_time(row): # 提取sepsis发生时间, 返回float，注意这里包含了对sepsis发生时间的定义
-        return min(converter(row['antibiotic_time']), converter(row['culture_time']))
-    
-    def build_dict(row): # 提取sepsis dict
-        id = int(row['subject_id'])
-        element = {k:row[k] for k in ['sepsis_time', 'stay_id', 'sofa_score', 'respiration', 'liver', 'cardiovascular', 'cns', 'renal']}
-        element['stay_id'] = int(element['stay_id'])
-        if id in sepsis_dict:
-            sepsis_dict[id].append(element)
-        else:
-            sepsis_dict[id] = [element]
-        
-    df = pd.read_csv(csv_path, encoding='utf-8')
-    df['sepsis_time'] = df.apply(extract_time, axis=1)
-    df.apply(build_dict, axis=1)
-    logger.info(f'Load {len(sepsis_dict.keys())} sepsis subjects based on sepsis3.csv')
-    return sepsis_dict
-
-
 class KFoldIterator:
     def __init__(self, dataset, k):
         self._current = -1
@@ -200,3 +175,11 @@ class KFoldIterator:
             return self._dataset.set_kf_index(self._current)
         else:
             raise StopIteration
+        
+def load_all_subjects(patient_table_path:str) -> set:
+    # return a dict with key=subject_id, value=None
+    patient_set = set()
+    patients = pd.read_csv(os.path.join(patient_table_path), encoding='utf-8')
+    for row in tqdm(patients.itertuples(), 'Find all subjects', total=len(patients)):
+        patient_set.add(row.subject_id)
+    return patient_set

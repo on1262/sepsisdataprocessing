@@ -11,9 +11,9 @@ from sklearn.model_selection import KFold
 from abc import abstractmethod
 from datetime import datetime
 from random import choice
-from .mimic_helper import Subject, KFoldIterator, interp
+from .helper import Subject, KFoldIterator, interp
 
-class MIMICIV(Dataset):
+class MIMICIV_Core(Dataset):
     def __init__(self, dataset_name):
         super().__init__()
         # configs
@@ -45,7 +45,7 @@ class MIMICIV(Dataset):
 
         self._load_data()
 
-        logger.info('MIMICIV inited')
+        logger.info('MIMICIV-Core inited')
 
     # read-only access control
     @property
@@ -98,7 +98,7 @@ class MIMICIV(Dataset):
         pkl_paths = [os.path.join(cache_dir, name + suffix) for name in ['1_phase1', '2_phase2', '3_subjects', '4_numeric_subject', '5_norm_dict', '6_table_final']]
         version_files = [os.path.join(cache_dir, f'7_version_{version_name}' + suffix) for version_name in self._loc_conf['version'].keys()] + \
                 [os.path.join(cache_dir, f'7_version_{version_name}.npz') for version_name in self._loc_conf['version'].keys()]
-        bare_mode = np.all([os.path.exists(p) for p in pkl_paths] + [os.path.exists(p) for p in version_files]) # 仅当所有文件都存在时才进行载入加速
+        bare_mode = np.all([os.path.exists(p) for p in pkl_paths] + [os.path.exists(p) for p in version_files]) # speed up IO only when all cache files exist
         
         if bare_mode:
             logger.info('MIMIC-IV: Bare Mode Enabled')
@@ -150,33 +150,32 @@ class MIMICIV(Dataset):
                 'low': row['lownormalvalue'], 
                 'high': row['highnormalvalue']
             }
-            icu_item['label'][row['label']] = icu_item['id'][str(row['itemid'])] # 可以用名字或id查找
+            icu_item['label'][row['label']] = icu_item['id'][str(row['itemid'])]
 
         # 建立ed item的编号映射, 和icu lab_item关联
         ed_item = {'id': {
-            'ED_temperature': {'id': 'ED_temperature', 'link_id':'223761', 'label':'Temperature Fahrenheit'}, 
-            'ED_heartrate': {'id': 'ED_heartrate', 'link_id':'220045', 'label':'Heart Rate'},
-            'ED_resprate': {'id': 'ED_resprate', 'link_id':'220210', 'label':'Respiratory Rate'},
-            'ED_o2sat': {'id': 'ED_o2sat', 'link_id':'220277', 'label':'O2 saturation pulseoxymetry'},
-            'ED_sbp': {'id': 'ED_sbp', 'link_id': None, 'label':'sbp'},
-            'ED_dbp': {'id': 'ED_dbp', 'link_id': None, 'label':'dbp'}
+            'ED_temperature': {'id': 'ED_temperature', 'link_id':'223761', 'label':'(ED) Temperature Fahrenheit'}, 
+            'ED_heartrate': {'id': 'ED_heartrate', 'link_id':'220045', 'label':'(ED) Heart Rate'},
+            'ED_resprate': {'id': 'ED_resprate', 'link_id':'220210', 'label':'(ED) Respiratory Rate'},
+            'ED_o2sat': {'id': 'ED_o2sat', 'link_id':'220277', 'label':'(ED) O2 saturation pulseoxymetry'},
+            'ED_sbp': {'id': 'ED_sbp', 'link_id': None, 'label':'(ED) sbp'},
+            'ED_dbp': {'id': 'ED_dbp', 'link_id': None, 'label':'(ED) dbp'}
         }}
         ed_item['label'] = {val['label']:val for val in ed_item['id'].values()}
 
-        # 抽取符合条件的患者id
-        extract_result = self.on_extract_subjects()
-        # 存储cache
+        subject_set, extra_information = self.on_extract_subjects()
+
         self._hosp_item = hosp_item
         self._icu_item = icu_item
         self._ed_item = ed_item
         self._all_items = {
-            'id': {key:val for d in [icu_item, hosp_item, ed_item] for key, val in d['id'].items()},
-            'label': {key:val for d in [icu_item, hosp_item, ed_item] for key, val in d['label'].items()}
+            'id': {key:val for d in [ed_item, icu_item, hosp_item] for key, val in d['id'].items()},
+            'label': {key:val for d in [ed_item, icu_item, hosp_item] for key, val in d['label'].items()}
         }
-        self._extract_result = extract_result
+        self._extract_result = (subject_set, extra_information)
         with open(pkl_path, 'wb') as fp:
             pickle.dump({
-                'extract_result': extract_result,
+                'extract_result': self._extract_result,
                 'icu_item': icu_item,
                 'hosp_item': self._hosp_item,
                 'ed_item': self._ed_item,
@@ -192,17 +191,18 @@ class MIMICIV(Dataset):
             return
 
         logger.info(f'MIMIC-IV: processing subjects and admissions')
-        # 构建subject
+
+        # construct subject
         patients = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'patients.csv'), encoding='utf-8')
         for row in tqdm(patients.itertuples(), 'Construct Subjects', total=len(patients)):
             s_id = row.subject_id
-            if s_id in self._extract_result:
+            if s_id in self._extract_result[0]:
                 subject = Subject(row.subject_id, birth_year=row.anchor_year - row.anchor_age)
-                self._subjects[s_id] = self.on_build_subject(s_id, subject, row, self._extract_result)
+                self._subjects[s_id] = self.on_build_subject(s_id, subject, row, self._extract_result[0], self._extract_result[1])
 
-        logger.info(f'Extract {len(self._subjects)} patients from {len(self._extract_result)} patients in extract_result')
+        logger.info(f'Extract {len(self._subjects)} patients from {len(self._extract_result[0])} patients in extract_result')
 
-        # 加入admission
+        # add admission
         admissions = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'admissions.csv'), encoding='utf-8')
         for row in tqdm(admissions.itertuples(), 'Extract Admissions', total=len(admissions)):
             if row.subject_id in self._subjects:
@@ -243,9 +243,9 @@ class MIMICIV(Dataset):
         ymdhms_converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
 
         # 决定捕捉哪些特征
-        collect_icu_set = set([id for id, row in self._icu_item['id'].items() if self.on_select_feature(id=id, row=row, source='icu')])
-        collect_ed_set = set([id for id in self._ed_item['id'].keys() if self.on_select_feature(id=id, row=None, source='ed')])
-        collect_hosp_set = set([id for id, row in self._hosp_item['id'].items() if self.on_select_feature(id=id, row=row, source='hosp')])
+        collect_icu_set = set([id for id, row in self._icu_item['id'].items() if self.on_select_feature(subject_id=id, row=row, source='icu')])
+        collect_ed_set = set([id for id in self._ed_item['id'].keys() if self.on_select_feature(subject_id=id, row=None, source='ed')])
+        collect_hosp_set = set([id for id, row in self._hosp_item['id'].items() if self.on_select_feature(subject_id=id, row=row, source='hosp')])
         
         if self._loc_conf['data_linkage']['ed']:
             # 采集ED内的数据
@@ -425,6 +425,7 @@ class MIMICIV(Dataset):
         logger.info(f'Detected {len(self._static_keys)} available static features')
 
         default_missvalue = float(self._loc_conf['generate_table']['default_missing_value'])
+        calculate_bin = self._loc_conf['generate_table']['calculate_bin']
         for s_id in tqdm(self._subjects.keys(), desc='Generate aligned table'):
             s = self._subjects[s_id]
             adm = s.admissions[0]
@@ -438,22 +439,26 @@ class MIMICIV(Dataset):
             # 生成表本身, 缺失值为-1
             individual_table = np.ones((len(collect_keys), ticks.shape[0]), dtype=np.float32) * default_missvalue
 
-            # 填充static data, 找最近的点
+            # fulfill static data by nearest value
             static_data = np.ones((len(self._static_keys))) * default_missvalue
             for idx, key in enumerate(self._static_keys):
                 if key in self._subjects[s_id].static_data:
-                    value = self._subjects[s_id].nearest_static(key, t_start)
+                    value = self._subjects[s_id].latest_static(key, t_start)
                     static_data[idx] = self.on_build_table(self._subjects[s_id], key, value, t_start)
+            
             individual_table[:len(self._static_keys), :] = static_data[:, None]
             self.check_nan(individual_table)
-            # 插值dynamic data
+            # interpolation of dynamic data
             for idx, key in enumerate(self._dynamic_keys):
                 if key in adm.keys():
                     self.check_nan(adm[key])
                     if adm[key].shape[0] == 1:
                         individual_table[len(self._static_keys)+idx, :] = adm[key][0, 0]
                     else:
-                        individual_table[len(self._static_keys)+idx, :] = interp(fx=adm[key][:, 1], fy=adm[key][:, 0], x=ticks)
+                        individual_table[len(self._static_keys)+idx, :] = interp(
+                            fx=adm[key][:, 1], fy=adm[key][:, 0], x_start=ticks[0], 
+                            interval=t_step, n_bins=len(ticks), missing=default_missvalue, fill_bin=calculate_bin
+                        )
                     self.check_nan(individual_table)
             if individual_table.size > 0:
                 self.check_nan(individual_table)
@@ -674,7 +679,7 @@ class MIMICIV(Dataset):
             return len(self._data_index)
 
     @abstractmethod
-    def on_extract_subjects(self) -> dict:
+    def on_extract_subjects(self) -> tuple:
         pass
 
     @abstractmethod
@@ -686,11 +691,11 @@ class MIMICIV(Dataset):
         pass
 
     @abstractmethod
-    def on_build_subject(self, id:int, subject:Subject, row:dict, _extract_result:dict) -> Subject:
+    def on_build_subject(self, subject_id:int, subject:Subject, row:dict, patient_set:set, extra_data:object) -> Subject:
         pass
 
     @abstractmethod
-    def on_select_feature(self, id:int, row:dict, source:str=['icu', 'hosp', 'ed']):
+    def on_select_feature(self, subject_id:int, row:dict, source:str=['icu', 'hosp', 'ed']):
         pass
 
     @abstractmethod

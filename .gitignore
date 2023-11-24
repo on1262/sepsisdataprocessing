@@ -10,6 +10,7 @@ nohup.out
 simhei.ttf
 generate_requirements.sh
 test_plot/
+tools/module_test.py
 launch_list.yml
 
 

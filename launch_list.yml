@@ -1,7 +1,9 @@
 ---
 
+# analyzers will run in sequence according to the following order
 analyzer_params:
-  # - catboost_dynamic
+  # - ards_nearest_4cls
+  # - ards_catboost_dynamic
+  - ards_feature_explore
   # - cross_validation
-  - feature_explore
-  # - feature_explore_raw
+  # - raw_feature_explore

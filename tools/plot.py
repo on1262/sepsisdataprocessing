@@ -13,7 +13,8 @@ from tqdm import tqdm
 import subprocess
 import missingno as msno
 from .generic import reinit_dir, remove_slash
-from .colorful_logging import logger
+from matplotlib.colors import to_rgb
+from .logging import logger
 
 '''
     用于分位数回归的作图, 通过线性插值得到待测点所对应的分位数, 使得数据的分布不会改变出图的色彩多样性
@@ -139,7 +140,7 @@ def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
 
     # Set up the histogram
     fig, ax = plt.subplots(figsize=(12,12)) # Set figure size
-    plt.subplots_adjust(bottom=0.3)
+    plt.subplots_adjust(bottom=0.4, left=0.2, right=0.8)
     ind = np.arange(len(data))
     width = 0.8
     if len(labels) < 20:
@@ -161,6 +162,29 @@ def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
         plt.savefig(out_path)
     plt.close()
 
+def plot_stack_proportion(data:dict[str, tuple], out_path=None):
+    plt.figure(figsize=(25, 10))
+    height = 0.5
+    names = list(data.keys())
+    style = [to_rgb(f'C{idx}') for idx in range(10)]
+    plt.barh(names, [0 for _ in names], height=height)
+    idx = 0
+    for k_idx, (key, (x, label)) in enumerate(data.items()):
+        x_sum = 0
+        for idx in range(len(x)):
+            color = np.asarray(style[k_idx % 10])
+            color = np.clip(color + 0.2 * (idx % 2), 0, 1.0)
+            plt.barh([key], x[idx], left=x_sum, color=tuple(color), height=height)
+            label_wid = len(label[idx])*0.006
+            if x[idx] > label_wid:
+                plt.annotate(label[idx], (x_sum + x[idx]*0.5 - label_wid*0.5, k_idx), fontsize=10)
+            x_sum += x[idx]
+    
+    plt.xlim(left=0, right=1)
+    plt.subplots_adjust(left=0.1, right=0.9)
+    plt.savefig(out_path)
+
+
 def plot_density_matrix(data:np.ndarray, title:str, xlabel:str, ylabel:str, aspect='equal', save_path=None):
     plt.figure(figsize=(10, 10))
     plt.title(title)
@@ -172,7 +196,7 @@ def plot_density_matrix(data:np.ndarray, title:str, xlabel:str, ylabel:str, aspe
     plt.close()
 
 
-def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True, adapt=False, **kwargs):
+def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True, adapt=False, label=False, **kwargs):
     '''
     从源数据直接打印直方图
     data: shape任意, 每个元素代表一个样本
@@ -187,10 +211,16 @@ def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=Tr
     mu, sigma = scipy.stats.norm.fit(data)
     if adapt and sigma > 0.01:
         data = data[np.logical_and(data >= mu-3*sigma, data <= mu+3*sigma)]
+    
+    plt.figure(figsize=(8,8))
     ax = sns.histplot(data=data, stat='proportion', discrete=discrete, **kwargs)
     if adapt:
-        ax.set_xlim(left=max(mu-3*sigma, np.min(data)), right=min(mu+3*sigma, np.max(data)))
-
+        if discrete:
+            ax.set_xlim(left=max(mu-3*sigma, np.min(data))-0.5, right=min(mu+3*sigma, np.max(data))+0.5)
+        else:
+            ax.set_xlim(left=max(mu-3*sigma, np.min(data)), right=min(mu+3*sigma, np.max(data)))
+    if label:
+        ax.bar_label(ax.containers[1], fontsize=10, fmt=lambda x:f'{x:.3f}')
     plt.title('Distribution of ' + data_name, fontsize = 13)
     plt.legend(['data', 'Normal dist. ($\mu=$ {:.2f} and $\sigma=$ {:.2f} )'.format(mu, sigma)], loc='best')
     if save_path is None:

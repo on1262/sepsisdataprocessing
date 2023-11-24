@@ -39,15 +39,20 @@ cross_validation:
 
 feature_explore:
   dataset_version: explore_version
+  plot_admission_dist: true
   plot_chart_vis:
-    enabled: false
-    plot_transfer_careunit: false
+    enabled: true
+    collect_list: [
+      transfer,
+      admission
+    ]
   plot_samples:
-    enabled: false
-    n_sample: 50
+    enabled: true
+    n_sample: 10
     features:
       - Arterial O2 pressure
       - Inspired O2 Fraction
+      - '220045'
   plot_time_series:
     enabled: false
     names:

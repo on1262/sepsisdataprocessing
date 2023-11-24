@@ -3,18 +3,41 @@ import tools
 import numpy as np
 from tools import logger
 from tqdm import tqdm
-from .mimic_helper import Subject, Admission, load_sepsis_patients
+from .helper import Subject, Admission
 from collections import namedtuple, Counter
 from random import choice
-from .mimiciv import MIMICIV
+from .mimiciv_core import MIMICIV_Core
+import pandas as pd
 
-class MIMICIVDataset(MIMICIV):
+def load_sepsis_patients(csv_path:str) -> tuple:
     '''
-    MIMIC-IV上层抽象, 从中间文件读取数据, 进行处理, 得到最终数据集
-    (batch, n_fea, seq_len)
-    有效接口: norm_dict(key可能是多余的), idx_dict, static_keys, dynamic_keys, total_keys
+    load extra information of sepsis patients from sepsis3.csv
+    sepsis_dict: dict(int(subject_id):list(occur count, elements))
+        element: [sepsis_time(float), stay_id, sofa_score, respiration, liver, cardiovascular, cns, renal]
     '''
-    __name = 'mimic-iv'
+    converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
+    sepsis_dict = {}
+
+    def extract_time(row): # extracts the sepsis occurrence time, returns a float, note that this contains a definition of the sepsis occurrence time
+        return min(converter(row['antibiotic_time']), converter(row['culture_time']))
+    
+    def build_dict(row): # extract sepsis dict
+        id = int(row['subject_id'])
+        element = {k:row[k] for k in ['sepsis_time', 'stay_id', 'sofa_score', 'respiration', 'liver', 'cardiovascular', 'cns', 'renal']}
+        element['stay_id'] = int(element['stay_id'])
+        if id in sepsis_dict:
+            sepsis_dict[id].append(element)
+        else:
+            sepsis_dict[id] = [element]
+    
+    df = pd.read_csv(csv_path, encoding='utf-8')
+    df['sepsis_time'] = df.apply(extract_time, axis=1)
+    df.apply(build_dict, axis=1)
+    logger.info(f'Load {len(sepsis_dict.keys())} sepsis subjects based on sepsis3.csv')
+    return set(sepsis_dict.keys()), sepsis_dict
+
+class MIMICIV_ARDS_Dataset(MIMICIV_Core):
+    __name = 'mimic-iv-ards'
 
     @classmethod
     def name(cls):
@@ -23,115 +46,28 @@ class MIMICIVDataset(MIMICIV):
     def __init__(self):
         super().__init__(self.name())
 
-    def on_select_admissions(self, rule:dict, subjects:dict[int, Subject]):
-        '''
-        remove pass1: 检查是否为空、有无target特征
-        '''
-        for s_id in subjects:
-            if not subjects[s_id].empty():
-                retain_adms = []
-                for idx, adm in enumerate(subjects[s_id].admissions):
-                    flag = 1
-                    # 检查target
-                    if flag != 0  and 'target_id' in rule and len(rule['target_id']) > 0:
-                        for target_id in rule['target_id']:
-                            if target_id not in adm.keys():
-                                flag = 0
-                    if flag != 0:
-                        start_time, end_time = None, None
-                        for id in rule['target_id']:
-                            start_time = max(adm[id][0,1], start_time) if start_time is not None else adm[id][0,1]
-                            end_time = min(adm[id][-1,1], end_time) if end_time is not None else adm[id][-1,1]
-                        dur = end_time - start_time
-                        if dur <= 0:
-                            continue
-                        if 'duration_minmax' in rule:
-                            dur_min, dur_max = rule['duration_minmax']
-                            if not (dur > dur_min and dur < dur_max):
-                                continue
-                        if 'check_sepsis_time' in rule:
-                            t_min, t_max = rule['check_sepsis_time']
-                            sepsis_time = subjects[s_id].nearest_static('sepsis_time', start_time)
-                            time_delta = sepsis_time - (adm.admittime + start_time)
-                            if not (time_delta > t_min and time_delta < t_max):
-                                continue
-                    if flag != 0:
-                        retain_adms.append(idx)
-                subjects[s_id].admissions = [subjects[s_id].admissions[idx] for idx in retain_adms]
-       
-        # 删除空的admission和subjects
-        pop_list = []
-        for s_id in subjects:
-            subjects[s_id].del_empty_admission() # 删除空的admission
-            if subjects[s_id].empty():
-                pop_list.append(s_id)
-                
-        for s_id in pop_list:
-            subjects.pop(s_id)
-        
-        logger.info(f'remove_pass1: Deleted {len(pop_list)}/{len(pop_list)+len(subjects)} subjects')
-        return subjects
-
-    def on_remove_missing_data(self, rule:dict, subjects: dict[int, Subject]) -> dict[int, Subject]:
-        '''
-        按照传入的配置去除无效特征
-        '''
-        n_iter = 0
-        while n_iter < len(rule['max_col_missrate']) or (len(post_dynamic_keys)+len(post_static_keys) != len(col_missrate)) or (len(pop_subject_ids) > 0):
-            # step1: create column missrate dict
-            prior_static_keys = [k for s in subjects.values() for k in s.static_data.keys()]
-            prior_dynamic_keys = [k for s in subjects.values() if not s.empty() for k in choice(s.admissions).keys()] # random smapling strategy
-            col_missrate = {k:1-v/len(subjects) for key_list in [prior_static_keys, prior_dynamic_keys] for k,v in Counter(key_list).items()}
-            # step2: remove invalid columns and admissions
-            for s_id, s in subjects.items():
-                for adm in s.admissions:
-                    pop_keys = [k for k in adm.keys() if k not in col_missrate or col_missrate[k] > rule['max_col_missrate'][min(n_iter, len(rule['max_col_missrate'])-1)]]
-                    for key in pop_keys:
-                        adm.pop_dynamic(key)
-                s.del_empty_admission()
-                if len(s.admissions) > 1:
-                    retain_adm = np.random.randint(0, len(s.admissions)) if rule['adm_select_strategy'] == 'random' else 0
-                    s.admissions = [s.admissions[retain_adm]]
-            # step3: create subject missrate dict
-            post_static_keys = set([k for s in subjects.values() for k in s.static_data.keys()])
-            post_dynamic_keys = set([k for s in subjects.values() if not s.empty() for k in s.admissions[0].keys()])
-            subject_missrate = {
-                s_id:1 - (len(s.static_data) + len(s.admissions[0]))/(len(post_static_keys)+len(post_dynamic_keys)) \
-                    if not s.empty() else 1 for s_id, s in subjects.items()
-            }
-            # step4: remove invalid subject
-            pop_subject_ids = set([s_id for s_id in subjects if subject_missrate[s_id] > rule['max_subject_missrate'][min(n_iter, len(rule['max_subject_missrate'])-1)] or subjects[s_id].empty()])
-            for s_id in pop_subject_ids:
-                subjects.pop(s_id)
-            # step5: calculate removed subjects/columns
-            logger.info(f'remove_pass2: iter[{n_iter}] Retain {len(self._subjects)}/{len(pop_subject_ids)+len(self._subjects)} subjects')
-            logger.info(f'remove_pass2: iter[{n_iter}] Retain {len(post_dynamic_keys)+len(post_static_keys)}/{len(col_missrate)} keys in selected admission')
-            n_iter += 1
-        logger.info(f'remove_pass2: selected {len(self._subjects)} subjects')
-        return subjects
-
-    def on_extract_subjects(self) -> dict:
+    def on_extract_subjects(self) -> tuple:
         sepsis_patient_path = self._paths['sepsis_patient_path']
-        sepsis_result = load_sepsis_patients(sepsis_patient_path)
-        return sepsis_result
+        patient_set, extra_data = load_sepsis_patients(sepsis_patient_path)
+        return patient_set, extra_data
     
-    def on_build_subject(self, id:int, subject:Subject, row:namedtuple, _extract_result:dict) -> Subject:
+    def on_build_subject(self, subject_id:int, subject:Subject, row:namedtuple, patient_set:set, extra_data:dict) -> Subject:
         '''
         subject: Subject()
         row: dict, {column_name:value}
         extract_value: value of _extract_reuslt[id]
         '''
         '''
-            NOTE: sepsis time的处理方式
-            sepsis time被看作一个静态特征添加到subject下, 一个subject可以有多个sepsis time, 这里假设sepsis time都被stay覆盖
-            如果一个admission没有sepsis time对应, 那么这个admission无效
-            在最终的三维数据上, sepsis_time会变为距离起始点t_start的相对值(sep-t_start)
-            由于起始点设为max(sepsis, t_start), 所以sepsis_time只会是负数或者0
-            当sepsis_time<0的时候, 表明sepsis发生得早, 对于一些模型, sepsis time不能太小, 可以用来筛选数据
+            NOTE: How sepsis time is handled
+            sepsis time is treated as a static feature added to a subject, a subject can have more than one sepsis time, it is assumed that sepsis time is covered by stay.
+            If there is no sepsis time for a submission, then the submission is invalid.
+            In the final 3D data, sepsis_time will be the relative value of the distance from the start point t_start (sep-t_start).
+            Since the start point is set to max(sepsis, t_start), sepsis_time will only be negative or 0.
+            When sepsis_time < 0, that sepsis occurs early, for some models, sepsis time can not be too small, can be used to filter the data
         '''
         ymd_convertor = tools.TimeConverter(format="%Y-%m-%d", out_unit='hour')
         subject.append_static(0, 'age', -1)
-        for ele_dict in _extract_result[id]: # dict(list(dict))
+        for ele_dict in extra_data[subject_id]: # dict(list(dict))
             sepsis_time = ele_dict['sepsis_time']
             subject.append_static(sepsis_time, 'gender', row.gender)
             if row.dod is not None and isinstance(row.dod, str):
@@ -146,10 +82,10 @@ class MIMICIVDataset(MIMICIV):
             subject.append_static(sepsis_time, 'cns', ele_dict['cns'])
             subject.append_static(sepsis_time, 'renal', ele_dict['renal'])
         return subject
-    
+
     def on_extract_admission(self, subject:Subject, source:str, row:namedtuple):
         ymdhms_converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
-        if source == 'admission': # 覆盖最全面，最开始进行筛选
+        if source == 'admission':
             admittime = ymdhms_converter(row.admittime)
             dischtime = ymdhms_converter(row.dischtime)
             if dischtime < admittime:
@@ -180,7 +116,7 @@ class MIMICIVDataset(MIMICIV):
         else:
             assert(0)
 
-    def on_select_feature(self, id:int, row:dict, source:str=['icu', 'hosp', 'ed']):
+    def on_select_feature(self, subject_id:int, row:dict, source:str=['icu', 'hosp', 'ed']):
         if source == 'icu':
             if row['type'] in ['Numeric', 'Numeric with tag'] and row['category'] != 'Alarms':
                 return True # select
@@ -192,10 +128,6 @@ class MIMICIVDataset(MIMICIV):
             return True
     
     def on_convert_numeric(self, s:Subject) -> Subject:
-        '''
-        1. 对特定格式的特征进行转换(血压)
-        2. 检测不能转换为float的静态特征
-        '''
         # step1: convert static data
         invalid_count = 0
         static_data = s.static_data
@@ -260,29 +192,107 @@ class MIMICIVDataset(MIMICIV):
                 adm.dynamic_data.pop(key)
         return invalid_count
 
+    def on_select_admissions(self, rule:dict, subjects:dict[int, Subject]):
+        for s_id in subjects:
+            if not subjects[s_id].empty():
+                retain_adms = []
+                for idx, adm in enumerate(subjects[s_id].admissions):
+                    flag = 1
+                    # 检查target
+                    if flag != 0  and 'target_id' in rule and len(rule['target_id']) > 0:
+                        for target_id in rule['target_id']:
+                            if target_id not in adm.keys():
+                                flag = 0
+                    if flag != 0:
+                        start_time, end_time = None, None
+                        for id in rule['target_id']:
+                            start_time = max(adm[id][0,1], start_time) if start_time is not None else adm[id][0,1]
+                            end_time = min(adm[id][-1,1], end_time) if end_time is not None else adm[id][-1,1]
+                        dur = end_time - start_time
+                        if dur <= 0:
+                            continue
+                        if 'duration_minmax' in rule:
+                            dur_min, dur_max = rule['duration_minmax']
+                            if not (dur > dur_min and dur < dur_max):
+                                continue
+                        if 'check_sepsis_time' in rule:
+                            t_min, t_max = rule['check_sepsis_time']
+                            sepsis_time = subjects[s_id].latest_static('sepsis_time', start_time)
+                            time_delta = sepsis_time - (adm.admittime + start_time)
+                            if not (time_delta > t_min and time_delta < t_max):
+                                continue
+                    if flag != 0:
+                        retain_adms.append(idx)
+                subjects[s_id].admissions = [subjects[s_id].admissions[idx] for idx in retain_adms]
+       
+        # delete empty admission and subjects
+        pop_list = []
+        for s_id in subjects:
+            subjects[s_id].del_empty_admission()
+            if subjects[s_id].empty():
+                pop_list.append(s_id)
+                
+        for s_id in pop_list:
+            subjects.pop(s_id)
+        
+        logger.info(f'remove_pass1: Deleted {len(pop_list)}/{len(pop_list)+len(subjects)} subjects')
+        return subjects
+
+    def on_remove_missing_data(self, rule:dict, subjects: dict[int, Subject]) -> dict[int, Subject]:
+        n_iter = 0
+        while n_iter < len(rule['max_col_missrate']) or (len(post_dynamic_keys)+len(post_static_keys) != len(col_missrate)) or (len(pop_subject_ids) > 0):
+            # step1: create column missrate dict
+            prior_static_keys = [k for s in subjects.values() for k in s.static_data.keys()]
+            prior_dynamic_keys = [k for s in subjects.values() if not s.empty() for k in choice(s.admissions).keys()] # random smapling strategy
+            col_missrate = {k:1-v/len(subjects) for key_list in [prior_static_keys, prior_dynamic_keys] for k,v in Counter(key_list).items()}
+            # step2: remove invalid columns and admissions
+            for s_id, s in subjects.items():
+                for adm in s.admissions:
+                    pop_keys = [k for k in adm.keys() if k not in col_missrate or col_missrate[k] > rule['max_col_missrate'][min(n_iter, len(rule['max_col_missrate'])-1)]]
+                    for key in pop_keys:
+                        adm.pop_dynamic(key)
+                s.del_empty_admission()
+                if len(s.admissions) > 1:
+                    retain_adm = np.random.randint(0, len(s.admissions)) if rule['adm_select_strategy'] == 'random' else 0
+                    s.admissions = [s.admissions[retain_adm]]
+            # step3: create subject missrate dict
+            post_static_keys = set([k for s in subjects.values() for k in s.static_data.keys()])
+            post_dynamic_keys = set([k for s in subjects.values() if not s.empty() for k in s.admissions[0].keys()])
+            subject_missrate = {
+                s_id:1 - (len(s.static_data) + len(s.admissions[0]))/(len(post_static_keys)+len(post_dynamic_keys)) \
+                    if not s.empty() else 1 for s_id, s in subjects.items()
+            }
+            # step4: remove invalid subject
+            pop_subject_ids = set([s_id for s_id in subjects if subject_missrate[s_id] > rule['max_subject_missrate'][min(n_iter, len(rule['max_subject_missrate'])-1)] or subjects[s_id].empty()])
+            for s_id in pop_subject_ids:
+                subjects.pop(s_id)
+            # step5: calculate removed subjects/columns
+            logger.info(f'remove_pass2: iter[{n_iter}] Retain {len(self._subjects)}/{len(pop_subject_ids)+len(self._subjects)} subjects')
+            logger.info(f'remove_pass2: iter[{n_iter}] Retain {len(post_dynamic_keys)+len(post_static_keys)}/{len(col_missrate)} keys in selected admission')
+            n_iter += 1
+        logger.info(f'remove_pass2: selected {len(self._subjects)} subjects')
+        return subjects
+    
     def on_build_table(self, subject:Subject, key, value, t_start):
         admittime = subject.admissions[0].admittime
-        if key == 'sepsis_time': # sepsis time 基准变为表格的起始点
-            return value - (t_start+admittime)
+        if key == 'sepsis_time': 
+            return value - (t_start+admittime) # sepsis time: The datum becomes the start of the table.
         elif key == 'dod':
             if abs(value+1.0)<1e-3:
                 return -1
             else:
-                delta_year = np.floor(value / (24*365) - ((t_start+admittime) / (24*365))) # 经过多少年死亡, 两个都是timestamp，不需要加上1970
+                delta_year = np.floor(value / (24*365) - ((t_start+admittime) / (24*365))) # After how many years of death, both are timestamp, no need to add 1970
                 assert(-100 < delta_year < 100)
                 return delta_year
         elif key == 'age':
-            age = (admittime + t_start) // (24*365) + 1970 - subject.birth_year # admittime从1970年开始计时
+            age = (admittime + t_start) // (24*365) + 1970 - subject.birth_year # admit time starts from 1970 year
             return age
         else:
             return value
     
     def on_feature_engineering(self, tables:list[np.ndarray], norm_dict:dict, static_keys:list, dynamic_keys):
-        '''
-        特征工程, 增加某些计算得到的特征
-        '''
         addi_dynamic = ['shock_index', 'MAP', 'PPD', 'PF_ratio']
-        dynamic_keys += addi_dynamic # NOTE: 如果对static keys添加特征，需要重新排序table
+        dynamic_keys += addi_dynamic
         collect_keys = static_keys + dynamic_keys
         index_dict = {key:val for val, key in enumerate(collect_keys)} # used for finding index
         norm_data = []
@@ -324,7 +334,6 @@ class MIMICIVDataset(MIMICIV):
         }
     
     def make_report(self, version_name, params:dict):
-        '''进行数据集的信息统计'''
         # switch version
         self.load_version(version_name)
         self.mode('all')
@@ -334,7 +343,7 @@ class MIMICIVDataset(MIMICIV):
         tools.reinit_dir(dist_dir, build=True)
         for name in dir_names:
             os.makedirs(os.path.join(dist_dir, name))
-        logger.info('MIMIC-IV: generating dataset report')
+        logger.info('MIMIC-IV-ARDS: generating dataset report')
         write_lines = []
         if params['basic']:
             # basic statistics
@@ -360,7 +369,7 @@ class MIMICIVDataset(MIMICIV):
                     for adm in s.admissions:
                         if id in adm.keys():
                             dur = adm[id][-1,1] - adm[id][0,1]
-                            sepsis_time = s.nearest_static('sepsis_time', adm[id][0, 1])
+                            sepsis_time = s.latest_static('sepsis_time', adm[id][0, 1])
                             t_sep = adm[id][0, 1] + adm.admittime - sepsis_time
                             arr_from_sepsis_time.append(t_sep)
                             arr_points.append(adm[id].shape[0])

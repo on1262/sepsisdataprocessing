@@ -1,5 +1,5 @@
 import tools
-from tools.colorful_logging import logger
+from tools.logging import logger
 from .container import DataContainer
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,14 +8,15 @@ import seaborn as sns
 import os
 from os.path import join as osjoin
 import pandas as pd
-from datasets.mimic_dataset import MIMICIVDataset
+from datasets.derived_raw_dataset import MIMICIV_Raw_Dataset
+from scipy.signal import convolve2d
 
 
-class FeatureExplorer:
+class RawFeatureExplorer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.container = container
-        self.dataset = MIMICIVDataset()
+        self.dataset = MIMICIV_Raw_Dataset()
         self.dataset.load_version(params['dataset_version'])
         self.gbl_conf = container._conf
         self.data = self.dataset.data
@@ -41,19 +42,19 @@ class FeatureExplorer:
             n_per_plots = self.params['plot_time_series']['n_per_plots']
             for name in self.params['plot_time_series']["names"]:
                 self.plot_time_series_samples(name, n_sample=n_sample, n_per_plots=n_per_plots, write_dir=os.path.join(out_dir, f"time_series_{name}"))
-        if self.params['correlation']['enabled']:
-            self.correlation(out_dir, self.params['correlation']['target'])
+        if self.params['correlation']:
+            self.correlation(out_dir)
+        if self.params['abnormal_dist']['enabled']:
+            self.abnormal_dist(out_dir)
         if self.params['miss_mat']:
             self.miss_mat(out_dir)
-        if self.params['first_ards_time']:
-            self.first_ards_time(out_dir)
         if self.params['feature_count']:
             self.feature_count(out_dir)
     
     def plot_chart_vis(self, out_dir):
         tools.reinit_dir(out_dir)
         if self.params['plot_chart_vis']['plot_transfer_careunit']:
-            transfer_path = osjoin(self.params['paths']['mimic-iv']['mimic_dir'], 'hosp', 'transfers.csv')
+            transfer_path = osjoin(self.params['paths']['mimic-iv-raw']['mimic_dir'], 'hosp', 'transfers.csv')
             table = pd.read_csv(transfer_path, engine='c', encoding='utf-8')
             record = {}
             for row in tqdm(table.itertuples(), 'plot chart: transfers'):
@@ -67,48 +68,45 @@ class FeatureExplorer:
             y = np.asarray([record[k] for k in x])
             tools.plot_bar_with_label(y, x, f'hosp/transfer.careunit Count', out_path=os.path.join(out_dir, f"transfer_careunit.png"))
 
-    def first_ards_time(self, out_dir):
-        '''打印首次呼衰出现的时间分布'''
-        times = []
-        counts = [] # 产生呼衰的次数
-        ards_count = 0
-        adms = [adm for s in self.dataset.subjects.values() for adm in s.admissions]
-        pao2_id, fio2_id =  "220224", "223835"
-        for adm in adms:
-            count = 0
-            ticks = adm[pao2_id][:, 1]
-            fio2 = np.interp(x=ticks, xp=adm[fio2_id][:, 1], fp=adm[fio2_id][:, 0])
-            pao2 = adm[pao2_id][:, 0]
-            pf = pao2 / fio2
-            for idx in range(pf.shape[0]):
-                if pf[idx] < self.container.ards_threshold:
-                    times.append(adm[pao2_id][idx, 1])
-                    count += 1
-            if count != 0:
-                ards_count += 1
-                counts.append(count) 
-        tools.plot_single_dist(np.asarray(times), f"First ARDS time(hour)", os.path.join(out_dir, "first_ards_time.png"), adapt=True)
-        tools.plot_single_dist(np.asarray(counts), f"ARDS Count", os.path.join(out_dir, "ards_count.png"), adapt=True)
-        logger.info(f"ARDS patients count={ards_count}")
+    def abnormal_dist(self, out_dir):
+        limit:dict = self.params['abnormal_dist']['value_limitation']
+        limit_names = list(limit.keys())
+        abnormal_table = np.zeros((len(limit_names), 2)) # True=miss
+        idx_dict = {name:idx for idx, name in enumerate(limit_names)}
+        for s_id in self.dataset.subjects:
+            adm = self.dataset.subjects[s_id].admissions[0]
+            for key in adm.dynamic_data:
+                name = self.dataset.fea_label(key)
+                if name in limit.keys():
+                    is_abnormal = np.any(
+                        np.logical_or(adm.dynamic_data[key][:, 0] < limit[name]['min'], adm.dynamic_data[key][:, 0] > limit[name]['max'])
+                    )
+                    abnormal_table[idx_dict[name], 0] += (1 if is_abnormal else 0)
+                    abnormal_table[idx_dict[name], 1] += 1
+        abnormal_table = abnormal_table[:, 0] / np.maximum(abnormal_table[:, 1], 1e-3) # avoid nan
+        # sort table
+        limit_names = sorted(limit_names, key=lambda x:abnormal_table[limit_names.index(x)], reverse=True)
+        abnormal_table = np.sort(abnormal_table)[::-1]
+        # bar plot
+        plt.figure(figsize=(10,10))
+        ax = sns.barplot(x=np.asarray(limit_names), y=abnormal_table)
+        ax.set_xticklabels(limit_names, rotation=45, ha='right')
+        ax.bar_label(ax.containers[0], fontsize=10, fmt=lambda x:f'{x:.4f}')
+        plt.subplots_adjust(bottom=0.3)
+        plt.savefig(osjoin(out_dir, 'abnormal.png'))
+        plt.close()
 
-    def correlation(self, out_dir, target_id_or_label):
+
+    
+    def correlation(self, out_dir):
         # plot correlation matrix
-        target_id, target_label = self.dataset.fea_id(target_id_or_label), self.dataset.fea_label(target_id_or_label)
-        target_index = self.dataset.idx_dict[target_id]
         labels = [self.dataset.fea_label(id) for id in self.dataset._total_keys]
-        corr_mat = tools.plot_correlation_matrix(self.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation_matrix'))
-        correlations = []
-        for idx in range(corr_mat.shape[1]):
-            correlations.append([corr_mat[target_index, idx], labels[idx]]) # list[(correlation coeff, label)]
-        correlations = sorted(correlations, key=lambda x:np.abs(x[0]), reverse=True)
-        with open(os.path.join(out_dir, 'correlation.txt'), 'w') as fp:
-            fp.write(f"Target feature: {target_label}")
-            for idx in range(corr_mat.shape[1]):
-                fp.write(f'Correlation with target: {correlations[idx][0]} \t{correlations[idx][1]}\n')
+        logger.info('plot correlation')
+        tools.plot_correlation_matrix(self.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation_matrix'), corr_thres=0.8)
     
     def miss_mat(self, out_dir):
         '''计算行列缺失分布并输出'''
-        na_table = np.ones((len(self.dataset.subjects), len(self.dataset._dynamic_keys)), dtype=bool)
+        na_table = np.ones((len(self.dataset.subjects), len(self.dataset._dynamic_keys)), dtype=bool) # True=miss
         for r_id, s_id in enumerate(self.dataset.subjects):
             for adm in self.dataset.subjects[s_id].admissions:
                 # TODO 替换dynamic keys到total keys
@@ -116,7 +114,7 @@ class FeatureExplorer:
                 for c_id, key in enumerate(self.dataset._dynamic_keys):
                     if key in adm_key:
                         na_table[r_id, c_id] = False
-        # 行缺失
+        
         row_nas = na_table.mean(axis=1)
         col_nas = na_table.mean(axis=0)
         tools.plot_single_dist(row_nas, f"Row miss rate", os.path.join(out_dir, "row_miss_rate.png"), discrete=False, adapt=True)
@@ -124,6 +122,16 @@ class FeatureExplorer:
         # save raw/col miss rate to file
         tools.save_pkl(row_nas, os.path.join(out_dir, "row_missrate.pkl"))
         tools.save_pkl(col_nas, os.path.join(out_dir, "col_missrate.pkl"))
+
+        # plot matrix
+        row_idx = sorted(list(range(row_nas.shape[0])), key=lambda x:row_nas[x])
+        col_idx = sorted(list(range(col_nas.shape[0])), key=lambda x:col_nas[x])
+        na_table = na_table[row_idx, :][:, col_idx] # (n_subjects, n_feature)
+        # apply conv to get density
+        conv_kernel = np.ones((5,5)) / 25
+        na_table = np.clip(convolve2d(na_table, conv_kernel, boundary='symm'), 0, 1.0)
+        tools.plot_density_matrix(1.0-na_table, 'Missing distribution for subjects and features [miss=white]', xlabel='features', ylabel='subjects',
+                               aspect='auto', save_path=os.path.join(out_dir, "miss_mat.png"))
 
     def feature_count(self, out_dir):
         '''打印vital_sig中特征出现的次数和最短间隔排序'''

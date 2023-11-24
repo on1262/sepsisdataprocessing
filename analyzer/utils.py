@@ -7,11 +7,11 @@ import os
 
 def map_func(a:np.ndarray):
     '''
-    将4分类的结果map到2分类的结果
-    默认是[0,1,2,3]对应[重度,中度,轻度,无]
-    映射是ARDS=[0,1,2], No ARDS=[3]
-    a: (..., n_cls) 可以是软标签
-    return (..., 2) 其中[...,0]代表无ARDS, [...,1]代表有ARDS, 可以是软标签
+    Map the results of 4 classifications to the results of 2 classifications
+    Default is [0,1,2,3] corresponding to [Severe,Moderate,Mild,No]
+    Mapping is ARDS=[0,1,2], No ARDS=[3]
+    a: (... , n_cls) can be soft-labeled
+    return (... , 2) where [... ,0] represents no ARDS, [... ,1] means ARDS, can be soft labeling.
     '''
     a_shape = list(a.shape)
     a_shape[-1] = 2
@@ -21,7 +21,7 @@ def map_func(a:np.ndarray):
     return result
 
 def create_final_result(out_dir):
-    '''收集各个文件夹里面的result.log, 合并为final result.log'''
+    '''Collect result.log from each folder, merge to final result.log'''
     logger.info('Creating final result')
     with open(os.path.join(out_dir, 'final_result.log'), 'w') as final_f:
         for dir in os.listdir(out_dir):
@@ -37,7 +37,7 @@ def create_final_result(out_dir):
 
 def cal_label_weight(n_cls, label:np.ndarray):
     '''
-    获取n_cls反比于数量的权重
+    Get the weight of n_cls inversely proportional to the number.
     label: (..., n_cls)
     return: (n_cls,)
     '''

@@ -3,7 +3,7 @@ import numpy as np
 import os, sys
 from scipy.interpolate import interp1d
 from sklearn.metrics import auc as sk_auc
-from .colorful_logging import logger
+from .logging import logger
 from .plot import plot_confusion_matrix
 from tools import GLOBAL_CONF_LOADER
 import pandas as pd

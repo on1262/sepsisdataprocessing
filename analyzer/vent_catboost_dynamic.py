@@ -4,21 +4,21 @@ import os
 from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
-from models.utils import SliceDataGenerator, LabelGenerator_4cls
+from models.utils import SliceDataGenerator, LabelGenerator_origin
 from catboost import Pool, CatBoostClassifier
 from analyzer.utils import map_func, cal_label_weight
-from datasets.mimic_dataset import MIMICIVDataset
+from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
 
 
 
-class CatboostDynamicAnalyzer:
+class VentCatboostDynamicAnalyzer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
-        self.dataset = MIMICIVDataset()
+        self.dataset = MIMICIV_ARDS_Dataset()
         self.dataset.load_version(params['dataset_version'])
         self.model_name = self.params['analyzer_name']
-        self.target_idx = self.dataset.idx_dict['PF_ratio']
+        self.target_idx = self.dataset.idx_dict['vent_status']
 
     def run(self):
         # step 1: init variables
@@ -29,14 +29,10 @@ class CatboostDynamicAnalyzer:
         generator = SliceDataGenerator(
             window_points=self.params['window'],
             n_fea=len(self.dataset.total_keys),
-            label_generator=LabelGenerator_4cls(
-                centers=self.params['centers'], 
-                soft_label=self.params['soft_label'], 
-                smoothing_band=self.params['smoothing_band']
-            ),
+            label_generator=LabelGenerator_origin(),
             target_idx=self.target_idx,
             limit_idx=[],
-            forbidden_idx=[],
+            forbidden_idx=['vent_status'],
             cache_dir=None # or out_dir
         )
         # step 2: train and predict

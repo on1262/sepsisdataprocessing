@@ -3,26 +3,28 @@ import tools
 import os
 from tools import logger as logger
 from .container import DataContainer
-from .method_catboost_dynamic import CatboostDynamicAnalyzer
-from .feature_explore import FeatureExplorer
-from .method_nearest_cls import BaselineNearest4ClsAnalyzer
+from .ards_catboost_dynamic import ARDSCatboostRegressionAnalyzer
+from .ards_explore import ArdsFeatureExplorer
+from .ards_nearest_cls import ArdsNearest4ClsAnalyzer
 from .cross_validation import CV_Analyzer
-from .feature_explore_raw import FeatureExplorerRaw
+from .raw_explore import RawFeatureExplorer
 
 
 class Analyzer:
     def __init__(self, params:list) -> None:
         '''
-        params: 启动脚本, 否则需要手动run_sub_analyzer, 可以是None
-        dataset: 数据集
+        params: startup script, otherwise you need to run_sub_analyzer manually, can be None
         '''
         self.container = DataContainer()
         self.analyzer_dict = {
-            'nearest_4cls': BaselineNearest4ClsAnalyzer,
-            'catboost_dynamic': CatboostDynamicAnalyzer,
-            'feature_explore': FeatureExplorer,
+            'ards_nearest_4cls': ArdsNearest4ClsAnalyzer,
+            'ards_catboost_dynamic': ARDSCatboostRegressionAnalyzer,
+            'ards_feature_explore': ArdsFeatureExplorer,
+
             'cross_validation': CV_Analyzer,
-            'feature_explore_raw': FeatureExplorerRaw
+
+            'raw_feature_explore': RawFeatureExplorer,
+            
         }
         if params is not None:
             for name in params:
