@@ -14,6 +14,8 @@ from random import choice
 from .helper import Subject, KFoldIterator, interp
 
 class MIMICIV_Core(Dataset):
+    _name = 'mimic-iv-core'
+
     def __init__(self, dataset_name):
         super().__init__()
         # configs
@@ -45,7 +47,7 @@ class MIMICIV_Core(Dataset):
 
         self._load_data()
 
-        logger.info('MIMICIV-Core inited')
+        logger.info(f'{self.name()} inited')
 
     # read-only access control
     @property
@@ -84,6 +86,10 @@ class MIMICIV_Core(Dataset):
     def subjects(self):
         return self._subjects
 
+    @classmethod
+    def name(cls):
+        return cls._name
+    
     def check_nan(self, x:np.ndarray):
         assert(not np.any(np.isnan(x)))
     
@@ -667,9 +673,9 @@ class MIMICIV_Core(Dataset):
     
     def __getitem__(self, idx):
         assert(self._version_name is not None)
-        if self._data_index is None:
+        if self._data_index is None: # 'all' mode
             return {'data': self._data[idx, :, :], 'length': self._seqs_len[idx]}
-        else:
+        else:# k-fold mode
             return {'data': self._data[self._data_index[idx], :, :], 'length': self._seqs_len[self._data_index[idx]]}
 
     def __len__(self):
@@ -714,4 +720,4 @@ class MIMICIV_Core(Dataset):
     def on_build_table(self, key, value, t_start):
         pass
 
-    
+

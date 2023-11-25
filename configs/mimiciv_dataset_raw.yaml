@@ -2,41 +2,41 @@
 ## configs for mimic-iv-core
 
 data_linkage:
-  ed: True # link mimic-iv-ED dataset
-  hosp: True
-  icu: True
+    ed: True # link mimic-iv-ED dataset
+    hosp: True
+    icu: True
 
 category_to_numeric:
-  insurance: { Medicare: 1, Medicaid: 2, Other: 0, Default: 0}
-  language: {ENGLISH: 1, Default: 0}
-  marital_status: {WIDOWED: 1, SINGLE: 2, MARRIED: 3, DIVORCED: 4, Default: 0}
-  race: {WHITE: 1, Default: 0}
-  careunit: {'Emergency Department': 1, 'Medicine': 2, 'Emergency Department Observation': 3, 'Default': 0}
-  
+    insurance: { Medicare: 1, Medicaid: 2, Other: 0, Default: 0}
+    language: {ENGLISH: 1, Default: 0}
+    marital_status: {WIDOWED: 1, SINGLE: 2, MARRIED: 3, DIVORCED: 4, Default: 0}
+    race: {WHITE: 1, Default: 0}
+    careunit: {'Emergency Department': 1, 'Medicine': 2, 'Emergency Department Observation': 3, 'Default': 0}
+    
 remove_rule:
-  pass1:
-    target_id: ['220045'] # use heart rate as indicator
-    duration_minmax: [2, 200]
-  pass2:
-    # gradually eliminate invalid cols/rows in several iterations
-    # the last value in each list is an approximation of final missrate threshold
-    max_col_missrate: [1.0]
-    max_subject_missrate: [1.0]
-    adm_select_strategy: default # default always select zero. Another option: random
+    pass1:
+        target_id: ['220045'] # use heart rate as indicator
+        duration_minmax: [2, 200]
+    pass2:
+        # gradually eliminate invalid cols/rows in several iterations
+        # the last value in each list is an approximation of final missrate threshold
+        max_col_missrate: [1.0]
+        max_subject_missrate: [1.0]
+        adm_select_strategy: default # default always select zero. Another option: random
 
 generate_table:
-  align_target: ['220045']
-  default_missing_value: -1
-  delta_t_hour: 0.5
+    align_target: ['220045']
+    default_missing_value: -1
+    delta_t_hour: 0.5
 
 k-fold: 5
 validation_proportion: 0.15 # use 0.15*80% samples for validation
 compress_cache: True # compress cache file to speed up loading 
 version:
-  raw_version:
-    fill_missvalue: none # do not fill miss value in feature explore status
-    feature_limit: []
-    forbidden_feas: []
+    raw_version:
+        fill_missvalue: none # do not fill miss value in feature explore status
+        feature_limit: []
+        forbidden_feas: []
 
 value_clip: {}
 

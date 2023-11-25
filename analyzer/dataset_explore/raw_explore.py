@@ -1,6 +1,6 @@
 import tools
 from tools.logging import logger
-from .container import DataContainer
+from ..container import DataContainer
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
@@ -8,15 +8,15 @@ import seaborn as sns
 import os
 from os.path import join as osjoin
 import pandas as pd
-import yaml
-from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
+from datasets.derived_raw_dataset import MIMICIV_Raw_Dataset
+from scipy.signal import convolve2d
 
 
-class ArdsFeatureExplorer:
+class RawFeatureExplorer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.container = container
-        self.dataset = MIMICIV_ARDS_Dataset()
+        self.dataset = MIMICIV_Raw_Dataset()
         self.dataset.load_version(params['dataset_version'])
         self.gbl_conf = container._conf
         self.data = self.dataset.data
@@ -28,8 +28,6 @@ class ArdsFeatureExplorer:
         out_dir = osjoin(self.params['paths']['out_dir'], f'feature_explore[{dataset_version}]')
         tools.reinit_dir(out_dir, build=True)
         # random plot sample time series
-        if self.params['plot_admission_dist']:
-            self.plot_admission_dist(out_dir=out_dir)
         if self.params['generate_report']:
             self.dataset.make_report(version_name=dataset_version, params=self.params['report_params'])
         if self.params['plot_chart_vis']['enabled']:
@@ -44,107 +42,71 @@ class ArdsFeatureExplorer:
             n_per_plots = self.params['plot_time_series']['n_per_plots']
             for name in self.params['plot_time_series']["names"]:
                 self.plot_time_series_samples(name, n_sample=n_sample, n_per_plots=n_per_plots, write_dir=os.path.join(out_dir, f"time_series_{name}"))
-        if self.params['correlation']['enabled']:
-            self.correlation(out_dir, self.params['correlation']['target'])
+        if self.params['correlation']:
+            self.correlation(out_dir)
+        if self.params['abnormal_dist']['enabled']:
+            self.abnormal_dist(out_dir)
         if self.params['miss_mat']:
             self.miss_mat(out_dir)
-        if self.params['first_ards_time']:
-            self.first_ards_time(out_dir)
         if self.params['feature_count']:
             self.feature_count(out_dir)
     
-    def plot_admission_dist(self, out_dir):
-        out_path = osjoin(out_dir, 'admission_dist.png')
-        admission_path = osjoin(self.params['paths']['mimic-iv-ards']['mimic_dir'], 'hosp', 'admissions.csv')
-        admissions = pd.read_csv(admission_path, encoding='utf-8')
-        subject_dict = {}
-        for row in tqdm(admissions.itertuples(), 'Collect Admission info', total=len(admissions)):
-            subject_dict[row.subject_id] = 1 if row.subject_id not in subject_dict else subject_dict[row.subject_id] + 1
-        n_adm = np.asarray(list(subject_dict.values()))
-        logger.info(f'Admission: mean={n_adm.mean():.3f}')
-
-        logger.info(f'Retain {100*(n_adm)/np.sum(n_adm):.3f}% admissions if we only choose the first admission.')
-        tools.plot_single_dist(n_adm, 'Number of Admission', save_path=out_path, discrete=True, adapt=True, label=True, shrink=0.9, edgecolor=None)
-
     def plot_chart_vis(self, out_dir):
         tools.reinit_dir(out_dir)
-        plot_keys = self.params['plot_chart_vis']['collect_list']
-        record = {}
-        for plot_key in plot_keys:
-            if plot_key == 'transfer':
-                key_record = {}
-                transfer_path = osjoin(self.params['paths']['mimic-iv-ards']['mimic_dir'], 'hosp', 'transfers.csv')
-                table = pd.read_csv(transfer_path, engine='c', encoding='utf-8')
-                for row in tqdm(table.itertuples(), 'plot category distribution: transfers'):
-                    r = 'empty' if not isinstance(row.careunit, str) else row.careunit
-                    key_record[r] = 1 if r not in key_record else key_record[r] + 1
-                record[plot_key] = key_record
-            elif plot_key == 'admission':
-                names = ['insurance', 'language', 'marital_status', 'race']
-                for name in names:
-                    record[name] = {}
-                admission_path = osjoin(self.params['paths']['mimic-iv-ards']['mimic_dir'], 'hosp', 'admissions.csv')
-                table = pd.read_csv(admission_path, engine='c', encoding='utf-8')
-                for row in tqdm(table.itertuples(), 'plot chcategory distribution: admissions'):
-                    for name in names:
-                        r = 'empty' if not isinstance(getattr(row, name), str) else getattr(row, name)
-                        record[name][r] = 1 if r not in record[name] else record[name][r] + 1
+        if self.params['plot_chart_vis']['plot_transfer_careunit']:
+            transfer_path = osjoin(self.params['paths']['mimic-iv-raw']['mimic_dir'], 'hosp', 'transfers.csv')
+            table = pd.read_csv(transfer_path, engine='c', encoding='utf-8')
+            record = {}
+            for row in tqdm(table.itertuples(), 'plot chart: transfers'):
+                r = 'empty' if not isinstance(row.careunit, str) else row.careunit
+                if not r in record:
+                    record[r] = 1
+                else:
+                    record[r] += 1
+            # sort and plot careunit types
+            x = sorted(list(record.keys()), key=lambda x:record[x], reverse=True)
+            y = np.asarray([record[k] for k in x])
+            tools.plot_bar_with_label(y, x, f'hosp/transfer.careunit Count', out_path=os.path.join(out_dir, f"transfer_careunit.png"))
 
-        # sort and plot
-        plot_in = {}
-        for key, key_record in record.items():
-            x = sorted(key_record.values(), reverse=True)
-            y = sorted(list(key_record.keys()), key=lambda x:key_record[x], reverse=True)
-            total = sum(key_record.values())
-            x = [xi/total for xi in x]
-            plot_in[key] = (x, y)
-        with open(osjoin(out_dir, 'categories.yml'), 'w', encoding='utf-8') as fp:
-            yaml.dump(plot_in, fp)
-            
-        tools.plot_stack_proportion(plot_in, out_path=os.path.join(out_dir, f"stack_percentage.png"))
+    def abnormal_dist(self, out_dir):
+        limit:dict = self.params['abnormal_dist']['value_limitation']
+        limit_names = list(limit.keys())
+        abnormal_table = np.zeros((len(limit_names), 2)) # True=miss
+        idx_dict = {name:idx for idx, name in enumerate(limit_names)}
+        for s_id in self.dataset.subjects:
+            adm = self.dataset.subjects[s_id].admissions[0]
+            for key in adm.dynamic_data:
+                name = self.dataset.fea_label(key)
+                if name in limit.keys():
+                    is_abnormal = np.any(
+                        np.logical_or(adm.dynamic_data[key][:, 0] < limit[name]['min'], adm.dynamic_data[key][:, 0] > limit[name]['max'])
+                    )
+                    abnormal_table[idx_dict[name], 0] += (1 if is_abnormal else 0)
+                    abnormal_table[idx_dict[name], 1] += 1
+        abnormal_table = abnormal_table[:, 0] / np.maximum(abnormal_table[:, 1], 1e-3) # avoid nan
+        # sort table
+        limit_names = sorted(limit_names, key=lambda x:abnormal_table[limit_names.index(x)], reverse=True)
+        abnormal_table = np.sort(abnormal_table)[::-1]
+        # bar plot
+        plt.figure(figsize=(10,10))
+        ax = sns.barplot(x=np.asarray(limit_names), y=abnormal_table)
+        ax.set_xticklabels(limit_names, rotation=45, ha='right')
+        ax.bar_label(ax.containers[0], fontsize=10, fmt=lambda x:f'{x:.4f}')
+        plt.subplots_adjust(bottom=0.3)
+        plt.savefig(osjoin(out_dir, 'abnormal.png'))
+        plt.close()
 
-    def first_ards_time(self, out_dir):
-        '''打印首次呼衰出现的时间分布'''
-        times = []
-        counts = [] # 产生呼衰的次数
-        ards_count = 0
-        adms = [adm for s in self.dataset.subjects.values() for adm in s.admissions]
-        pao2_id, fio2_id =  "220224", "223835"
-        for adm in adms:
-            count = 0
-            ticks = adm[pao2_id][:, 1]
-            fio2 = np.interp(x=ticks, xp=adm[fio2_id][:, 1], fp=adm[fio2_id][:, 0])
-            pao2 = adm[pao2_id][:, 0]
-            pf = pao2 / fio2
-            for idx in range(pf.shape[0]):
-                if pf[idx] < self.container.ards_threshold:
-                    times.append(adm[pao2_id][idx, 1])
-                    count += 1
-            if count != 0:
-                ards_count += 1
-                counts.append(count) 
-        tools.plot_single_dist(np.asarray(times), f"First ARDS time(hour)", os.path.join(out_dir, "first_ards_time.png"), adapt=True)
-        tools.plot_single_dist(np.asarray(counts), f"ARDS Count", os.path.join(out_dir, "ards_count.png"), adapt=True)
-        logger.info(f"ARDS patients count={ards_count}")
 
-    def correlation(self, out_dir, target_id_or_label):
+    
+    def correlation(self, out_dir):
         # plot correlation matrix
-        target_id, target_label = self.dataset.fea_id(target_id_or_label), self.dataset.fea_label(target_id_or_label)
-        target_index = self.dataset.idx_dict[target_id]
         labels = [self.dataset.fea_label(id) for id in self.dataset._total_keys]
-        corr_mat = tools.plot_correlation_matrix(self.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation_matrix'))
-        correlations = []
-        for idx in range(corr_mat.shape[1]):
-            correlations.append([corr_mat[target_index, idx], labels[idx]]) # list[(correlation coeff, label)]
-        correlations = sorted(correlations, key=lambda x:np.abs(x[0]), reverse=True)
-        with open(os.path.join(out_dir, 'correlation.txt'), 'w') as fp:
-            fp.write(f"Target feature: {target_label}")
-            for idx in range(corr_mat.shape[1]):
-                fp.write(f'Correlation with target: {correlations[idx][0]} \t{correlations[idx][1]}\n')
+        logger.info('plot correlation')
+        tools.plot_correlation_matrix(self.data[:, :, 0], labels, save_path=os.path.join(out_dir, 'correlation_matrix'), corr_thres=0.8)
     
     def miss_mat(self, out_dir):
         '''计算行列缺失分布并输出'''
-        na_table = np.ones((len(self.dataset.subjects), len(self.dataset._dynamic_keys)), dtype=bool)
+        na_table = np.ones((len(self.dataset.subjects), len(self.dataset._dynamic_keys)), dtype=bool) # True=miss
         for r_id, s_id in enumerate(self.dataset.subjects):
             for adm in self.dataset.subjects[s_id].admissions:
                 # TODO 替换dynamic keys到total keys
@@ -152,7 +114,7 @@ class ArdsFeatureExplorer:
                 for c_id, key in enumerate(self.dataset._dynamic_keys):
                     if key in adm_key:
                         na_table[r_id, c_id] = False
-        # 行缺失
+        
         row_nas = na_table.mean(axis=1)
         col_nas = na_table.mean(axis=0)
         tools.plot_single_dist(row_nas, f"Row miss rate", os.path.join(out_dir, "row_miss_rate.png"), discrete=False, adapt=True)
@@ -160,6 +122,16 @@ class ArdsFeatureExplorer:
         # save raw/col miss rate to file
         tools.save_pkl(row_nas, os.path.join(out_dir, "row_missrate.pkl"))
         tools.save_pkl(col_nas, os.path.join(out_dir, "col_missrate.pkl"))
+
+        # plot matrix
+        row_idx = sorted(list(range(row_nas.shape[0])), key=lambda x:row_nas[x])
+        col_idx = sorted(list(range(col_nas.shape[0])), key=lambda x:col_nas[x])
+        na_table = na_table[row_idx, :][:, col_idx] # (n_subjects, n_feature)
+        # apply conv to get density
+        conv_kernel = np.ones((5,5)) / 25
+        na_table = np.clip(convolve2d(na_table, conv_kernel, boundary='symm'), 0, 1.0)
+        tools.plot_density_matrix(1.0-na_table, 'Missing distribution for subjects and features [miss=white]', xlabel='features', ylabel='subjects',
+                               aspect='auto', save_path=os.path.join(out_dir, "miss_mat.png"))
 
     def feature_count(self, out_dir):
         '''打印vital_sig中特征出现的次数和最短间隔排序'''
@@ -206,7 +178,7 @@ class ArdsFeatureExplorer:
             for adm in s.admissions:
                 if count >= num:
                     return
-                plt.figure(figsize = (6, nrow*2))
+                plt.figure(figsize = (6, nrow*3))
                 # register xlim
                 xmin, xmax = np.inf,-np.inf
                 for idx, id in enumerate(id_list):
@@ -217,7 +189,7 @@ class ArdsFeatureExplorer:
                     if id in adm.keys():
                         plt.subplot(nrow, 1, idx+1)
                         plt.plot(adm[id][:,1], adm[id][:,0], '-o', label=id_names[idx])
-                        plt.gca().set_xlim([xmin-1, xmax+1])
+                        plt.gca().set_xlim([xmin, xmax])
                         plt.legend()
                 plt.suptitle(f'subject={s_id}')
                 plt.savefig(os.path.join(out_dir, f'{count}.png'))
@@ -252,45 +224,3 @@ class ArdsFeatureExplorer:
             else:
                 plt.savefig(os.path.join(write_dir, f"plot_{p_idx}.png"))
             plt.close()
-
-
-def plot_cover_rate(class_names, labels, mask, out_dir):
-    '''
-    二分类/多分类问题的覆盖率探究
-    labels: (sample, seq_lens, n_cls)
-    mask: (sample, seq_lens)
-    out_dir: 输出文件夹
-    '''
-    assert(mask.shape == labels.shape[:-1])
-    assert(len(class_names) == labels.shape[-1])
-    mask_sum = np.sum(mask, axis=1)
-    valid = (mask_sum > 0) # 有效的行, 极少样本无效
-    logger.debug(f'sum valid: {valid.sum()}')
-    label_class = (np.argmax(labels, axis=-1) + 1) * mask # 被mask去掉的是0,第一个class从1开始
-    if len(class_names) == 2:
-        cover_rate = np.sum(label_class==2, axis=1)[valid] / mask_sum[valid] # ->(sample,)
-        tools.plot_single_dist(data=cover_rate, 
-            data_name=f'{class_names[1]} cover rate (per sample)', 
-            save_path=os.path.join(out_dir, 'cover_rate.png'), discrete=False, adapt=False,bins=10)
-    else:
-        cover_rate = []
-        names = []
-        for idx, name in enumerate(class_names):
-            arr = np.sum(label_class==idx+1, axis=1)[valid] / mask_sum[valid] # ->(sample,)
-            arr = arr[arr > 0]
-            names += [name for _ in range(len(arr))]
-            cover_rate += [arr]
-        cover_rate = np.concatenate(cover_rate, axis=0)
-        df = pd.DataFrame(data={'coverrate':cover_rate, 'class':names})
-        sns.histplot(
-            df,
-            x="coverrate", hue='class',
-            multiple="stack",
-            palette=sns.light_palette("#79C", reverse=True, n_colors=4),
-            edgecolor=".3",
-            linewidth=.5,
-            log_scale=False,
-        )
-        plt.savefig(os.path.join(out_dir, f'coverrate_4cls.png'))
-        plt.close()
-

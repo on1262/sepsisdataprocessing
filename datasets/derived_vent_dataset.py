@@ -35,11 +35,7 @@ def load_ventilation_table(ventilation_csv_path:str, icu_stays_csv_path:str) -> 
     return vent_dict
 
 class MIMICIV_Vent_Dataset(MIMICIV_Core):
-    __name = 'mimic-iv-vent'
-
-    @classmethod
-    def name(cls):
-        return cls.__name
+    _name = 'mimic-iv-vent'
     
     def __init__(self):
         super().__init__(self.name())
@@ -48,7 +44,7 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
         # extract all subjects
         patient_set = load_all_subjects(osjoin(self._mimic_dir, 'hosp', 'patients.csv'))
         # load ventilation result
-        extra_data = load_ventilation_table(self._paths['ventilation_path'])
+        extra_data = load_ventilation_table(self._paths['ventilation_path'], osjoin(self._mimic_dir, 'icu', 'icustays.csv'))
         return patient_set, extra_data
     
     def on_build_subject(self, subject_id:int, subject:Subject, row:namedtuple, patient_set:set, extra_data:object) -> Subject:
@@ -57,7 +53,8 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
         row: dict, {column_name:value}
         extract_value: value of _extract_reuslt[id]
         '''
-        ymd_convertor = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
+        ymd_convertor = tools.TimeConverter(format="%Y-%m-%d", out_unit='hour')
+        ymdhms_convertor = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
         subject.append_static(0, 'age', -1)
         subject.append_static(0, 'gender', row.gender)
         if row.dod is not None and isinstance(row.dod, str):
@@ -66,11 +63,13 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
             subject.append_static(0, 'dod', -1)
         if subject_id in extra_data:
             for vent_dict in extra_data[subject_id]:
-                vent_start = ymd_convertor(vent_dict['starttime'])
-                vent_end = ymd_convertor(vent_dict['endtime'])
-                subject.append_static(vent_start, 'ventilation_start', vent_start)
-                subject.append_static(vent_start, 'ventilation_num', self._loc_conf['ventilation_to_numeric'][vent_dict['ventilation_status']]) # to be numeric
-                subject.append_static(vent_start, 'ventilation_end', vent_end) # the time of 'end time' is just a key for search
+                vent_start = ymdhms_convertor(vent_dict['starttime'])
+                vent_end = ymdhms_convertor(vent_dict['endtime'])
+                if isinstance(vent_dict['ventilation_status'], str):
+                    subject.append_static(vent_start, 'ventilation_start', vent_start)
+                    subject.append_static(vent_start, 'ventilation_end', vent_end) # the time of 'end time' is just a key for search
+                    subject.append_static(vent_start, 'ventilation_num', self._loc_conf['ventilation_to_numeric'][vent_dict['ventilation_status']]) # to be numeric
+                
         return subject
     
     def on_extract_admission(self, subject:Subject, source:str, row:namedtuple):
@@ -78,7 +77,7 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
         if source == 'admission':
             admittime = ymdhms_converter(row.admittime)
             dischtime = ymdhms_converter(row.dischtime)
-            if dischtime < admittime:
+            if dischtime <= admittime:
                 return
             adm = Admission(
                 unique_id=int(row.hadm_id*1e8),

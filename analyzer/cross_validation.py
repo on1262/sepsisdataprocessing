@@ -4,8 +4,7 @@ import tools
 import os
 from tools import logger as logger
 from .container import DataContainer
-from models.utils import SliceDataGenerator, LabelGenerator_4cls
-from .utils import cal_label_weight
+from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight
 from catboost import CatBoostClassifier, Pool
 from os.path import join as osjoin
 from datasets.cv_dataset import CrossValidationDataset
@@ -42,10 +41,10 @@ class CV_Analyzer:
         self.val_generator = SliceDataGenerator(
             window_points=self.params['window'],
             n_fea=len(self.cv_dataset.total_keys),
-            label_generator=LabelGenerator_4cls(
+            label_generator=LabelGenerator_cls(
                 centers=self.params['centers'],
                 soft_label=False,
-                smoothing_band=self.params['smoothing_band']
+                smooth_band=self.params['smoothing_band']
             ),
             target_idx=self.cv_dataset.total_keys.index('dX_PaO2（mmHg） / FiO2（%）')
         )
@@ -76,10 +75,10 @@ class CV_Analyzer:
         generator = SliceDataGenerator(
             window_points=self.params['window'], 
             n_fea=len(dataset.total_keys),
-            label_generator=LabelGenerator_4cls(
+            label_generator=LabelGenerator_cls(
                 centers=self.params['centers'],
                 soft_label=False,
-                smoothing_band=self.params['smoothing_band']
+                smooth_band=self.params['smoothing_band']
             ),
             target_idx=dataset.idx_dict['PF_ratio'],
             limit_idx=mimic_limit_idx

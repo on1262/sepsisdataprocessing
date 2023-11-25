@@ -4,9 +4,8 @@ import os
 from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
-from models.utils import DynamicDataGenerator, LabelGenerator_4cls
+from tools.data import DynamicDataGenerator, LabelGenerator_cls, map_func
 from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
-from analyzer.utils import map_func
 
 
 class ArdsNearest4ClsAnalyzer:
@@ -43,10 +42,10 @@ class ArdsNearest4ClsAnalyzer:
         generator = DynamicDataGenerator(
             window_points=self.params['window'],
             n_fea=len(self.dataset.total_keys),
-            label_generator=LabelGenerator_4cls(
+            label_generator=LabelGenerator_cls(
                 centers=self.params['centers'], 
                 soft_label=self.params['soft_label'], 
-                smoothing_band=self.params['smoothing_band']
+                smooth_band=self.params['smoothing_band']
             ),
             target_idx=self.target_idx,
             limit_idx=[],

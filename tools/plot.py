@@ -1,7 +1,5 @@
 import matplotlib.pyplot as plt
-from matplotlib.path import Path
 from matplotlib.colors import Normalize as ColorNorm
-from matplotlib.patches import PathPatch
 import numpy as np
 import seaborn as sns
 import scipy
@@ -50,80 +48,6 @@ def simple_plot(data, title='Title', out_path=None):
         plt.savefig(out_path)
     plt.close()
 
-class LossLogger:
-    def __init__(self) -> None:
-        self.data = None
-
-    def add_loss(self, data:dict):
-        '''增加一条独立的model训练记录'''
-        for key in data.keys():
-            assert(isinstance(data[key], np.ndarray))
-            if len(data[key].shape) == 1:
-                data[key] = data[key][None, ...]
-            assert(len(data[key].shape) <= 2)
-        if self.data is None:
-            self.data = data
-        else:
-            for key in data.keys():
-                if key in self.data.keys():
-                    self.data[key] = np.concatenate([self.data[key], data[key]], axis=0)
-
-    def clear(self):
-        self.data = None
-    
-    
-    '''
-        提供单个model的train和valid的loss下降图
-        data: dict
-            'train': [n, epochs] or [epochs]
-            'valid': [n, epochs] or [epochs]
-            'epochs': [epochs]
-        std_bar: bool 是否作标准差(对于n>1)误差区间
-        title: str
-        out_path: str
-    '''
-    def plot(self, data:dict=None, std_bar=False, log_loss=False, title='Title', out_path:str=None):
-        if data is None:
-            data = self.data
-        assert('train' in data.keys() or 'valid' in data.keys())
-        for key in data.keys():
-            assert(isinstance(data[key], np.ndarray))
-        if 'train' in data.keys() and len(data['train'].shape) == 1:
-            data['train'] = data['train'][None, :]
-        
-        if 'valid' in data.keys() and len(data['valid'].shape) == 1:
-            data['valid'] = data['valid'][None, :]
-        n = data['train'].shape[0] if 'train' in data.keys() else data['valid'].shape[0]
-        std_flag = (n > 1) and std_bar
-        epoch_len = data['train'].shape[1] if 'train' in data.keys() else data['valid'].shape[1]
-        if 'epochs' in data.keys():
-            epochs = data['epoch'][:]
-        else:
-            epochs = np.linspace(start=0, stop=epoch_len-1, num=epoch_len)
-
-        # create figure
-        plt.figure(figsize = (round(min(12+epoch_len/50, 15)),6))
-        if 'train' in data.keys():
-            train_data = data['train'] if not log_loss else np.log10(data['train'])
-            train_mean = np.mean(train_data, axis=0)
-            plt.plot(epochs, train_mean, color='C0', label='train loss')
-        if 'valid' in data.keys():
-            valid_data = data['valid'] if not log_loss else np.log10(data['valid'])
-            valid_mean = np.mean(valid_data, axis=0)
-            plt.plot(epochs, valid_mean, color="C1", label='valid loss')
-        plt.title(title)
-        plt.xlabel('Epoch')
-        if log_loss:
-            plt.ylabel('Log Loss')
-        else:
-            plt.ylabel('Loss')
-        plt.legend()
-        # plt.legend(['train_loss', 'valid_loss'] if 'valid' in data.keys() else ['train_loss'])
-        if out_path is None:
-            plt.show()
-        else:
-            plt.savefig(out_path)
-        plt.close()
 
 def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
     '''打印柱状图, 按标签顺序'''

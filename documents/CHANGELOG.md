@@ -30,3 +30,6 @@ Upgrade to generic framework
 - mimic_dataset->mimic_ards_dataset. All these 3 datasets are examples
 - New ways of interpolation
 - nearest_static will be changed to latest_static. It will only obtain latest history. return -1 if no history is founded
+
+### Other changes
+- fix bug: admittime < dischtime

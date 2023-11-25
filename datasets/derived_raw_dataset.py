@@ -10,11 +10,7 @@ from os.path import join as osjoin
 from .mimiciv_core import MIMICIV_Core
 
 class MIMICIV_Raw_Dataset(MIMICIV_Core):
-    __name = 'mimic-iv-raw'
-
-    @classmethod
-    def name(cls):
-        return cls.__name
+    _name = 'mimic-iv-raw'
     
     def __init__(self):
         super().__init__(self.name())
@@ -42,7 +38,7 @@ class MIMICIV_Raw_Dataset(MIMICIV_Core):
         if source == 'admission':
             admittime = ymdhms_converter(row.admittime)
             dischtime = ymdhms_converter(row.dischtime)
-            if dischtime < admittime:
+            if dischtime <= admittime:
                 return
             adm = Admission(
                 unique_id=int(row.hadm_id*1e8),
