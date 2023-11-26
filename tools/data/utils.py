@@ -47,19 +47,16 @@ def unroll(x:np.ndarray, mask:np.ndarray):
     else:
         assert(0)
 
-def map_func(a:np.ndarray):
+def map_func(a:np.ndarray, mapping:dict):
     '''
-    Map the results of 4 classifications to the results of 2 classifications
-    Default is [0,1,2,3] corresponding to [Severe,Moderate,Mild,No]
-    Mapping is ARDS=[0,1,2], No ARDS=[3]
-    a: (... , n_cls) can be soft-labeled
-    return (... , 2) where [... ,0] represents no ARDS, [... ,1] means ARDS, can be soft labeling.
+    mapping: key=origin_idx, value=target_idx
     '''
     a_shape = list(a.shape)
-    a_shape[-1] = 2
+    n_targets = len(np.unique(list(mapping.values())))
+    a_shape[-1] = n_targets
     result = np.zeros(tuple(a_shape))
-    result[..., 0] = a[..., 3]
-    result[..., 1] = a[..., 0] + a[..., 1] + a[..., 2]
+    for k,v in mapping.items():
+        result[..., v] += a[..., k]
     return result
 
 def cal_label_weight(n_cls, label:np.ndarray):

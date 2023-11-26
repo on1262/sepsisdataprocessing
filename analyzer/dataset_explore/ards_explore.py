@@ -82,7 +82,7 @@ class ArdsFeatureExplorer:
             correlations.append([corr_mat[target_index, idx], labels[idx]]) # list[(correlation coeff, label)]
         correlations = sorted(correlations, key=lambda x:np.abs(x[0]), reverse=True)
         with open(os.path.join(out_dir, 'correlation.txt'), 'w') as fp:
-            fp.write(f"Target feature: {target_label}")
+            fp.write(f"Target feature: {target_label}\n")
             for idx in range(corr_mat.shape[1]):
                 fp.write(f'Correlation with target: {correlations[idx][0]} \t{correlations[idx][1]}\n')
     

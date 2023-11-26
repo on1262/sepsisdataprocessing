@@ -15,19 +15,18 @@ category_to_numeric:
     
 remove_rule:
     pass1:
-        target_id: ['220045'] # use heart rate as indicator
-        duration_minmax: [2, 200]
+        duration_minmax: [2, 96]
     pass2:
         # gradually eliminate invalid cols/rows in several iterations
         # the last value in each list is an approximation of final missrate threshold
-        max_col_missrate: [1.0]
+        max_col_missrate: [0.95] # there are >5000 features. They will cause OOM
         max_subject_missrate: [1.0]
         adm_select_strategy: default # default always select zero. Another option: random
 
 generate_table:
-    align_target: ['220045']
+    align_target: []
     default_missing_value: -1
-    delta_t_hour: 0.5
+    delta_t_hour: 1.0
 
 k-fold: 5
 validation_proportion: 0.15 # use 0.15*80% samples for validation

@@ -456,6 +456,9 @@ class MIMICIV_Core(Dataset):
                     t_start = max(adm[id][0,1], t_start) if t_start is not None else adm[id][0,1]
                     t_end = min(adm[id][-1,1], t_end) if t_end is not None else adm[id][-1,1]
             t_step = self._loc_conf['generate_table']['delta_t_hour']
+            if t_end - t_start < t_step: # NOTE: e.g. all features are in the same tick. We can not made prediction in such cases.
+                continue
+
             ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
             # 生成表本身, 缺失值为-1
             individual_table = np.ones((len(collect_keys), ticks.shape[0]), dtype=np.float32) * default_missvalue
@@ -486,6 +489,7 @@ class MIMICIV_Core(Dataset):
             if individual_table.size > 0:
                 self.check_nan(individual_table)
                 tables.append(individual_table)
+        logger.info(f'Generated {len(tables)} individual tables')
         result = self.on_feature_engineering(tables, self._norm_dict, self._static_keys, self._dynamic_keys) # 特征工程
         tables, self._norm_dict, static_keys, dynamic_keys = result['tables'], result['norm_dict'], result['static_keys'], result['dynamic_keys']
         for table in tables:

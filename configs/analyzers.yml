@@ -87,16 +87,14 @@ raw_feature_explore:
 vent_feature_explore:
     dataset_version: vent_version
     correlation:
-        enabled: false
-        target: PF_ratio
+        enabled: true
+        target: vent_status
     miss_mat: true
     vent_statistics: true
     vent_sample:
         enabled: true
         n_plot: 10
     
-
-
 ards_catboost_dynamic:
     dataset_version: original_version
     window: 18
@@ -119,11 +117,17 @@ ards_nearest_4cls:
     class_names: [Severe, Moderate, Mild, No_ARDS]
     smoothing_band: 50
 
+vent_nearest_3cls:
+    dataset_version: vent_version
+    window: 16
+    centers: [0, 1, 2]
+    class_names: ['no_vent', 'non-invasive', 'invasive']
+
 vent_catboost_dynamic:
     dataset_version: vent_version
     window: 16
     loss_function: MultiClass
-    iterations: 300
+    iterations: 400
     depth: 5
     learning_rate: 0.03
     centers: [0, 1, 2]

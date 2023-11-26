@@ -4,7 +4,7 @@ import os
 from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
-from tools.data import SliceDataGenerator, LabelGenerator_cls,  map_func, cal_label_weight, label_func_min
+from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight, label_func_min
 from catboost import Pool, CatBoostClassifier
 from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
 

@@ -39,7 +39,7 @@ version:
         feature_limit: []
         forbidden_feas: [
             Weight, BMI, Height (Inches), '225677', '220545', '226730', '226531', Weight (Lbs), '227467', '220339', '227443', '220587', 'dod',
-            ventilation_start, ventilation_end, ventilation_num
+            ventilation_start, ventilation_end, ventilation_num, hosp_expire
         ]
 
 value_clip: {}

@@ -32,8 +32,9 @@ class VentCatboostDynamicAnalyzer:
             label_func=label_func_max,
             target_idx=self.target_idx,
             limit_idx=[],
-            forbidden_idx=[]
+            forbidden_idx=[self.dataset.idx_dict[id] for id in ['hosp_expire', 'vent_status']]
         )
+        print(f'Available features: {[self.dataset.total_keys[idx] for idx in generator.avail_idx]}')
         # step 2: train and predict
         for fold_idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()):
             train_result = generator(self.dataset.data[train_index, :, :], self.dataset.seqs_len[train_index])

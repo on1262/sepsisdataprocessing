@@ -20,7 +20,7 @@ class MIMICIV_Raw_Dataset(MIMICIV_Core):
         patient_set = load_all_subjects(osjoin(self._mimic_dir, 'hosp', 'patients.csv'))
         return patient_set, None
     
-    def on_build_subject(self, subject_id:int, subject:Subject, row:namedtuple, _extract_result:dict) -> Subject:
+    def on_build_subject(self, subject_id:int, subject:Subject, row:namedtuple, patient_set:set, extra_data:object) -> Subject:
         '''
         subject: Subject()
         row: dict, {column_name:value}
@@ -66,7 +66,7 @@ class MIMICIV_Raw_Dataset(MIMICIV_Core):
         else:
             assert(0)
     
-    def on_select_feature(self, id:int, row:dict, source:str=['icu', 'hosp', 'ed']):
+    def on_select_feature(self, subject_id:int, row:dict, source:str=['icu', 'hosp', 'ed']):
         if source == 'icu':
             if row['type'] in ['Numeric', 'Numeric with tag'] and row['category'] != 'Alarms':
                 return True # select
@@ -147,44 +147,39 @@ class MIMICIV_Raw_Dataset(MIMICIV_Core):
         return invalid_count
     
     def on_select_admissions(self, rule:dict, subjects:dict[int, Subject]):
+        invalid_record = {'duration_positive':0, 'duration_limit':0, 'empty':0}
         for s_id in subjects:
             if not subjects[s_id].empty():
                 retain_adms = []
                 for idx, adm in enumerate(subjects[s_id].admissions):
-                    flag = 1
-                    # 检查target
-                    if flag != 0  and 'target_id' in rule and len(rule['target_id']) > 0:
-                        for target_id in rule['target_id']:
-                            if target_id not in adm.keys():
-                                flag = 0
-                    if flag != 0:
-                        start_time, end_time = None, None
-                        for id in rule['target_id']:
-                            start_time = max(adm[id][0,1], start_time) if start_time is not None else adm[id][0,1]
-                            end_time = min(adm[id][-1,1], end_time) if end_time is not None else adm[id][-1,1]
-                        dur = end_time - start_time
-                        if dur <= 0:
+                    dur = adm.dischtime - adm.admittime
+                    if dur <= 0:
+                        invalid_record['duration_positive'] += 1
+                        continue
+                    if 'duration_minmax' in rule:
+                        dur_min, dur_max = rule['duration_minmax']
+                        if not (dur > dur_min and dur < dur_max):
+                            invalid_record['duration_limit'] += 1
                             continue
-                        if 'duration_minmax' in rule:
-                            dur_min, dur_max = rule['duration_minmax']
-                            if not (dur > dur_min and dur < dur_max):
-                                continue
-                    if flag != 0:
-                        retain_adms.append(idx)
+                    retain_adms.append(idx)
                 subjects[s_id].admissions = [subjects[s_id].admissions[idx] for idx in retain_adms]
-        
+       
         pop_list = []
         for s_id in subjects:
             subjects[s_id].del_empty_admission()
             if subjects[s_id].empty():
                 pop_list.append(s_id)
-                
+        invalid_record['empty'] += len(pop_list)
         for s_id in pop_list:
             subjects.pop(s_id)
         
+        # logger.info(f'invalid admissions without target id: {invalid_record["target"]}')
+        logger.info(f'invalid admissions without positive duration: {invalid_record["duration_positive"]}')
+        logger.info(f'invalid admissions exceed duration limitation: {invalid_record["duration_limit"]}')
         logger.info(f'remove_pass1: Deleted {len(pop_list)}/{len(pop_list)+len(subjects)} subjects')
-        return subjects
 
+        return subjects
+    
     def on_remove_missing_data(self, rule:dict, subjects: dict[int, Subject]) -> dict[int, Subject]:
         n_iter = 0
         while n_iter < len(rule['max_col_missrate']) or (len(post_dynamic_keys)+len(post_static_keys) != len(col_missrate)) or (len(pop_subject_ids) > 0):
@@ -223,7 +218,7 @@ class MIMICIV_Raw_Dataset(MIMICIV_Core):
     def on_build_table(self, subject:Subject, key, value, t_start):
         admittime = subject.admissions[0].admittime
         if key == 'dod':
-            if abs(value+1.0)<1e-3:
+            if abs(value+1.0) < 1e-3:
                 return -1
             else:
                 delta_year = np.floor(value / (24*365) - ((t_start+admittime) / (24*365))) # 经过多少年死亡, 两个都是timestamp，不需要加上1970

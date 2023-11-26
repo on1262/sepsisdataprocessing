@@ -49,7 +49,7 @@ class VentFeatureExplorer:
             correlations.append([corr_mat[target_index, idx], labels[idx]]) # list[(correlation coeff, label)]
         correlations = sorted(correlations, key=lambda x:np.abs(x[0]), reverse=True)
         with open(os.path.join(out_dir, 'correlation.txt'), 'w') as fp:
-            fp.write(f"Target feature: {target_label}")
+            fp.write(f"Target feature: {target_label}\n")
             for idx in range(corr_mat.shape[1]):
                 fp.write(f'Correlation with target: {correlations[idx][0]} \t{correlations[idx][1]}\n')
     
@@ -98,14 +98,14 @@ class VentFeatureExplorer:
             elif max_vent == 1:
                 result['non-invasive_vent'] += 1
                 for idx in range(vent_num.shape[0]):
-                    if int(vent_num[idx, 0]) == 1:
-                        non_invasive_vent_times.append(vent_num[idx, 1])
+                    if int(vent_num[idx, 0]) == 1 and (vent_num[idx, 1] >= subject.admissions[0].admittime) and (vent_num[idx, 1] < subject.admissions[0].dischtime):
+                        non_invasive_vent_times.append(vent_num[idx, 1] - subject.admissions[0].admittime)
                         break
             elif max_vent == 2:
                 result['invasive_vent'] += 1
                 for idx in range(vent_num.shape[0]):
-                    if int(vent_num[idx, 0]) == 2:
-                        invasive_vent_times.append(vent_num[idx, 1])
+                    if int(vent_num[idx, 0]) == 2 and (vent_num[idx, 1] >= subject.admissions[0].admittime) and (vent_num[idx, 1] < subject.admissions[0].dischtime):
+                        invasive_vent_times.append(vent_num[idx, 1] - subject.admissions[0].admittime)
                         break
             else:
                 assert(0)
@@ -119,21 +119,27 @@ class VentFeatureExplorer:
         n_plot = self.params['vent_sample']['n_plot']
         n_idx = 1
         plt.figure(figsize = (6, n_plot*2))
-        
         for s_id in self.dataset.subjects:
             subject = self.dataset.subjects[s_id]
+            adm = subject.admissions[0]
             if 'ventilation_num' not in subject.static_data:
                 continue
-            vent_status = int(np.max(subject.static_data['ventilation_num'][:, 0]))
-            if vent_status != 2:
-                continue
             else:
-                plt.subplot(n_plot, 1, n_idx)
                 vent_status = subject.static_data['ventilation_num'][:, 0]
                 vent_start = subject.static_data['ventilation_start'][:, 0]
                 vent_end = subject.static_data['ventilation_end'][:, 0]
+                mask = np.logical_and(vent_start >= adm.admittime, vent_start < adm.dischtime)
+                vent_status = vent_status[mask]
+                if not np.any(mask):
+                    continue
+                status_list = np.unique(vent_status).astype(int).tolist()
+                if 2 not in status_list or 1 not in status_list:
+                    continue
+                vent_start = vent_start[mask]
+                vent_end = vent_end[mask]
+                plt.subplot(n_plot, 1, n_idx)
                 for idx in range(vent_status.shape[0]):
-                    plt.plot([vent_start[idx], vent_end[idx]], [vent_status[idx], vent_status[idx]], '-o')
+                    plt.plot([vent_start[idx] - adm.admittime, vent_end[idx] - adm.admittime], [vent_status[idx], vent_status[idx]], '-o')
                 n_idx += 1
                 if n_idx > n_plot:
                     break
