@@ -1,19 +1,39 @@
 import tools
 from tools.logging import logger
 import matplotlib.pyplot as plt
+from ..container import DataContainer
 import numpy as np
 from tqdm import tqdm
 import os
 from os.path import join as osjoin
 import pandas as pd
 import yaml
+from datasets.derived_vent_dataset import MIMICIV_Vent_Dataset
+from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
+from datasets.derived_raw_dataset import MIMICIV_Raw_Dataset
 from datasets.mimiciv_core import MIMICIV_Core
 
-
-def make_report(dataset: MIMICIV_Core, version_name:str, params:dict):
+class DatasetReport():
+    def __init__(self, params:dict, container:DataContainer) -> None:
+        self.params = params
+        if params['dataset_name'] == 'ards':
+            self.dataset = MIMICIV_ARDS_Dataset()
+        elif params['dataset_name'] == 'raw':
+            self.dataset = MIMICIV_Raw_Dataset()
+        elif params['dataset_name'] == 'vent':
+            self.dataset = MIMICIV_Vent_Dataset()
+        else:
+            logger.error('Incorrect dataset_name')
+            assert(0)
+        self.dataset.load_version(params['dataset_version'])
+        self.dataset.mode('all')
+        self.gbl_conf = container._conf
+        self.data = self.dataset.data
+    
+    def run(dataset: MIMICIV_Core, version_name:str, params:dict):
         # switch version
         dataset.load_version(version_name)
-        dataset.mode('all')
+        
         out_path = os.path.join(dataset._paths['out_dir'], f'dataset_report_{version_name}.txt')
         dist_dir = os.path.join(dataset._paths['out_dir'], 'report_dist')
         dir_names = ['points', 'duration', 'frequency', 'value', 'static_value']
@@ -46,7 +66,7 @@ def make_report(dataset: MIMICIV_Core, version_name:str, params:dict):
                     for adm in s.admissions:
                         if id in adm.keys():
                             dur = adm[id][-1,1] - adm[id][0,1]
-                            sepsis_time = s.latest_static('sepsis_time', adm[id][0, 1])
+                            sepsis_time = s.nearest_static('sepsis_time', adm[id][0, 1])
                             t_sep = adm[id][0, 1] + adm.admittime - sepsis_time
                             arr_from_sepsis_time.append(t_sep)
                             arr_points.append(adm[id].shape[0])

@@ -30,6 +30,10 @@ Upgrade to generic framework
 - mimic_dataset->mimic_ards_dataset. All these 3 datasets are examples
 - New ways of interpolation
 - nearest_static will be changed to latest_static. It will only obtain latest history. return -1 if no history is founded
+- empty align target: push forward the start time when at least one dynamic feature is valid
 
 ### Other changes
 - fix bug: admittime < dischtime
+- fix bug: carrunit now is in static data
+- fix bug: generate label
+- empty align id is available

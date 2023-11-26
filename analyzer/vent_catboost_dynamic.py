@@ -4,7 +4,7 @@ import os
 from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
-from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight
+from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight, label_func_max
 from catboost import Pool, CatBoostClassifier
 from datasets.derived_vent_dataset import MIMICIV_Vent_Dataset
 
@@ -29,10 +29,10 @@ class VentCatboostDynamicAnalyzer:
             label_generator=LabelGenerator_cls(
                 centers=self.params['centers']
             ),
-            label_func=lambda x: np.max(x, axis=1),
+            label_func=label_func_max,
             target_idx=self.target_idx,
             limit_idx=[],
-            forbidden_idx=['vent_status']
+            forbidden_idx=[]
         )
         # step 2: train and predict
         for fold_idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()):

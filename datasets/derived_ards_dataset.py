@@ -213,7 +213,7 @@ class MIMICIV_ARDS_Dataset(MIMICIV_Core):
                                 continue
                         if 'check_sepsis_time' in rule:
                             t_min, t_max = rule['check_sepsis_time']
-                            sepsis_time = subjects[s_id].latest_static('sepsis_time', start_time)
+                            sepsis_time = subjects[s_id].nearest_static('sepsis_time', start_time)
                             time_delta = sepsis_time - (adm.admittime + start_time)
                             if not (time_delta > t_min and time_delta < t_max):
                                 continue

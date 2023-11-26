@@ -200,7 +200,7 @@ class MIMICIV_Core(Dataset):
 
         # construct subject
         patients = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'patients.csv'), encoding='utf-8')
-        for row in tqdm(patients.itertuples(), 'Construct Subjects', total=len(patients)):
+        for row in tqdm(patients.itertuples(), 'Construct Subjects', total=len(patients), miniters=len(patients)//100):
             s_id = row.subject_id
             if s_id in self._extract_result[0]:
                 subject = Subject(row.subject_id, birth_year=row.anchor_year - row.anchor_age)
@@ -210,7 +210,7 @@ class MIMICIV_Core(Dataset):
 
         # add admission
         admissions = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'admissions.csv'), encoding='utf-8')
-        for row in tqdm(admissions.itertuples(), 'Extract Admissions', total=len(admissions)):
+        for row in tqdm(admissions.itertuples(), 'Extract Admissions', total=len(admissions), miniters=len(admissions)//100):
             if row.subject_id in self._subjects:
                 self.on_extract_admission(self._subjects[row.subject_id], source='admission', row=row)
 
@@ -219,7 +219,7 @@ class MIMICIV_Core(Dataset):
             ['icu', 'transfer']
         ):
             table = pd.read_csv(path, encoding='utf-8')
-            for row in tqdm(table.itertuples(), desc=f'Extract admission information from {prefix.upper()}', total=len(table)):
+            for row in tqdm(table.itertuples(), desc=f'Extract admission information from {prefix.upper()}', total=len(table), miniters=len(table)//100):
                 s_id = row.subject_id
                 if s_id in self._subjects:
                     self.on_extract_admission(self._subjects[s_id], source=prefix, row=row)
@@ -229,7 +229,7 @@ class MIMICIV_Core(Dataset):
         ymd_convertor = tools.TimeConverter(format="%Y-%m-%d", out_unit='hour')
         table_omr = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'omr.csv'), encoding='utf-8') 
         # omr: [subject_id,chartdate,seq_num,result_name,result_value]
-        for row in tqdm(table_omr.itertuples(), 'Extract patient information from OMR', total=len(table_omr)):
+        for row in tqdm(table_omr.itertuples(), 'Extract patient information from OMR', total=len(table_omr), miniters=len(table_omr)//100):
             s_id = row.subject_id
             if s_id in self._subjects:
                 self._subjects[s_id].append_static(ymd_convertor(row.chartdate), row.result_name, row.result_value)
@@ -256,7 +256,7 @@ class MIMICIV_Core(Dataset):
         if self._loc_conf['data_linkage']['ed']:
             # 采集ED内的数据
             ed_vitalsign = pd.read_csv(os.path.join(self._mimic_dir, 'ed', 'vitalsign.csv'), encoding='utf-8')
-            for row in tqdm(ed_vitalsign.itertuples(), 'Extract vitalsign from MIMIC-IV-ED', total=len(ed_vitalsign)):
+            for row in tqdm(ed_vitalsign.itertuples(), 'Extract vitalsign from MIMIC-IV-ED', total=len(ed_vitalsign), miniters=len(ed_vitalsign)//100):
                 s_id = row.subject_id
                 for itemid in ['temperature', 'heartrate', 'resprate', 'o2sat', 'sbp', 'dbp', 'rhythm', 'pain']:
                     if s_id in self._subjects and 'ED_'+itemid in collect_ed_set:
@@ -275,9 +275,13 @@ class MIMICIV_Core(Dataset):
                 usecols=['subject_id', 'itemid', 'charttime', 'valuenum'], engine='c',
                 dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':float}
             )
-            for chunk_idx, chunk in tqdm(enumerate(hosp_labevents), 'Extract labevent from hosp', total=total_size//hosp_chunksize):
+            for chunk_idx, chunk in tqdm(
+                enumerate(hosp_labevents), 'Extract labevent from hosp', 
+                total=total_size//hosp_chunksize, 
+                miniters=total_size//hosp_chunksize//100
+            ):
                 chunk = chunk.to_numpy()
-                for row in tqdm(chunk, f'chunk {chunk_idx}'):
+                for row in tqdm(chunk, f'chunk {chunk_idx}', miniters=len(chunk)//10):
                     s_id, itemid, charttime, valuenum = row
                     if s_id in self._subjects and itemid in collect_hosp_set:
                         charttime = datetime.fromisoformat(charttime).timestamp() / 3600.0 # hour
@@ -293,9 +297,14 @@ class MIMICIV_Core(Dataset):
                     dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':float}
             )
             
-            for chunk_idx, chunk in tqdm(enumerate(icu_events), 'Extract ICU events', total=total_size // icu_events_chunksize):
+            for chunk_idx, chunk in tqdm(
+                enumerate(icu_events), 
+                'Extract ICU events', 
+                total=total_size // icu_events_chunksize,
+                miniters=total_size // icu_events_chunksize // 100
+            ):
                 chunk = chunk.to_numpy()
-                for row in tqdm(chunk, f'chunk {chunk_idx}'):
+                for row in tqdm(chunk, f'chunk {chunk_idx}', miniters=len(chunk)//10):
                     s_id, charttime, itemid, valuenum = row # 要和文件头保持相同的顺序
                     if s_id in self._subjects and itemid in collect_icu_set: # do not double check subject id
                         charttime = datetime.fromisoformat(charttime).timestamp() / 3600.0 # hour
@@ -315,11 +324,11 @@ class MIMICIV_Core(Dataset):
             logger.info(f'Load numeric subject data from {p_numeric_subject}')
             return
         
-        for s_id in tqdm(self._subjects, desc='update data'):
+        for s_id in tqdm(self._subjects, desc='update data', miniters=len(self._subjects)//100):
             self._subjects[s_id].update_data()
 
         invalid_count = 0
-        for s in tqdm(self._subjects.values(), 'Convert to numeric'):
+        for s in tqdm(self._subjects.values(), 'Convert to numeric', miniters=len(self._subjects)//100):
             invalid_count += self.on_convert_numeric(s)
         logger.warning(f'Convert to numeric: find {invalid_count} invalid values in dynamic data')
         
@@ -432,31 +441,39 @@ class MIMICIV_Core(Dataset):
 
         default_missvalue = float(self._loc_conf['generate_table']['default_missing_value'])
         calculate_bin = self._loc_conf['generate_table']['calculate_bin']
-        for s_id in tqdm(self._subjects.keys(), desc='Generate aligned table'):
+        for s_id in tqdm(self._subjects.keys(), desc='Generate aligned table', miniters=len(self._subjects)//100):
             s = self._subjects[s_id]
             adm = s.admissions[0]
             
             t_start, t_end = None, None
-            for id in self._loc_conf['generate_table']['align_target']:
-                t_start = max(adm[id][0,1], t_start) if t_start is not None else adm[id][0,1]
-                t_end = min(adm[id][-1,1], t_end) if t_end is not None else adm[id][-1,1]
+            if len(self._loc_conf['generate_table']['align_target']) == 0: # no target
+                for id in adm.keys():
+                    t_start = min(adm[id][0,1], t_start) if t_start is not None else adm[id][0,1]
+                    t_end = max(adm[id][-1,1], t_end) if t_end is not None else adm[id][-1,1]
+                t_start, t_end = max(t_start, 0), min(t_end, adm.dischtime - adm.admittime)
+            else:
+                for id in self._loc_conf['generate_table']['align_target']:
+                    t_start = max(adm[id][0,1], t_start) if t_start is not None else adm[id][0,1]
+                    t_end = min(adm[id][-1,1], t_end) if t_end is not None else adm[id][-1,1]
             t_step = self._loc_conf['generate_table']['delta_t_hour']
             ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
             # 生成表本身, 缺失值为-1
             individual_table = np.ones((len(collect_keys), ticks.shape[0]), dtype=np.float32) * default_missvalue
 
             # fulfill static data by nearest value
-            static_data = np.ones((len(self._static_keys))) * default_missvalue
-            for idx, key in enumerate(self._static_keys):
-                if key in self._subjects[s_id].static_data:
-                    value = self._subjects[s_id].latest_static(key, t_start)
-                    static_data[idx] = self.on_build_table(self._subjects[s_id], key, value, t_start)
-            
-            individual_table[:len(self._static_keys), :] = static_data[:, None]
+            static_data = np.ones((len(self._static_keys), ticks.shape[0])) * default_missvalue
+            for t_idx, t in enumerate(ticks):
+                for idx, key in enumerate(self._static_keys):
+                    if key in self._subjects[s_id].static_data:
+                        value = self._subjects[s_id].latest_static(key, t+adm.admittime)
+                        if value is not None:
+                            static_data[idx, t_idx] = self.on_build_table(self._subjects[s_id], key, value, t_start)
+                
+            individual_table[:len(self._static_keys), :] = static_data
             self.check_nan(individual_table)
             # interpolation of dynamic data
             for idx, key in enumerate(self._dynamic_keys):
-                if key in adm.keys():
+                if key in adm.keys() and key not in ['careunit']:
                     self.check_nan(adm[key])
                     if adm[key].shape[0] == 1:
                         individual_table[len(self._static_keys)+idx, :] = adm[key][0, 0]
@@ -479,7 +496,7 @@ class MIMICIV_Core(Dataset):
         # step2: 时间轴长度对齐, 生成seqs_len, 进行某些特征的最后处理
         seqs_len = np.asarray([d.shape[1] for d in tables], dtype=np.int64)
         max_len = max(seqs_len)
-        for t_idx in tqdm(range(len(tables)), desc='Padding tables'):
+        for t_idx in tqdm(range(len(tables)), desc='Padding tables', miniters=len(tables)//100):
             if seqs_len[t_idx] == max_len:
                 continue
             padding = -np.ones((len(total_keys), max_len - seqs_len[t_idx]))

@@ -242,30 +242,3 @@ class MIMICIV_Raw_Dataset(MIMICIV_Core):
             'static_keys': static_keys,
             'dynamic_keys': dynamic_keys
         }
-    
-    def make_report(self, version_name, params:dict):
-        # switch version
-        self.load_version(version_name)
-        self.mode('all')
-        out_path = os.path.join(self._paths['out_dir'], f'dataset_report_{version_name}.txt')
-        dist_dir = os.path.join(self._paths['out_dir'], 'report_dist')
-        dir_names = ['points', 'duration', 'frequency', 'value', 'from_sepsis', 'static_value']
-        tools.reinit_dir(dist_dir, build=True)
-        for name in dir_names:
-            os.makedirs(os.path.join(dist_dir, name))
-        logger.info('MIMIC-IV-raw: generating dataset report')
-        write_lines = []
-        if params['basic']:
-            # basic statistics
-            write_lines.append('='*10 + 'basic' + '='*10)
-            write_lines.append(f'Version: {version_name}')
-            write_lines.append(f'Static keys: {len(self.static_keys)}')
-            write_lines.append(f'Dynamic keys: {len(self.dynamic_keys)}')
-            write_lines.append(f'Subjects:{len(self)}')
-            write_lines.append(f'Static feature: {[self.fea_label(id) for id in self.static_keys]}')
-            write_lines.append(f'Dynamic feature: {[self.fea_label(id) for id in self.dynamic_keys]}')
-        # write report
-        with open(out_path, 'w', encoding='utf-8') as fp:
-            for line in write_lines:
-                fp.write(line + '\n')
-        logger.info(f'Report generated at {out_path}')

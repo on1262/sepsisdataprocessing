@@ -3,12 +3,13 @@ import tools
 import os
 from tools import logger as logger
 from .container import DataContainer
-from .ards_catboost_dynamic import ARDSCatboostRegressionAnalyzer
-from .dataset_explore.ards_explore import ArdsFeatureExplorer
-from .ards_nearest_cls import ArdsNearest4ClsAnalyzer
-from .cross_validation import CV_Analyzer
-from .dataset_explore.raw_explore import RawFeatureExplorer
-from .vent_catboost_dynamic import VentCatboostDynamicAnalyzer
+from analyzer.ards_catboost_dynamic import ARDSCatboostRegressionAnalyzer
+from analyzer.dataset_explore.ards_explore import ArdsFeatureExplorer
+from analyzer.ards_nearest_cls import ArdsNearest4ClsAnalyzer
+from analyzer.cross_validation import CV_Analyzer
+from analyzer.dataset_explore.raw_explore import RawFeatureExplorer
+from analyzer.dataset_explore.vent_explore import VentFeatureExplorer
+from analyzer.vent_catboost_dynamic import VentCatboostDynamicAnalyzer
 
 
 class Analyzer:
@@ -22,6 +23,7 @@ class Analyzer:
             'ards_catboost_dynamic': ARDSCatboostRegressionAnalyzer,
             'ards_feature_explore': ArdsFeatureExplorer,
 
+            'vent_feature_explore': VentFeatureExplorer,
             'vent_catboost_dynamic': VentCatboostDynamicAnalyzer,
             'cross_validation': CV_Analyzer,
 

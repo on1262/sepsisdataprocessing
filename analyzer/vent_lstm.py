@@ -3,7 +3,7 @@ import tools
 import os
 from tools import logger as logger
 from .container import DataContainer
-from tools.data import DynamicDataGenerator, LabelGenerator_cls
+from tools.data import DynamicDataGenerator, LabelGenerator_cls, label_func_max
 from datasets.derived_vent_dataset import MIMICIV_Vent_Dataset
 from models.vent_lstm_model import VentLSTMModel
 from torch.utils.data.dataloader import DataLoader
@@ -107,7 +107,7 @@ class VentLSTMAnalyzer:
             label_generator=LabelGenerator_cls(
                 centers=self.params['centers']
             ),
-            label_func=lambda x: np.max(x, axis=1), # predict most severe ventilation in each bin
+            label_func=label_func_max, # predict most severe ventilation in each bin
             target_idx=self.target_idx,
             limit_idx=[],
             forbidden_idx=[]

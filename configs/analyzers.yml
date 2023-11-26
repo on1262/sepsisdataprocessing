@@ -21,6 +21,13 @@ cross_validation:
     forbidden_feas: []
     slice_len: 192
 
+dataset_report:
+    dataset_name: vent # ['ards', 'raw', 'vent']
+    dataset_version: vent_version
+    basic: true
+    dynamic_dist: false
+    static_dist: false
+
 ards_feature_explore:
     dataset_version: explore_version
     plot_admission_dist: true
@@ -46,11 +53,6 @@ ards_feature_explore:
     miss_mat: true
     first_ards_time: false
     feature_count: true
-    generate_report: false
-    report_params:
-        basic: true
-        dynamic_dist: false
-        static_dist: false
 
 raw_feature_explore:
     dataset_version: raw_version
@@ -80,12 +82,7 @@ raw_feature_explore:
             Daily Weight: {min: 30, max: 200}
     miss_mat: false
     feature_count: false
-    generate_report: false
     correlation: false
-    report_params:
-        basic: true
-        dynamic_dist: false
-        static_dist: false
 
 vent_feature_explore:
     dataset_version: vent_version
@@ -93,13 +90,12 @@ vent_feature_explore:
         enabled: false
         target: PF_ratio
     miss_mat: true
-    first_ards_time: false
-    feature_count: true
-    generate_report: false
-    report_params:
-        basic: true
-        dynamic_dist: false
-        static_dist: false
+    vent_statistics: true
+    vent_sample:
+        enabled: true
+        n_plot: 10
+    
+
 
 ards_catboost_dynamic:
     dataset_version: original_version

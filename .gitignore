@@ -1,7 +1,7 @@
 mimic-iv-2.2.zip
 __pycache__
-data/
-outputs/
+/data/
+/outputs/
 *.pyc
 *.pt
 *.log

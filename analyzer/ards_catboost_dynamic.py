@@ -4,7 +4,7 @@ import os
 from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
-from tools.data import SliceDataGenerator, LabelGenerator_cls,  map_func, cal_label_weight
+from tools.data import SliceDataGenerator, LabelGenerator_cls,  map_func, cal_label_weight, label_func_min
 from catboost import Pool, CatBoostClassifier
 from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
 
@@ -31,7 +31,7 @@ class ARDSCatboostRegressionAnalyzer:
                 soft_label=self.params['soft_label'], 
                 smooth_band=self.params['smoothing_band']
             ),
-            label_func=lambda x: np.min(x, axis=1),
+            label_func=label_func_min,
             target_idx=self.target_idx,
             limit_idx=[],
             forbidden_idx=[]

@@ -116,20 +116,30 @@ class Subject:
                 self.static_data[name].append((value, charttime))
     
     def latest_static(self, key, time=None):
-        '''返回与输入时间最接近的静态特征取值'''
         if key not in self.static_data.keys():
-            return -1
+            return None
 
         if not isinstance(self.static_data[key], np.ndarray): # single value
             return self.static_data[key]
         else:
             assert(time is not None)
-            for idx in range(self.static_data[key].shape[0]):
-                if time >= self.static_data[key][idx, 1]:
-                    return self.static_data[key][idx, 0]
-                
-            return -1 # input time is too early
+            idx = np.argmin(time - self.static_data[key][:, 1])
+            if time - self.static_data[key][idx, 1] >= 0:
+                return self.static_data[key][idx, 0]
+            else:
+                return None # input time is too early
+    
+    def nearest_static(self, key, time=None):
+        if key not in self.static_data.keys():
+            return None
 
+        if not isinstance(self.static_data[key], np.ndarray): # single value
+            return self.static_data[key]
+        else:
+            assert(time is not None)
+            idx = np.argmin(np.abs(self.static_data[key][:, 1] - time))
+            return self.static_data[key][idx, 0]
+    
     def append_dynamic(self, charttime:float, itemid, value):
         '''添加一个动态特征到合适的admission中'''
         for adm in self.admissions: # search admission by charttime
