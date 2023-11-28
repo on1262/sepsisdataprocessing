@@ -57,7 +57,7 @@ class RawFeatureExplorer:
         n_adm = np.asarray(list(subject_dict.values()))
         logger.info(f'Admission: mean={n_adm.mean():.3f}')
 
-        logger.info(f'Retain {100*(n_adm)/np.sum(n_adm):.3f}% admissions if we only choose the first admission.')
+        logger.info(f'Retain {100*len(n_adm)/np.sum(n_adm):.3f}% admissions if we only choose the first admission.')
         tools.plot_single_dist(n_adm, 'Number of Admission', save_path=out_path, discrete=True, adapt=True, label=True, shrink=0.9, edgecolor=None)
     
     def plot_chart_vis(self, out_dir):

@@ -56,21 +56,16 @@ ards_feature_explore:
 
 raw_feature_explore:
     dataset_version: raw_version
+    plot_admission_dist: true
     plot_chart_vis:
-        enabled: false
-        plot_transfer_careunit: false
+        enabled: true
+        collect_list: [transfer, admission]
     plot_samples:
         enabled: false
         n_sample: 50
         features:
             - Arterial O2 pressure
             - Inspired O2 Fraction
-    plot_time_series:
-        enabled: false
-        names:
-            - PF_ratio
-        n_sample: 400
-        n_per_plots: 40
     abnormal_dist:
         enabled: true
         value_limitation:
@@ -80,9 +75,9 @@ raw_feature_explore:
             Arterial O2 Saturation: {min: 50, max: 100}
             O2 saturation pulseoxymetry: {min: 50, max: 100}
             Daily Weight: {min: 30, max: 200}
-    miss_mat: false
-    feature_count: false
-    correlation: false
+    miss_mat: true
+    feature_count: true
+    correlation: true
 
 vent_feature_explore:
     dataset_version: vent_version
@@ -138,14 +133,12 @@ vent_catboost_dynamic:
 vent_lstm:
     dataset_version: vent_version
     window: 16
-    soft_label: false
+    device: 'cuda:1'
     centers: [0, 1, 2]
     class_names: ['no_vent', 'non-invasive', 'invasive']
     feature_limit: []
     forbidden_feas: []
     hidden_size: 128
+    batch_size: 2048
+    epoch: 100
     lr: 0.001
-    device: 'cuda:1'
-
-
-

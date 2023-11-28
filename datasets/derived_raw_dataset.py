@@ -50,7 +50,7 @@ class MIMICIV_Raw_Dataset(MIMICIV_Core):
             for name, val in zip(
                 ['insurance', 'language', 'race', 'marital_status'],
                 [row.insurance, row.language, row.race, row.marital_status]
-            ):  
+            ):
                 subject.append_static(admittime, name, discretizer[name][val] if val in discretizer[name] else discretizer[name]['Default'])
             
             subject.append_static(admittime, 'hosp_expire', row.hospital_expire_flag)
@@ -83,7 +83,13 @@ class MIMICIV_Raw_Dataset(MIMICIV_Core):
         2. 检测不能转换为float的静态特征
         '''
         # step1: convert static data
-        invalid_count = 0
+        invalid_record = {}
+        def add_invalid(key, value):
+            if key not in invalid_record:
+                invalid_record[key] = {'count':1, 'examples':[value]}
+            else:
+                invalid_record[key]['count'] += 1
+        
         static_data = s.static_data
         pop_keys = []
         for key in list(static_data.keys()):
@@ -105,20 +111,19 @@ class MIMICIV_Raw_Dataset(MIMICIV_Core):
             elif isinstance(static_data[key], list):
                 valid_idx = []
                 for idx in range(len(static_data[key])):
-                    v,t = static_data[key][idx]
+                    value, t = static_data[key][idx]
                     try:
-                        v = float(v)
+                        v = float(value)
                         assert(not np.isnan(v))
                         valid_idx.append(idx)
                     except Exception as e:
-                        invalid_count += 1
+                       add_invalid(key, value)
                 if len(valid_idx) == 0: # no valid
                     pop_keys.append(key)
                 else:
                     static_data[key] = np.asarray(static_data[key])[valid_idx, :].astype(np.float64)
         for key in pop_keys:
             static_data.pop(key)
-        # logger.info(f'Convert Numeric: pop_keys in static data: {pop_keys}')
                 
         s.static_data = static_data
         # step2: convert dynamic data in admissions
@@ -130,21 +135,21 @@ class MIMICIV_Raw_Dataset(MIMICIV_Core):
                 for idx, row in enumerate(adm.dynamic_data[key]):
                     value = row[0]
                     try:
-                        value = float(value)
-                        assert(not np.isnan(value))
+                        v = float(value)
+                        assert(not np.isnan(v))
                         valid_idx.append(idx)
                     except Exception as e:
-                        invalid_count += 1
-                
+                        add_invalid(key, value)
                 if len(valid_idx) == 0:
                     pop_keys.append(key)
-                elif len(valid_idx) < adm.dynamic_data[key].shape[0]:
-                    adm.dynamic_data[key] = adm.dynamic_data[key][valid_idx, :].astype(np.float64)
+                elif len(valid_idx) < len(adm.dynamic_data[key]):
+                    adm.dynamic_data[key] = np.asarray(adm.dynamic_data[key])[valid_idx, :].astype(np.float64) # TODO 这部分代码需要复制给另外两个dataset
                 else:
-                    adm.dynamic_data[key] = adm.dynamic_data[key].astype(np.float64)
+                    adm.dynamic_data[key] = np.asarray(adm.dynamic_data[key]).astype(np.float64)
             for key in pop_keys:
                 adm.dynamic_data.pop(key)
-        return invalid_count
+        
+        return invalid_record
     
     def on_select_admissions(self, rule:dict, subjects:dict[int, Subject]):
         invalid_record = {'duration_positive':0, 'duration_limit':0, 'empty':0}

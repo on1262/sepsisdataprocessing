@@ -9,6 +9,7 @@ analyzer_params:
   # - vent_catboost_dynamic
   # - vent_feature_explore
   # - vent_nearest_3cls
+  - vent_lstm
   
   # - cross_validation
-  - raw_feature_explore
+  # - raw_feature_explore

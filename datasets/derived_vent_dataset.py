@@ -180,13 +180,13 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
                 
                 if len(valid_idx) == 0:
                     pop_keys.append(key)
-                elif len(valid_idx) < adm.dynamic_data[key].shape[0]:
-                    adm.dynamic_data[key] = adm.dynamic_data[key][valid_idx, :].astype(np.float64)
+                elif len(valid_idx) < len(adm.dynamic_data[key]):
+                    adm.dynamic_data[key] = np.asarray(adm.dynamic_data[key])[valid_idx, :].astype(np.float64)
                 else:
-                    adm.dynamic_data[key] = adm.dynamic_data[key].astype(np.float64)
+                    adm.dynamic_data[key] = np.asarray(adm.dynamic_data[key]).astype(np.float64)
             for key in pop_keys:
                 adm.dynamic_data.pop(key)
-        return invalid_count
+        return {'all': {'count': invalid_count, 'examples':[]}}
 
     def on_select_admissions(self, rule:dict, subjects:dict[int, Subject]):
         invalid_record = {'duration_positive':0, 'duration_limit':0, 'empty':0}

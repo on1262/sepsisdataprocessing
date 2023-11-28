@@ -26,6 +26,7 @@ remove_rule:
 generate_table:
     align_target: ['220224', '223835']
     default_missing_value: -1
+    calculate_bin: avg # how to calculate multiple data points in a discrete bin: avg=use average value, latest: use last value
     delta_t_hour: 0.5
 
 k-fold: 5

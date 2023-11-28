@@ -11,6 +11,8 @@ from analyzer.dataset_explore.raw_explore import RawFeatureExplorer
 from analyzer.dataset_explore.vent_explore import VentFeatureExplorer
 from analyzer.vent_catboost_dynamic import VentCatboostDynamicAnalyzer
 from analyzer.vent_nearest_cls import VentNearest3ClsAnalyzer
+from analyzer.vent_lstm import VentLSTMAnalyzer
+
 
 
 class Analyzer:
@@ -27,6 +29,7 @@ class Analyzer:
             'vent_feature_explore': VentFeatureExplorer,
             'vent_catboost_dynamic': VentCatboostDynamicAnalyzer,
             'vent_nearest_3cls': VentNearest3ClsAnalyzer,
+            'vent_lstm': VentLSTMAnalyzer,
             'cross_validation': CV_Analyzer,
 
             'raw_feature_explore': RawFeatureExplorer,

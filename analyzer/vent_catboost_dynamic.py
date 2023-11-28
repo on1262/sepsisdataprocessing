@@ -4,8 +4,9 @@ import os
 from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
-from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight, label_func_max
+from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight, label_func_max, map_func
 from catboost import Pool, CatBoostClassifier
+from os.path import join as osjoin
 from datasets.derived_vent_dataset import MIMICIV_Vent_Dataset
 
 class VentCatboostDynamicAnalyzer:
@@ -23,6 +24,7 @@ class VentCatboostDynamicAnalyzer:
         tools.reinit_dir(out_dir, build=True)
         # metric_2cls = tools.DichotomyMetric()
         metric_3cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
+        metric_2cls = [tools.DichotomyMetric() for _ in range(3)]
         generator = SliceDataGenerator(
             window_points=self.params['window'],
             n_fea=len(self.dataset.total_keys),
@@ -60,12 +62,14 @@ class VentCatboostDynamicAnalyzer:
             
             model.fit(pool_train, eval_set=pool_valid)
 
-            Y_pred = model.predict_proba(X_test)
-            metric_3cls.add_prediction(Y_pred, Y_test) # 去掉mask外的数据
-            # metric_2cls.add_prediction(map_func(Y_pred)[..., 1].flatten(), map_func(Y_test)[..., 1].flatten())
+            Y_test_pred = model.predict_proba(X_test)
+            metric_3cls.add_prediction(Y_test_pred, Y_test) # 去掉mask外的数据
+            for idx, map_dict in zip([0,1,2], [{0:0,1:1,2:1}, {0:0,1:1,2:0}, {0:0,1:0,2:1}]): # TODO 这里写错了
+                metric_2cls[idx].add_prediction(map_func(Y_test_pred, map_dict)[:, 1], map_func(Y_test, map_dict)[:, 1])
         
         metric_3cls.confusion_matrix(comment=self.model_name)
-        # metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
+        for idx in range(3):
+            metric_2cls[idx].plot_roc(f'ROC for {self.params["class_names"][idx]}', save_path=osjoin(out_dir, f'roc_cls_{idx}.png'))
         
         with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
             print('Overall performance:', file=fp)

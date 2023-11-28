@@ -255,7 +255,10 @@ class MIMICIV_Core(Dataset):
         
         if self._loc_conf['data_linkage']['ed']:
             # 采集ED内的数据
-            ed_vitalsign = pd.read_csv(os.path.join(self._mimic_dir, 'ed', 'vitalsign.csv'), encoding='utf-8')
+            ed_vitalsign = pd.read_csv(os.path.join(self._mimic_dir, 'ed', 'vitalsign.csv'), 
+                                       dtype={'subject_id':int, 'charttime':str, 'temperature':str, "heartrate":str ,"resprate":str ,"o2sat":str, 'sbp':str, 'dbp':str, 'rhythm':str, 'pain':str}, 
+                                       encoding='utf-8'
+            )
             for row in tqdm(ed_vitalsign.itertuples(), 'Extract vitalsign from MIMIC-IV-ED', total=len(ed_vitalsign), miniters=len(ed_vitalsign)//100):
                 s_id = row.subject_id
                 for itemid in ['temperature', 'heartrate', 'resprate', 'o2sat', 'sbp', 'dbp', 'rhythm', 'pain']:
@@ -268,21 +271,20 @@ class MIMICIV_Core(Dataset):
             del ed_vitalsign
 
         if self._loc_conf['data_linkage']['hosp']:
-            total_size = 10000000 * 12 # 大概需要10分钟
+            total_size = 10000000 * 12
             hosp_chunksize = 10000000
             hosp_labevents = pd.read_csv(
                 os.path.join(self._mimic_dir, 'hosp', 'labevents.csv'), encoding='utf-8', chunksize=hosp_chunksize,
                 usecols=['subject_id', 'itemid', 'charttime', 'valuenum'], engine='c',
-                dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':float}
+                dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':str}
             )
             for chunk_idx, chunk in tqdm(
                 enumerate(hosp_labevents), 'Extract labevent from hosp', 
                 total=total_size//hosp_chunksize, 
                 miniters=total_size//hosp_chunksize//100
             ):
-                chunk = chunk.to_numpy()
-                for row in tqdm(chunk, f'chunk {chunk_idx}', miniters=len(chunk)//10):
-                    s_id, itemid, charttime, valuenum = row
+                for row in tqdm(chunk.itertuples(), f'chunk {chunk_idx}', miniters=len(chunk)//10): # NOTE: reserve dtypes for valuenum
+                    s_id, itemid, charttime, valuenum = row.subject_id, row.itemid, row.charttime, row.valuenum
                     if s_id in self._subjects and itemid in collect_hosp_set:
                         charttime = datetime.fromisoformat(charttime).timestamp() / 3600.0 # hour
                         self._subjects[s_id].append_dynamic(charttime=charttime, itemid=itemid, value=valuenum)
@@ -294,7 +296,7 @@ class MIMICIV_Core(Dataset):
             icu_events_chunksize = 10000000
             icu_events = pd.read_csv(os.path.join(self._mimic_dir, 'icu', 'chartevents.csv'), 
                     encoding='utf-8', usecols=['subject_id', 'charttime', 'itemid', 'valuenum'], chunksize=icu_events_chunksize, engine='c',
-                    dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':float}
+                    dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':str}
             )
             
             for chunk_idx, chunk in tqdm(
@@ -303,9 +305,8 @@ class MIMICIV_Core(Dataset):
                 total=total_size // icu_events_chunksize,
                 miniters=total_size // icu_events_chunksize // 100
             ):
-                chunk = chunk.to_numpy()
-                for row in tqdm(chunk, f'chunk {chunk_idx}', miniters=len(chunk)//10):
-                    s_id, charttime, itemid, valuenum = row # 要和文件头保持相同的顺序
+                for row in tqdm(chunk.itertuples(), f'chunk {chunk_idx}', miniters=len(chunk)//10):
+                    s_id, charttime, itemid, valuenum = row.subject_id, row.charttime, row.itemid, row.valuenum # 要和文件头保持相同的顺序
                     if s_id in self._subjects and itemid in collect_icu_set: # do not double check subject id
                         charttime = datetime.fromisoformat(charttime).timestamp() / 3600.0 # hour
                         self._subjects[s_id].append_dynamic(charttime=charttime, itemid=itemid, value=valuenum)
@@ -323,15 +324,26 @@ class MIMICIV_Core(Dataset):
                 self._subjects = pickle.load(fp)
             logger.info(f'Load numeric subject data from {p_numeric_subject}')
             return
+
+        invalid_record = {}
+        for s in tqdm(self._subjects.values(), 'Convert to numeric', miniters=len(self._subjects)//100):
+            r = self.on_convert_numeric(s)
+            for k,v in r.items():
+                if k not in invalid_record:
+                    invalid_record[k] = v
+                else:
+                    invalid_record[k]['count'] += v['count']
+                    if len(invalid_record[k]['examples']) < 5:
+                        invalid_record[k]['examples'] += v['examples']
+        for key in invalid_record:
+            count, examples = invalid_record[key]['count'], invalid_record[key]['examples']
+            logger.debug(f'Invalid: key={key}, count={count}, example={examples}')
+        invalid_count = sum([val['count'] for val in invalid_record.values()])
+        logger.warning(f'Convert to numeric: find {invalid_count} invalid values in dynamic data')
         
         for s_id in tqdm(self._subjects, desc='update data', miniters=len(self._subjects)//100):
             self._subjects[s_id].update_data()
 
-        invalid_count = 0
-        for s in tqdm(self._subjects.values(), 'Convert to numeric', miniters=len(self._subjects)//100):
-            invalid_count += self.on_convert_numeric(s)
-        logger.warning(f'Convert to numeric: find {invalid_count} invalid values in dynamic data')
-        
         self._subjects = self.on_select_admissions(rule=self._loc_conf['remove_rule']['pass1'], subjects=self._subjects)
 
         # TODO col_abnormal_rate = {}

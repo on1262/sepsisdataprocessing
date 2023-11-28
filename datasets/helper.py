@@ -67,10 +67,9 @@ class Admission:
         if not self._data_updated:
             self._data_updated = True
             for key in self.dynamic_data:
-                if isinstance(self.dynamic_data[key], list):
-                    arr = np.asarray(sorted(self.dynamic_data[key], key=lambda x:x[1]))
-                    arr[:, 1] -= self.admittime
-                    self.dynamic_data[key] = arr
+                arr = np.asarray(sorted(self.dynamic_data[key], key=lambda x:x[1]))
+                arr[:, 1] -= self.admittime
+                self.dynamic_data[key] = arr
     
     def duration(self):
         return max(0, self.dischtime - self.admittime)

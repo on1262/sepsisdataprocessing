@@ -55,7 +55,7 @@ def map_func(a:np.ndarray, mapping:dict):
     n_targets = len(np.unique(list(mapping.values())))
     a_shape[-1] = n_targets
     result = np.zeros(tuple(a_shape))
-    for k,v in mapping.items():
+    for k, v in mapping.items():
         result[..., v] += a[..., k]
     return result
 
