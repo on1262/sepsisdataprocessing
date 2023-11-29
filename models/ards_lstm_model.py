@@ -4,7 +4,7 @@ import torch
 import tools
 from tools import logger as logger
 
-class VentLSTMModel(nn.Module):
+class ArdsLSTMModel(nn.Module):
     '''带预测窗口的多分类判别模型'''
     def __init__(self, in_channels:int, n_cls, hidden_size=128) -> None:
         super().__init__()

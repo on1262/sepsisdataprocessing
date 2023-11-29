@@ -1,15 +1,15 @@
 import numpy as np
 import tools
 import os
-from os.path import join as osjoin
 from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
-from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight, label_func_min, map_func
-from catboost import Pool, CatBoostClassifier
+from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight, label_func_min, Normalization, map_func
+from sklearn.linear_model import LogisticRegression
+from os.path import join as osjoin
 from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
 
-class ARDSCatboostRegressionAnalyzer:
+class ArdsLogisticRegAnalyzer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
@@ -31,6 +31,7 @@ class ARDSCatboostRegressionAnalyzer:
             label_generator=LabelGenerator_cls(
                 centers=self.params['centers']
             ),
+            norm=Normalization(self.dataset.norm_dict, self.dataset.total_keys),
             label_func=label_func_min,
             target_idx=self.target_idx,
             limit_idx=[],
@@ -39,26 +40,20 @@ class ARDSCatboostRegressionAnalyzer:
         feature_names = [self.dataset.fea_label(idx) for idx in generator.avail_idx]
         print(f'Available features: {feature_names}')
         # step 2: train and predict
-        for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()):
-            train_result = generator(self.dataset.data[train_index, :, :], self.dataset.seqs_len[train_index])
+        for fold_idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()):
+            reg_train_index = np.concatenate([train_index, valid_index], axis=0) # lineat regression do not need validation
+            train_result = generator(self.dataset.data[reg_train_index, :, :], self.dataset.seqs_len[reg_train_index])
             X_train, Y_train = train_result['data'], train_result['label']
-
-            valid_result = generator(self.dataset.data[valid_index, :, :], self.dataset.seqs_len[valid_index])
-            X_valid, Y_valid = valid_result['data'], valid_result['label']
 
             test_result = generator(self.dataset.data[test_index, :, :], self.dataset.seqs_len[test_index])
             X_test, Y_test = test_result['data'], test_result['label']
 
-            model = CatBoostClassifier(
-                iterations=self.params['iterations'],
-                learning_rate=self.params['learning_rate'],
-                loss_function=self.params['loss_function'],
-                class_weights=cal_label_weight(len(self.params['centers']), Y_train)
-            )
-            pool_train = Pool(X_train, Y_train.argmax(axis=-1))
-            pool_valid = Pool(X_valid, Y_valid.argmax(axis=-1))
+            class_weight = cal_label_weight(len(self.params['centers']), Y_train)
+            class_weight = {idx:class_weight[idx] for idx in len(class_weight)}
+            logger.info(f'class weight: {class_weight}')
             
-            model.fit(pool_train, eval_set=pool_valid)
+            model = LogisticRegression(max_iter=self.params['max_iter'], multi_class='multinomial', class_weight=class_weight)
+            model.fit(X_train, np.argmax(Y_train, axis=-1))
 
             Y_test_pred = model.predict_proba(X_test)
             metric_4cls.add_prediction(Y_test_pred, Y_test) # 去掉mask外的数据

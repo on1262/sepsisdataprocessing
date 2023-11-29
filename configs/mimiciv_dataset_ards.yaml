@@ -34,11 +34,11 @@ validation_proportion: 0.15 # use 0.15*80% samples for validation
 compress_cache: True # compress cache file to speed up loading 
 
 version:
-    explore_version:
+    ards@origin:
         fill_missvalue: none # do not fill miss value in feature explore status
         feature_limit: []
         forbidden_feas: []
-    original_version:
+    ards@filled:
         fill_missvalue: avg
         feature_limit: []
         forbidden_feas: [Weight, BMI, Height (Inches), '225677', '220545', '226730', '226531', Weight (Lbs), '227467', '220339', '227443', '220587', 'dod']

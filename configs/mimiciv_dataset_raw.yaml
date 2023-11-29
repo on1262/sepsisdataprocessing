@@ -33,7 +33,7 @@ k-fold: 5
 validation_proportion: 0.15 # use 0.15*80% samples for validation
 compress_cache: True # compress cache file to speed up loading 
 version:
-    raw_version:
+    raw@version:
         fill_missvalue: none # do not fill miss value in feature explore status
         feature_limit: []
         forbidden_feas: []

@@ -32,24 +32,24 @@ class DichotomyMetric:
             pred: (batch,)  gt: (batch,)
             gt取值是0/1, pred取值是一个概率
         '''
-        assert(len(pred.shape)==1 and len(gt.shape)==1)
+        assert(len(pred.shape)==1 and len(gt.shape)==1 and pred.shape[0]==gt.shape[0])
         self.data.append(np.stack((pred.copy(), gt.copy()), axis=1)) # -> (batch, 2)
         self.is_calculated = False # 更新状态
 
     def _cal_single_point(self, Y_gt, Y_pred, thres):
         tp = np.sum(Y_pred[Y_gt > 0.5] > thres)
         fp = np.sum(Y_pred[Y_gt < 0.5] > thres)
-        fn = np.sum(Y_pred[Y_gt > 0.5] < thres)
-        tn = np.sum(Y_pred[Y_gt < 0.5] < thres)
+        fn = np.sum(Y_pred[Y_gt > 0.5] <= thres)
+        tn = np.sum(Y_pred[Y_gt < 0.5] <= thres)
         return {
             'tp': tp, 'fp':fp, 
             'tn': tn, 'fn':fn,
-            'tpr':tp/(tp+fn+self.eps), 'fpr':fp/(fp+tn+self.eps), 
-            'acc':(tp+tn)/(tp+fp+tn+fn+self.eps),
-            'recall':tp/(tp+fn+self.eps), 
-            'spec':tn/(tn+fp+self.eps), 
-            'prec': tp/(tp+fp+self.eps),
-            'f1': 2*(tp/(tp+fp+self.eps))*(tp/(tp+fn+self.eps)) / (tp/(tp+fp+self.eps) + tp/(tp+fn+self.eps)),
+            'tpr':tp/(tp+fn), 'fpr':fp/(fp+tn), 
+            'acc':(tp+tn)/(tp+fp+tn+fn),
+            'recall':tp/(tp+fn), 
+            'spec':tn/(tn+fp), 
+            'prec': tp/(tp+fp) if tp + fp > 0 else 1,
+            'f1': 2*(tp/(tp+fp))*(tp/(tp+fn)) / (tp/(tp+fp) + tp/(tp+fn)) if tp + fp > 0 else 2*tp/(2*tp+fn),
             'thres':thres
         }
     
@@ -68,7 +68,7 @@ class DichotomyMetric:
                 thres.append(next_thres)
         # add threshold for calculate recall-precision
         thres = np.asarray(sorted(np.unique(thres + [0.01, 0.02, 0.04, 0.08, 0.16, 0.99, 0.98, 0.96, 0.92, 0.84])))
-        thres = thres[np.logical_and(thres >= self.eps, thres <= 1.0 - self.eps)] # prec = nan when thres=1
+        # thres = thres[np.logical_and(thres >= self.eps, thres <= 1.0 - self.eps)] # prec = nan when thres=1
         self.n_thres = len(thres)
         self.thres = thres
     

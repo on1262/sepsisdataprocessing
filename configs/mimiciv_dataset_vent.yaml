@@ -34,8 +34,15 @@ validation_proportion: 0.15 # use X*80% samples for validation
 compress_cache: True # compress cache file to speed up loading, it will slow down cache dumping
 
 version:
-    vent_version:
+    vent@origin:
         fill_missvalue: none
+        feature_limit: []
+        forbidden_feas: [
+            Weight, BMI, Height (Inches), '225677', '220545', '226730', '226531', Weight (Lbs), '227467', '220339', '227443', '220587', 'dod',
+            ventilation_start, ventilation_end, ventilation_num, hosp_expire
+        ]
+    vent@filled:
+        fill_missvalue: avg
         feature_limit: []
         forbidden_feas: [
             Weight, BMI, Height (Inches), '225677', '220545', '226730', '226531', Weight (Lbs), '227467', '220339', '227443', '220587', 'dod',

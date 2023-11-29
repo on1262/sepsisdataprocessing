@@ -23,13 +23,13 @@ cross_validation:
 
 dataset_report:
     dataset_name: vent # ['ards', 'raw', 'vent']
-    dataset_version: vent_version
+    dataset_version: vent@origin
     basic: true
     dynamic_dist: false
     static_dist: false
 
 ards_feature_explore:
-    dataset_version: explore_version
+    dataset_version: ards@origin
     plot_admission_dist: true
     plot_chart_vis:
         enabled: true
@@ -55,7 +55,7 @@ ards_feature_explore:
     feature_count: true
 
 raw_feature_explore:
-    dataset_version: raw_version
+    dataset_version: raw@version
     plot_admission_dist: true
     plot_chart_vis:
         enabled: true
@@ -80,7 +80,7 @@ raw_feature_explore:
     correlation: true
 
 vent_feature_explore:
-    dataset_version: vent_version
+    dataset_version: vent@origin
     correlation:
         enabled: true
         target: vent_status
@@ -91,7 +91,7 @@ vent_feature_explore:
         n_plot: 10
     
 ards_catboost_dynamic:
-    dataset_version: original_version
+    dataset_version: ards@origin
     window: 18
     soft_label: false
     smoothing_band: 50
@@ -101,44 +101,65 @@ ards_catboost_dynamic:
     learning_rate: 0.03
     centers: [50, 150, 250, 350]
     class_names: [Severe, Moderate, Mild, No_ARDS]
-    feature_limit: [gender, '223830', '224690', age, '220277', '220224', '223835', PF_ratio]
+    feature_limit: []
     forbidden_feas: []
 
+ards_lstm:
+    dataset_version: ards@filled
+    window: 16
+    device: 'cuda:1'
+    centers: [50, 150, 250, 350]
+    class_names: [Severe, Moderate, Mild, No_ARDS]
+    hidden_size: 128
+    batch_size: 2048
+    epoch: 100
+    lr: 0.001
+
 ards_nearest_4cls:
-    dataset_version: original_version
+    dataset_version: ards@origin
     window: 16
     soft_label: false
     centers: [50, 150, 250, 350]
     class_names: [Severe, Moderate, Mild, No_ARDS]
     smoothing_band: 50
 
-vent_nearest_3cls:
-    dataset_version: vent_version
+ards_logistic_reg:
+    dataset_version: ards@filled
     window: 16
+    centers: [50, 150, 250, 350]
+    class_names: [Severe, Moderate, Mild, No_ARDS]
+    max_iter: 1000
+
+vent_nearest_3cls:
+    dataset_version: vent@origin
+    window: 8
     centers: [0, 1]
     class_names: ['no_vent', 'use_vent']
 
 vent_catboost_dynamic:
-    dataset_version: vent_version
-    window: 16
+    dataset_version: vent@origin
+    window: 8
     loss_function: MultiClass
     iterations: 400
     depth: 5
     learning_rate: 0.03
     centers: [0, 1]
     class_names: ['no_vent', 'use_vent']
-    feature_limit: []
-    forbidden_feas: []
+
+vent_logistic_reg:
+    dataset_version: vent@filled
+    window: 8
+    centers: [0, 1]
+    class_names: ['no_vent', 'use_vent']
+    max_iter: 1000
 
 vent_lstm:
-    dataset_version: vent_version
-    window: 16
+    dataset_version: vent@filled
+    window: 8
     device: 'cuda:1'
     centers: [0, 1]
     class_names: ['no_vent', 'use_vent']
-    feature_limit: []
-    forbidden_feas: []
     hidden_size: 128
     batch_size: 2048
-    epoch: 5
+    epoch: 100
     lr: 0.001

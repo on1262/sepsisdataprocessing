@@ -3,9 +3,9 @@ import tools
 import os
 from tools import logger as logger
 from .container import DataContainer
-from tools.data import DynamicDataGenerator, LabelGenerator_cls, vent_label_func, unroll
-from datasets.derived_vent_dataset import MIMICIV_Vent_Dataset
-from models.vent_lstm_model import VentLSTMModel
+from tools.data import DynamicDataGenerator, LabelGenerator_cls, label_func_min, unroll, map_func
+from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
+from models.ards_lstm_model import ArdsLSTMModel
 from torch.utils.data.dataloader import DataLoader
 import os
 from os.path import join as osjoin
@@ -13,8 +13,8 @@ import torch
 from tools.data import Collect_Fn
 from tools.logging import SummaryWriter
 
-class VentLSTMTrainer():
-    def __init__(self, params:dict, dataset:MIMICIV_Vent_Dataset, generator:DynamicDataGenerator) -> None:
+class ArdsLSTMTrainer():
+    def __init__(self, params:dict, dataset:MIMICIV_ARDS_Dataset, generator:DynamicDataGenerator) -> None:
         self.params = params
         self.dataset = dataset
         self.generator = generator
@@ -31,7 +31,7 @@ class VentLSTMTrainer():
             'model': self.model
         }, save_path)
 
-    def cal_label_weight(self, phase:str, dataset:MIMICIV_Vent_Dataset, generator:DynamicDataGenerator):
+    def cal_label_weight(self, phase:str, dataset:MIMICIV_ARDS_Dataset, generator:DynamicDataGenerator):
         dataset.mode(phase)
         result = None
         dl = DataLoader(dataset=dataset, batch_size=2000, shuffle=False, collate_fn=Collect_Fn)
@@ -49,7 +49,7 @@ class VentLSTMTrainer():
     def train(self, fold_idx:int, summary_writer:SummaryWriter, cache_dir:str):
         self.record = {}
         # create model
-        self.model = VentLSTMModel(
+        self.model = ArdsLSTMModel(
             in_channels=len(self.generator.avail_idx),
             n_cls=len(self.params['centers']),
             hidden_size=self.params['hidden_size']
@@ -105,21 +105,22 @@ class VentLSTMTrainer():
         }
         
 
-class VentLSTMAnalyzer:
+class ArdsLSTMAnalyzer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
-        self.dataset = MIMICIV_Vent_Dataset()
+        self.dataset = MIMICIV_ARDS_Dataset()
         self.dataset.load_version(params['dataset_version'])
         self.model_name = self.params['analyzer_name']
-        self.target_idx = self.dataset.idx_dict['vent_status']
+        self.target_idx = self.dataset.idx_dict['PF_ratio']
 
     def run(self):
         # step 1: init variables
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
 
-        metric_2cls = tools.DichotomyMetric()
+        metric_2cls = [tools.DichotomyMetric() for _ in range(len(self.params['class_names']))]
+        metric_4cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
 
         generator = DynamicDataGenerator(
             window_points=self.params['window'],
@@ -127,18 +128,17 @@ class VentLSTMAnalyzer:
             label_generator=LabelGenerator_cls(
                 centers=self.params['centers']
             ),
-            label_func=vent_label_func, # predict most severe ventilation in each bin
+            label_func=label_func_min,
             target_idx=self.target_idx,
             limit_idx=[],
-            forbidden_idx=[self.dataset.idx_dict[id] for id in ['vent_status']]
+            forbidden_idx=[]
         )
         feature_names = [self.dataset.fea_label(idx) for idx in generator.avail_idx]
         print(f'Available features: {feature_names}')
-        
         summary_writer = SummaryWriter()
         # step 2: train and predict
         for fold_idx, _ in enumerate(self.dataset.enumerate_kf()):
-            trainer = VentLSTMTrainer(params=self.params, dataset=self.dataset, generator=generator)
+            trainer = ArdsLSTMTrainer(params=self.params, dataset=self.dataset, generator=generator)
             cache_dir = osjoin(out_dir, f'fold_{fold_idx}')
             tools.reinit_dir(cache_dir, build=True)
             trainer.train(fold_idx=fold_idx, summary_writer=summary_writer, cache_dir=cache_dir)
@@ -146,14 +146,17 @@ class VentLSTMAnalyzer:
             out_dict['Y_pred'] = unroll(out_dict['Y_pred'],  out_dict['mask'])
             out_dict['Y_gt'] = unroll(out_dict['Y_gt'], out_dict['mask'])
             
-            metric_2cls.add_prediction(out_dict['Y_pred'][:, 1], out_dict['Y_gt'][:, 1])
+            metric_4cls.add_prediction(out_dict['Y_pred'], out_dict['Y_gt']) # 去掉mask外的数据
+            for idx, map_dict in zip([0,1,2,3], [{0:0,1:1,2:1,3:1}, {0:0,1:1,2:0,3:0}, {0:0,1:0,2:1,3:0}, {0:0,1:0,2:0,3:1}]): # TODO 这里写错了
+                metric_2cls[idx].add_prediction(map_func(out_dict['Y_pred'], map_dict)[:, 1], map_func(out_dict['Y_gt'], map_dict)[:, 1])
         
-        metric_2cls.plot_curve(curve_type='roc', title=f'ROC for ventilation', save_path=osjoin(out_dir, f'vent_roc.png'))
-        metric_2cls.plot_curve(curve_type='prc', title=f'PRC for ventilation', save_path=osjoin(out_dir, f'vent_prc.png'))
-
+        metric_4cls.confusion_matrix(comment=self.model_name)
+        for idx in range(4):
+            metric_2cls[idx].plot_curve(curve_type='roc', title=f'ROC for {self.params["class_names"][idx]}', save_path=osjoin(out_dir, f'roc_cls_{idx}.png'))
+        
         for phase in ['train', 'valid']:
             summary_writer.plot(tags=[f'{fold}_epoch_{phase}_loss' for fold in range(5)], 
-                            k_fold=True, log_y=True, title=f'{phase} loss for vent LSTM', out_path=osjoin(out_dir, f'{phase}_loss.png'))
+                            k_fold=True, log_y=True, title=f'{phase} loss for ards LSTM', out_path=osjoin(out_dir, f'{phase}_loss.png'))
         with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
             print('Overall performance:', file=fp)
-            metric_2cls.write_result(fp)
+            metric_4cls.write_result(fp)

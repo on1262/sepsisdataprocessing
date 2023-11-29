@@ -35,7 +35,7 @@ class DataGenerator():
         if len(limit_idx) == 0:
             self._avail_idx = [idx for idx in range(n_fea) if idx not in forbidden_idx]
         else:
-            self._avail_idx = [idx for idx in range(n_fea) if idx in limit_idx and idx not in forbidden_idx]
+            self._avail_idx = [idx for idx in range(n_fea) if (idx in limit_idx) and (idx not in forbidden_idx)]
 
     @property
     def avail_idx(self):

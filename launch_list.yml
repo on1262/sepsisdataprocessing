@@ -5,11 +5,14 @@ analyzer_params:
   # - ards_nearest_4cls
   # - ards_catboost_dynamic
   # - ards_feature_explore
+  # - ards_lstm
+  # - ards_logistic_reg
 
-  # - vent_catboost_dynamic
+  - vent_catboost_dynamic
   # - vent_feature_explore
   # - vent_nearest_3cls
-  - vent_lstm
+  # - vent_lstm
+  # - vent_logistic_reg
   
   # - cross_validation
   # - raw_feature_explore
