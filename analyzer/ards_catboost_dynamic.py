@@ -51,7 +51,7 @@ class ARDSCatboostRegressionAnalyzer:
                 iterations=self.params['iterations'],
                 learning_rate=self.params['learning_rate'],
                 loss_function=self.params['loss_function'],
-                class_weights=cal_label_weight(4, Y_train)
+                class_weights=cal_label_weight(len(self.params['centers']), Y_train)
             )
             pool_train = Pool(X_train, Y_train.argmax(axis=-1))
             pool_valid = Pool(X_valid, Y_valid.argmax(axis=-1))
@@ -65,7 +65,7 @@ class ARDSCatboostRegressionAnalyzer:
         
         metric_3cls.confusion_matrix(comment=self.model_name)
         for idx in range(4):
-            metric_2cls[idx].plot_roc(f'ROC for {self.params["class_names"][idx]}', save_path=osjoin(out_dir, f'roc_cls_{idx}.png'))
+            metric_2cls[idx].plot_curve(curve_type='roc', title=f'ROC for {self.params["class_names"][idx]}', save_path=osjoin(out_dir, f'roc_cls_{idx}.png'))
         
         with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
             print('Overall performance:', file=fp)

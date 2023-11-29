@@ -63,7 +63,7 @@ class VentNearest3ClsAnalyzer:
             )
         
         metric_3cls.confusion_matrix(comment=self.model_name)
-        metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
+        metric_2cls.plot_curve(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
         
         with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
             print('Overall performance:', file=fp)

@@ -21,10 +21,14 @@ def label_func_max(pred_window:np.ndarray, pred_window_mask:np.ndarray):
     assert(pred_window.shape == pred_window_mask.shape)
     invalid_flag = pred_window.min() - 1
     pred_window = pred_window * pred_window_mask + invalid_flag * np.logical_not(pred_window_mask)
-    label = np.min(pred_window, axis=1)
+    label = np.max(pred_window, axis=1)
     sequence_mask = label != invalid_flag
     return sequence_mask, label
 
+def vent_label_func(pred_window:np.ndarray, pred_window_mask:np.ndarray):
+    sequence_mask, label = label_func_max(pred_window, pred_window_mask)
+    label = np.clip(label, -1, 1) # 1,2 -> 1
+    return sequence_mask, label
 
 class DataGenerator():
     def __init__(self, n_fea, limit_idx=[], forbidden_idx=[]) -> None:

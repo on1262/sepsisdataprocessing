@@ -3,7 +3,7 @@ import tools
 import os
 from tools import logger as logger
 from .container import DataContainer
-from tools.data import DynamicDataGenerator, LabelGenerator_cls, label_func_max, map_func
+from tools.data import DynamicDataGenerator, LabelGenerator_cls, vent_label_func, unroll
 from datasets.derived_vent_dataset import MIMICIV_Vent_Dataset
 from models.vent_lstm_model import VentLSTMModel
 from torch.utils.data.dataloader import DataLoader
@@ -12,7 +12,6 @@ from os.path import join as osjoin
 import torch
 from tools.data import Collect_Fn
 from tools.logging import SummaryWriter
-
 
 class VentLSTMTrainer():
     def __init__(self, params:dict, dataset:MIMICIV_Vent_Dataset, generator:DynamicDataGenerator) -> None:
@@ -35,9 +34,9 @@ class VentLSTMTrainer():
     def cal_label_weight(self, phase:str, dataset:MIMICIV_Vent_Dataset, generator:DynamicDataGenerator):
         dataset.mode(phase)
         result = None
-        dl = DataLoader(dataset=self.dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
+        dl = DataLoader(dataset=dataset, batch_size=1, shuffle=False, collate_fn=Collect_Fn)
         for batch in dl:
-            data_dict = self.generator(batch['data'], batch['length'])
+            data_dict = generator(batch['data'], batch['length'])
             mask = tools.make_mask((batch['data'].shape[0], batch['data'].shape[2]), batch['length']).flatten()
             Y_gt:np.ndarray = data_dict['label']
             if result is None:
@@ -45,12 +44,12 @@ class VentLSTMTrainer():
             else:
                 result += np.sum(Y_gt[0, mask, :], axis=0)
         result = 1 / result
-        result = result / result.sum()
+        result = result / result.min()
         logger.info(f'Label weight: {result}')
         return result
 
 
-    def train(self, summary_writer:SummaryWriter, cache_dir:str):
+    def train(self, fold_idx:int, summary_writer:SummaryWriter, cache_dir:str):
         self.record = {}
         # create model
         self.model = VentLSTMModel(
@@ -59,6 +58,7 @@ class VentLSTMTrainer():
             hidden_size=self.params['hidden_size']
         ).to(self.params['device']) # TODO add sample weight
         self.opt = torch.optim.Adam(self.model.parameters(), lr=self.params['lr'])
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.opt, self.params['epoch'], eta_min=self.params['lr']*0.1)
         train_cls_weight = self.cal_label_weight('train', self.dataset, self.generator)
         self.criterion = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.as_tensor(train_cls_weight, device=self.params['device']))
         for epoch in range(self.params['epoch']):
@@ -79,8 +79,9 @@ class VentLSTMTrainer():
                         self.opt.zero_grad()
                         loss.backward()
                         self.opt.step()
-                    self.record[f'epoch_{phase}_loss'] += loss.detach().cpu().item() * batch['data'].shape[0] / len(self.dataset)
+                    self.record[f'{fold_idx}_epoch_{phase}_loss'] += loss.detach().cpu().item() * batch['data'].shape[0] / len(self.dataset)
                 summary_writer.add_scalar(f'{phase}_loss', self.record[f'epoch_{phase}_loss'], global_step=epoch)
+            self.scheduler.step()
             if (not 'best_valid_loss' in self.record) or (self.record['epoch_valid_loss'] < self.record['best_valid_loss']):
                 self.record['best_valid_loss'] = self.record['epoch_valid_loss']
                 logger.info(f'Save model at epoch {epoch}, valid loss={self.record["epoch_valid_loss"]}')
@@ -120,9 +121,8 @@ class VentLSTMAnalyzer:
         # step 1: init variables
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
-        # metric_2cls = tools.DichotomyMetric()
-        metric_3cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
-        metric_2cls = [tools.DichotomyMetric() for _ in range(3)]
+
+        metric_2cls = tools.DichotomyMetric()
 
         generator = DynamicDataGenerator(
             window_points=self.params['window'],
@@ -130,7 +130,7 @@ class VentLSTMAnalyzer:
             label_generator=LabelGenerator_cls(
                 centers=self.params['centers']
             ),
-            label_func=label_func_max, # predict most severe ventilation in each bin
+            label_func=vent_label_func, # predict most severe ventilation in each bin
             target_idx=self.target_idx,
             limit_idx=[],
             forbidden_idx=[self.dataset.idx_dict[id] for id in ['hosp_expire', 'vent_status']]
@@ -141,19 +141,19 @@ class VentLSTMAnalyzer:
             trainer = VentLSTMTrainer(params=self.params, dataset=self.dataset, generator=generator)
             cache_dir = osjoin(out_dir, f'fold_{fold_idx}')
             tools.reinit_dir(cache_dir, build=True)
-            trainer.train(summary_writer=summary_writer, cache_dir=cache_dir)
+            trainer.train(fold_idx=fold_idx, summary_writer=summary_writer, cache_dir=cache_dir)
             out_dict = trainer.predict()
+            out_dict['Y_pred'] = unroll(out_dict['Y_pred'],  out_dict['mask'])
+            out_dict['Y_gt'] = unroll(out_dict['Y_gt'], out_dict['mask'])
             
-            metric_3cls.add_prediction(out_dict['Y_pred'], out_dict['Y_gt'], out_dict['mask'])
-            for idx, map_dict in zip([0,1,2], [{0:0,1:1,2:1}, {0:0,1:1,2:0}, {0:0,1:0,2:1}]): # TODO 这里写错了
-                metric_2cls[idx].add_prediction(map_func(out_dict['Y_pred'], map_dict)[:, 1], map_func(out_dict['Y_gt'], map_dict)[:, 1])
-            # metric_2cls.add_prediction(map_func(Y_pred)[..., 1].flatten(), map_func(Y_test)[..., 1].flatten())
+            metric_2cls.add_prediction(out_dict['Y_pred'][:, 1], out_dict['Y_gt'][:, 1])
         
-        metric_3cls.confusion_matrix(comment=self.model_name)
-        for idx in range(3):
-            metric_2cls[idx].plot_roc(f'ROC for {self.params["class_names"][idx]}', save_path=osjoin(out_dir, f'roc_cls_{idx}.png'))
-        summary_writer.plot(tags=['train_loss'], k_fold=True, log_y=True, title='Train loss for vent LSTM', out_path=osjoin(out_dir, 'train_loss.png'))
-        summary_writer.plot(tags=['valid_loss'], k_fold=True, log_y=True, title='Valid loss for vent LSTM', out_path=osjoin(out_dir, 'valid_loss.png'))
+        metric_2cls.plot_curve(curve_type='roc', title=f'ROC for ventilation', save_path=osjoin(out_dir, f'vent_roc.png'))
+        metric_2cls.plot_curve(curve_type='prc', title=f'PRC for ventilation', save_path=osjoin(out_dir, f'vent_prc.png'))
+
+        for phase in ['train', 'valid']:
+            summary_writer.plot(tags=[f'{fold}_{phase}_loss' for fold in range(5)], 
+                            k_fold=True, log_y=True, title=f'{phase} loss for vent LSTM', out_path=osjoin(out_dir, f'{phase}_loss.png'))
         with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
             print('Overall performance:', file=fp)
-            metric_3cls.write_result(fp)
+            metric_2cls.write_result(fp)

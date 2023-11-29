@@ -63,7 +63,7 @@ class ArdsNearest4ClsAnalyzer:
             metric_2cls.add_prediction(map_func(Y_pred)[..., 1].flatten()[Y_mask], map_func(Y_gt)[..., 1].flatten()[Y_mask])
         
         metric_4cls.confusion_matrix(comment=self.model_name)
-        metric_2cls.plot_roc(title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
+        metric_2cls.plot_curve(curve_type='roc', title=f'{self.model_name} model ROC (4->2 cls)', save_path=os.path.join(out_dir, f'{self.model_name}_ROC.png'))
         
         with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
             print('Overall performance:', file=fp)

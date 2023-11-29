@@ -4,7 +4,7 @@ import os
 from tqdm import tqdm
 from tools import logger as logger
 from .container import DataContainer
-from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight, label_func_max, map_func
+from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight, vent_label_func
 from catboost import Pool, CatBoostClassifier
 from os.path import join as osjoin
 from datasets.derived_vent_dataset import MIMICIV_Vent_Dataset
@@ -23,15 +23,14 @@ class VentCatboostDynamicAnalyzer:
         out_dir = os.path.join(self.paths['out_dir'], self.model_name)
         tools.reinit_dir(out_dir, build=True)
         # metric_2cls = tools.DichotomyMetric()
-        metric_3cls = tools.MultiClassMetric(class_names=self.params['class_names'], out_dir=out_dir)
-        metric_2cls = [tools.DichotomyMetric() for _ in range(3)]
+        metric_2cls = tools.DichotomyMetric()
         generator = SliceDataGenerator(
             window_points=self.params['window'],
             n_fea=len(self.dataset.total_keys),
             label_generator=LabelGenerator_cls(
                 centers=self.params['centers']
             ),
-            label_func=label_func_max,
+            label_func=vent_label_func,
             target_idx=self.target_idx,
             limit_idx=[],
             forbidden_idx=[self.dataset.idx_dict[id] for id in ['hosp_expire', 'vent_status']]
@@ -48,7 +47,7 @@ class VentCatboostDynamicAnalyzer:
             test_result = generator(self.dataset.data[test_index, :, :], self.dataset.seqs_len[test_index])
             X_test, Y_test = test_result['data'], test_result['label']
 
-            label_weight = cal_label_weight(3, Y_train)
+            label_weight = cal_label_weight(len(self.params['centers']), Y_train)
             logger.info(f'label weight: {label_weight}')
             
             model = CatBoostClassifier(
@@ -63,14 +62,11 @@ class VentCatboostDynamicAnalyzer:
             model.fit(pool_train, eval_set=pool_valid)
 
             Y_test_pred = model.predict_proba(X_test)
-            metric_3cls.add_prediction(Y_test_pred, Y_test) # 去掉mask外的数据
-            for idx, map_dict in zip([0,1,2], [{0:0,1:1,2:1}, {0:0,1:1,2:0}, {0:0,1:0,2:1}]): # TODO 这里写错了
-                metric_2cls[idx].add_prediction(map_func(Y_test_pred, map_dict)[:, 1], map_func(Y_test, map_dict)[:, 1])
+            metric_2cls.add_prediction(Y_test_pred[:, 1], Y_test[:, 1])
         
-        metric_3cls.confusion_matrix(comment=self.model_name)
-        for idx in range(3):
-            metric_2cls[idx].plot_roc(f'ROC for {self.params["class_names"][idx]}', save_path=osjoin(out_dir, f'roc_cls_{idx}.png'))
-        
+        metric_2cls.plot_curve(curve_type='roc', title=f'ROC for ventilation', save_path=osjoin(out_dir, f'vent_roc.png'))
+        metric_2cls.plot_curve(curve_type='prc', title=f'PRC for ventilation', save_path=osjoin(out_dir, f'vent_prc.png'))
+
         with open(os.path.join(out_dir, 'result.txt'), 'w') as fp:
             print('Overall performance:', file=fp)
-            metric_3cls.write_result(fp)
+            metric_2cls.write_result(fp)
