@@ -1,0 +1,58 @@
+---
+## configs for mimic-iv-core
+
+data_linkage:
+    ed: True # link mimic-iv-ED dataset
+    hosp: True
+    icu: True
+
+category_to_numeric:
+    insurance: { Medicare: 1, Medicaid: 2, Other: 0, Default: 0}
+    language: {ENGLISH: 1, Default: 0}
+    marital_status: {WIDOWED: 1, SINGLE: 2, MARRIED: 3, DIVORCED: 4, Default: 0}
+    race: {WHITE: 1, Default: 0}
+    careunit: {'Emergency Department': 1, 'Medicine': 2, 'Emergency Department Observation': 3, 'Default': 0}
+
+remove_rule:
+    pass1:
+        duration_minmax: [4, 96]
+    pass2:
+        # gradually eliminate invalid cols/rows in several iterations
+        # the last value in each list is an approximation of final missrate threshold
+        max_col_missrate: [0.95, 0.9, 0.8, 0.8]
+        max_subject_missrate: [0.95, 0.9, 0.8, 0.5]
+        adm_select_strategy: default # default always select the first available admission. Another option: random
+
+generate_table:
+    align_target: [] # no target: pipeline will use the start time of nearest valid feature
+    default_missing_value: -1
+    calculate_bin: avg # how to calculate multiple data points in a discrete bin: avg=use average value, latest: use last value
+    delta_t_hour: 1.0
+
+k-fold: 5
+validation_proportion: 0.15 # use X*80% samples for validation
+compress_cache: True # compress cache file to speed up loading, it will slow down cache dumping
+
+version:
+    vent_version:
+        fill_missvalue: none
+        feature_limit: []
+        forbidden_feas: [
+            Weight, BMI, Height (Inches), '225677', '220545', '226730', '226531', Weight (Lbs), '227467', '220339', '227443', '220587', 'dod',
+            ventilation_start, ventilation_end, ventilation_num, hosp_expire
+        ]
+
+value_clip: {}
+
+## configs for mimic-iv-vent
+
+# 0: no ventilation, 1: non-invasive, 2:invasive
+ventilation_to_numeric: {
+    SupplementalOxygen: 1,
+    HFNC: 1,
+    NonInvasiveVent: 1,
+    InvasiveVent: 2,
+    Tracheostomy: 2
+}
+    
+    

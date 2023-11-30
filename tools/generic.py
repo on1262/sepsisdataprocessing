@@ -7,7 +7,7 @@ import pickle
 import os, sys
 import missingno as msno
 import hashlib
-from .colorful_logging import logger
+from .logging import logger
 
 def reinit_dir(write_dir_path=None, build=True):
     '''清除并且重建一个文件夹和其中所有的内容'''

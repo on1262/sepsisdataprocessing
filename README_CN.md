@@ -59,7 +59,7 @@ configs: 每个数据集对应的配置文件
 
 这部分处理对应`dataset specific processing`，在大多数情况下用户不需要修改其中的内容，只需理解大致的处理流程和接口的定义。按照最小封装原则，仅用`@property`区分内部和外部可见属性，用`@abstractmethod`指示哪些方法需要被派生类重写。
 
-**数据存取**：`MIMICIV`的数据处理分为7个阶段（phase），每个阶段处理后的数据会存入cache，在`data/mimic-iv/cache`下（如果是`mimic_raw`，则存储在`data/mimic-iv-raw/cache`下），一旦所有数据处理完毕，每次实例化时仅载入最终结果对应的cache，去除不必要的IO操作，此时会显示`Bare Mode Enabled`。另外，为了节约空间，cache采用lzma算法压缩，压缩耗时会大于pickle直接存储的耗时，但是对读取几乎没有影响，如果需要省去压缩的时间，修改`configs/mimic_dataset/compress_cache`为`False`
+**数据存取**：`MIMICIV`的数据处理分为7个阶段（phase），每个阶段处理后的数据会存入cache，在`data/mimic-iv-XXX/cache`下（例如, 如果是`mimic_raw`，则存储在`data/mimic-iv-raw/cache`下），一旦所有数据处理完毕，每次实例化时仅载入最终结果对应的cache，去除不必要的IO操作，此时会显示`Bare Mode Enabled`。另外，为了节约空间，cache采用lzma算法压缩，压缩耗时会大于pickle直接存储的耗时，但是对读取几乎没有影响，如果需要省去压缩的时间，修改`configs/mimic_dataset/compress_cache`为`False`
 
 **preprocess_phase1**：载入`hosp`, `icu`的item映射表，为`ed`创造对应的映射表，不需要实际读取ED的数据。之后调用`on_extract_subjects`引入需要筛选subject列表和外部数据。
 

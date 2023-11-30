@@ -1,7 +1,5 @@
 import matplotlib.pyplot as plt
-from matplotlib.path import Path
 from matplotlib.colors import Normalize as ColorNorm
-from matplotlib.patches import PathPatch
 import numpy as np
 import seaborn as sns
 import scipy
@@ -13,7 +11,8 @@ from tqdm import tqdm
 import subprocess
 import missingno as msno
 from .generic import reinit_dir, remove_slash
-from .colorful_logging import logger
+from matplotlib.colors import to_rgb
+from .logging import logger
 
 '''
     用于分位数回归的作图, 通过线性插值得到待测点所对应的分位数, 使得数据的分布不会改变出图的色彩多样性
@@ -49,80 +48,6 @@ def simple_plot(data, title='Title', out_path=None):
         plt.savefig(out_path)
     plt.close()
 
-class LossLogger:
-    def __init__(self) -> None:
-        self.data = None
-
-    def add_loss(self, data:dict):
-        '''增加一条独立的model训练记录'''
-        for key in data.keys():
-            assert(isinstance(data[key], np.ndarray))
-            if len(data[key].shape) == 1:
-                data[key] = data[key][None, ...]
-            assert(len(data[key].shape) <= 2)
-        if self.data is None:
-            self.data = data
-        else:
-            for key in data.keys():
-                if key in self.data.keys():
-                    self.data[key] = np.concatenate([self.data[key], data[key]], axis=0)
-
-    def clear(self):
-        self.data = None
-    
-    
-    '''
-        提供单个model的train和valid的loss下降图
-        data: dict
-            'train': [n, epochs] or [epochs]
-            'valid': [n, epochs] or [epochs]
-            'epochs': [epochs]
-        std_bar: bool 是否作标准差(对于n>1)误差区间
-        title: str
-        out_path: str
-    '''
-    def plot(self, data:dict=None, std_bar=False, log_loss=False, title='Title', out_path:str=None):
-        if data is None:
-            data = self.data
-        assert('train' in data.keys() or 'valid' in data.keys())
-        for key in data.keys():
-            assert(isinstance(data[key], np.ndarray))
-        if 'train' in data.keys() and len(data['train'].shape) == 1:
-            data['train'] = data['train'][None, :]
-        
-        if 'valid' in data.keys() and len(data['valid'].shape) == 1:
-            data['valid'] = data['valid'][None, :]
-        n = data['train'].shape[0] if 'train' in data.keys() else data['valid'].shape[0]
-        std_flag = (n > 1) and std_bar
-        epoch_len = data['train'].shape[1] if 'train' in data.keys() else data['valid'].shape[1]
-        if 'epochs' in data.keys():
-            epochs = data['epoch'][:]
-        else:
-            epochs = np.linspace(start=0, stop=epoch_len-1, num=epoch_len)
-
-        # create figure
-        plt.figure(figsize = (round(min(12+epoch_len/50, 15)),6))
-        if 'train' in data.keys():
-            train_data = data['train'] if not log_loss else np.log10(data['train'])
-            train_mean = np.mean(train_data, axis=0)
-            plt.plot(epochs, train_mean, color='C0', label='train loss')
-        if 'valid' in data.keys():
-            valid_data = data['valid'] if not log_loss else np.log10(data['valid'])
-            valid_mean = np.mean(valid_data, axis=0)
-            plt.plot(epochs, valid_mean, color="C1", label='valid loss')
-        plt.title(title)
-        plt.xlabel('Epoch')
-        if log_loss:
-            plt.ylabel('Log Loss')
-        else:
-            plt.ylabel('Loss')
-        plt.legend()
-        # plt.legend(['train_loss', 'valid_loss'] if 'valid' in data.keys() else ['train_loss'])
-        if out_path is None:
-            plt.show()
-        else:
-            plt.savefig(out_path)
-        plt.close()
 
 def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
     '''打印柱状图, 按标签顺序'''
@@ -139,7 +64,7 @@ def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
 
     # Set up the histogram
     fig, ax = plt.subplots(figsize=(12,12)) # Set figure size
-    plt.subplots_adjust(bottom=0.3)
+    plt.subplots_adjust(bottom=0.4, left=0.2, right=0.8)
     ind = np.arange(len(data))
     width = 0.8
     if len(labels) < 20:
@@ -161,6 +86,29 @@ def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
         plt.savefig(out_path)
     plt.close()
 
+def plot_stack_proportion(data:dict[str, tuple], out_path=None):
+    plt.figure(figsize=(25, 10))
+    height = 0.5
+    names = list(data.keys())
+    style = [to_rgb(f'C{idx}') for idx in range(10)]
+    plt.barh(names, [0 for _ in names], height=height)
+    idx = 0
+    for k_idx, (key, (x, label)) in enumerate(data.items()):
+        x_sum = 0
+        for idx in range(len(x)):
+            color = np.asarray(style[k_idx % 10])
+            color = np.clip(color + 0.2 * (idx % 2), 0, 1.0)
+            plt.barh([key], x[idx], left=x_sum, color=tuple(color), height=height)
+            label_wid = len(label[idx])*0.006
+            if x[idx] > label_wid:
+                plt.annotate(label[idx], (x_sum + x[idx]*0.5 - label_wid*0.5, k_idx), fontsize=10)
+            x_sum += x[idx]
+    
+    plt.xlim(left=0, right=1)
+    plt.subplots_adjust(left=0.1, right=0.9)
+    plt.savefig(out_path)
+
+
 def plot_density_matrix(data:np.ndarray, title:str, xlabel:str, ylabel:str, aspect='equal', save_path=None):
     plt.figure(figsize=(10, 10))
     plt.title(title)
@@ -172,7 +120,7 @@ def plot_density_matrix(data:np.ndarray, title:str, xlabel:str, ylabel:str, aspe
     plt.close()
 
 
-def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True, adapt=False, **kwargs):
+def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=True, adapt=False, label=False, **kwargs):
     '''
     从源数据直接打印直方图
     data: shape任意, 每个元素代表一个样本
@@ -187,10 +135,16 @@ def plot_single_dist(data:np.ndarray, data_name:str, save_path=None, discrete=Tr
     mu, sigma = scipy.stats.norm.fit(data)
     if adapt and sigma > 0.01:
         data = data[np.logical_and(data >= mu-3*sigma, data <= mu+3*sigma)]
+    
+    plt.figure(figsize=(8,8))
     ax = sns.histplot(data=data, stat='proportion', discrete=discrete, **kwargs)
     if adapt:
-        ax.set_xlim(left=max(mu-3*sigma, np.min(data)), right=min(mu+3*sigma, np.max(data)))
-
+        if discrete:
+            ax.set_xlim(left=max(mu-3*sigma, np.min(data))-0.5, right=min(mu+3*sigma, np.max(data))+0.5)
+        else:
+            ax.set_xlim(left=max(mu-3*sigma, np.min(data)), right=min(mu+3*sigma, np.max(data)))
+    if label:
+        ax.bar_label(ax.containers[1], fontsize=10, fmt=lambda x:f'{x:.3f}')
     plt.title('Distribution of ' + data_name, fontsize = 13)
     plt.legend(['data', 'Normal dist. ($\mu=$ {:.2f} and $\sigma=$ {:.2f} )'.format(mu, sigma)], loc='best')
     if save_path is None:

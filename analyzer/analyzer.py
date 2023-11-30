@@ -3,26 +3,37 @@ import tools
 import os
 from tools import logger as logger
 from .container import DataContainer
-from .method_catboost_dynamic import CatboostDynamicAnalyzer
-from .feature_explore import FeatureExplorer
-from .method_nearest_cls import BaselineNearest4ClsAnalyzer
-from .cross_validation import CV_Analyzer
-from .feature_explore_raw import FeatureExplorerRaw
+from analyzer.ards_catboost_dynamic import ARDSCatboostRegressionAnalyzer
+from analyzer.dataset_explore.ards_explore import ArdsFeatureExplorer
+from analyzer.ards_nearest_cls import ArdsNearest4ClsAnalyzer
+from analyzer.cross_validation import CV_Analyzer
+from analyzer.dataset_explore.raw_explore import RawFeatureExplorer
+from analyzer.dataset_explore.vent_explore import VentFeatureExplorer
+from analyzer.vent_catboost_dynamic import VentCatboostDynamicAnalyzer
+from analyzer.vent_nearest_cls import VentNearest3ClsAnalyzer
+from analyzer.vent_lstm import VentLSTMAnalyzer
+
 
 
 class Analyzer:
     def __init__(self, params:list) -> None:
         '''
-        params: 启动脚本, 否则需要手动run_sub_analyzer, 可以是None
-        dataset: 数据集
+        params: startup script, otherwise you need to run_sub_analyzer manually, can be None
         '''
         self.container = DataContainer()
         self.analyzer_dict = {
-            'nearest_4cls': BaselineNearest4ClsAnalyzer,
-            'catboost_dynamic': CatboostDynamicAnalyzer,
-            'feature_explore': FeatureExplorer,
+            'ards_nearest_4cls': ArdsNearest4ClsAnalyzer,
+            'ards_catboost_dynamic': ARDSCatboostRegressionAnalyzer,
+            'ards_feature_explore': ArdsFeatureExplorer,
+
+            'vent_feature_explore': VentFeatureExplorer,
+            'vent_catboost_dynamic': VentCatboostDynamicAnalyzer,
+            'vent_nearest_3cls': VentNearest3ClsAnalyzer,
+            'vent_lstm': VentLSTMAnalyzer,
             'cross_validation': CV_Analyzer,
-            'feature_explore_raw': FeatureExplorerRaw
+
+            'raw_feature_explore': RawFeatureExplorer,
+            
         }
         if params is not None:
             for name in params:

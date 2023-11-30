@@ -4,13 +4,12 @@ import tools
 import os
 from tools import logger as logger
 from .container import DataContainer
-from models.utils import SliceDataGenerator, LabelGenerator_4cls
-from .utils import cal_label_weight
+from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight
 from catboost import CatBoostClassifier, Pool
 from os.path import join as osjoin
 from datasets.cv_dataset import CrossValidationDataset
-from datasets.mimic_dataset import MIMICIVDataset
-from datasets.mimic_raw_dataset import MIMICIV_Raw_Dataset
+from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
+from datasets.derived_raw_dataset import MIMICIV_Raw_Dataset
 
 
 
@@ -23,7 +22,7 @@ class CV_Analyzer:
         # copy attribute from container
         self.mimic_raw_dataset = MIMICIV_Raw_Dataset()
         self.mimic_raw_dataset.load_version('raw_version')
-        self.mimic_dataset = MIMICIVDataset()
+        self.mimic_dataset = MIMICIV_ARDS_Dataset()
         self.mimic_dataset.load_version('no_fill_version')
         # prepare mimic-iv data
         self.mimic_data = self.mimic_dataset.data
@@ -42,10 +41,10 @@ class CV_Analyzer:
         self.val_generator = SliceDataGenerator(
             window_points=self.params['window'],
             n_fea=len(self.cv_dataset.total_keys),
-            label_generator=LabelGenerator_4cls(
+            label_generator=LabelGenerator_cls(
                 centers=self.params['centers'],
                 soft_label=False,
-                smoothing_band=self.params['smoothing_band']
+                smooth_band=self.params['smoothing_band']
             ),
             target_idx=self.cv_dataset.total_keys.index('dX_PaO2（mmHg） / FiO2（%）')
         )
@@ -76,10 +75,10 @@ class CV_Analyzer:
         generator = SliceDataGenerator(
             window_points=self.params['window'], 
             n_fea=len(dataset.total_keys),
-            label_generator=LabelGenerator_4cls(
+            label_generator=LabelGenerator_cls(
                 centers=self.params['centers'],
                 soft_label=False,
-                smoothing_band=self.params['smoothing_band']
+                smooth_band=self.params['smoothing_band']
             ),
             target_idx=dataset.idx_dict['PF_ratio'],
             limit_idx=mimic_limit_idx

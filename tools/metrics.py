@@ -3,7 +3,7 @@ import numpy as np
 import os, sys
 from scipy.interpolate import interp1d
 from sklearn.metrics import auc as sk_auc
-from .colorful_logging import logger
+from .logging import logger
 from .plot import plot_confusion_matrix
 from tools import GLOBAL_CONF_LOADER
 import pandas as pd
@@ -203,9 +203,6 @@ class DichotomyMetric:
         return result
 
 class MultiClassMetric:
-    '''
-    多分类指标, 主要是输出混淆矩阵
-    '''
     def __init__(self, class_names:list, out_dir:str) -> None:
         self.records = {'pred':[], 'gt':[]} # 记录格式: (sample, n_cls)
         self.class_names = class_names
@@ -214,9 +211,9 @@ class MultiClassMetric:
 
         # calculate statistics
         self.calculated = False # lazy update
-        self.cm = None
-        self.accs = None
-        self.acc_std = None
+        self.cm = None # [pred, gt]
+        self.recalls = None
+        self.recall_std = None
     
     def update_metrics(self):
         if self.calculated:
@@ -229,10 +226,10 @@ class MultiClassMetric:
         pred_label = np.argmax(pred, axis=1)
         for idx in range(pred.shape[0]):
             self.cm[pred_label[idx]][gt_label[idx]] += 1
-        self.accs = [self.cm[idx, idx] / np.sum(self.cm[:, idx]) for idx in range(self.n_cls)]
+        self.recalls = [self.cm[idx, idx] / np.sum(self.cm[:, idx]) for idx in range(self.n_cls)]
         # 计算acc的std
         k = 5
-        self.acc_std = []
+        self.recall_std = []
         for k_idx in range(k):
             idx_start = round(k_idx * pred.shape[0] / k)
             idx_end = min(round((k_idx + 1) * pred.shape[0] / k), pred.shape[0])
@@ -243,9 +240,9 @@ class MultiClassMetric:
             k_pred_label = np.argmax(k_pred, axis=1)
             for idx in range(k_pred.shape[0]):
                 k_cm[k_pred_label[idx]][k_gt_label[idx]] += 1
-            k_accs = [k_cm[idx, idx] / np.sum(k_cm[:, idx]) for idx in range(self.n_cls)]
-            self.acc_std.append(np.mean(k_accs))
-        self.acc_std = np.std(self.acc_std)
+            k_recall = [k_cm[idx, idx] / np.sum(k_cm[:, idx]) for idx in range(self.n_cls)] 
+            self.recall_std.append(np.mean(k_recall))
+        self.recall_std = np.std(self.recall_std)
 
     def add_prediction(self, _prediction:np.ndarray, _gt:np.ndarray, _mask:np.ndarray=None):
         '''
@@ -283,22 +280,42 @@ class MultiClassMetric:
         plot_confusion_matrix(cm_norm, labels=self.class_names, 
             title='Confusion matrix(norm)', save_path=os.path.join(self.out_dir, 'confusion_matrix(norm).png'))
     
-    def mean_acc(self):
-        self.update_metrics()        
+    def mean_recall(self):
+        self.update_metrics()
         # 平均正确率, 每个类的权重是相等的
-        mean_acc = np.mean(self.accs)
-        return mean_acc
+        mean_recall = np.mean(self.recalls)
+        return mean_recall
     
+    def calculate_other_metrics(self):
+        result = {}
+        self.update_metrics()
+        # accuracy for each class
+        for n in range(self.n_cls):
+            result[f'cls_{n}_recall'] = self.cm[n, n] / np.sum(self.cm[:, n])
+            result[f'cls_{n}_prec'] = self.cm[n, n] / np.sum(self.cm[n, :])
+            other_cls = [i for i in range(self.n_cls) if i != n]
+            result[f'cls_{n}_acc'] = (self.cm[n, n] + np.sum(self.cm[other_cls, :][:, other_cls])) / np.sum(self.cm)
+            result[f'cls_{n}_f1'] = 2*result[f'cls_{n}_prec']*result[f'cls_{n}_recall'] / (result[f'cls_{n}_prec']+result[f'cls_{n}_recall'])
+        
+        result['micro-acc'] = np.diag(self.cm).sum() / (np.sum(self.cm))
+        result['micro-f1'] = result['micro-acc']
+        result['macro-f1'] = np.mean([result[f'cls_{n}_f1'] for n in range(self.n_cls)])
+        return result
+        
+
     def write_result(self, fp=sys.stdout):
         '''输出准确率等信息'''
         print('='*10 + 'Metric 4 classes:'+ '='*10, file=fp)
         self.update_metrics()
         # 平均正确率, 每个类的权重是相等的
-        mean_acc = self.mean_acc()
+        mean_acc = self.mean_recall()
+        other_result = self.calculate_other_metrics()
         for idx, name in enumerate(self.class_names):
-            print(f'{name} accuracy={self.accs[idx]}', file=fp)
+            print(f'{name} recall={self.recalls[idx]}', file=fp)
         print('='*20, file=fp)
-        print(f'Mean accuracy={mean_acc}, std={self.acc_std}', file=fp)
+        print(f'Mean recall={mean_acc}, std={self.recall_std}', file=fp)
+        for key in other_result:
+            print(f'{key} = {other_result[key]}', file=fp)
 
 
 

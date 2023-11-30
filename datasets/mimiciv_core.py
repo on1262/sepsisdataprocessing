@@ -11,9 +11,11 @@ from sklearn.model_selection import KFold
 from abc import abstractmethod
 from datetime import datetime
 from random import choice
-from .mimic_helper import Subject, KFoldIterator, interp
+from .helper import Subject, KFoldIterator, interp
 
-class MIMICIV(Dataset):
+class MIMICIV_Core(Dataset):
+    _name = 'mimic-iv-core'
+
     def __init__(self, dataset_name):
         super().__init__()
         # configs
@@ -45,7 +47,7 @@ class MIMICIV(Dataset):
 
         self._load_data()
 
-        logger.info('MIMICIV inited')
+        logger.info(f'{self.name()} inited')
 
     # read-only access control
     @property
@@ -84,6 +86,10 @@ class MIMICIV(Dataset):
     def subjects(self):
         return self._subjects
 
+    @classmethod
+    def name(cls):
+        return cls._name
+    
     def check_nan(self, x:np.ndarray):
         assert(not np.any(np.isnan(x)))
     
@@ -98,7 +104,7 @@ class MIMICIV(Dataset):
         pkl_paths = [os.path.join(cache_dir, name + suffix) for name in ['1_phase1', '2_phase2', '3_subjects', '4_numeric_subject', '5_norm_dict', '6_table_final']]
         version_files = [os.path.join(cache_dir, f'7_version_{version_name}' + suffix) for version_name in self._loc_conf['version'].keys()] + \
                 [os.path.join(cache_dir, f'7_version_{version_name}.npz') for version_name in self._loc_conf['version'].keys()]
-        bare_mode = np.all([os.path.exists(p) for p in pkl_paths] + [os.path.exists(p) for p in version_files]) # 仅当所有文件都存在时才进行载入加速
+        bare_mode = np.all([os.path.exists(p) for p in pkl_paths] + [os.path.exists(p) for p in version_files]) # speed up IO only when all cache files exist
         
         if bare_mode:
             logger.info('MIMIC-IV: Bare Mode Enabled')
@@ -150,33 +156,32 @@ class MIMICIV(Dataset):
                 'low': row['lownormalvalue'], 
                 'high': row['highnormalvalue']
             }
-            icu_item['label'][row['label']] = icu_item['id'][str(row['itemid'])] # 可以用名字或id查找
+            icu_item['label'][row['label']] = icu_item['id'][str(row['itemid'])]
 
         # 建立ed item的编号映射, 和icu lab_item关联
         ed_item = {'id': {
-            'ED_temperature': {'id': 'ED_temperature', 'link_id':'223761', 'label':'Temperature Fahrenheit'}, 
-            'ED_heartrate': {'id': 'ED_heartrate', 'link_id':'220045', 'label':'Heart Rate'},
-            'ED_resprate': {'id': 'ED_resprate', 'link_id':'220210', 'label':'Respiratory Rate'},
-            'ED_o2sat': {'id': 'ED_o2sat', 'link_id':'220277', 'label':'O2 saturation pulseoxymetry'},
-            'ED_sbp': {'id': 'ED_sbp', 'link_id': None, 'label':'sbp'},
-            'ED_dbp': {'id': 'ED_dbp', 'link_id': None, 'label':'dbp'}
+            'ED_temperature': {'id': 'ED_temperature', 'link_id':'223761', 'label':'(ED) Temperature Fahrenheit'}, 
+            'ED_heartrate': {'id': 'ED_heartrate', 'link_id':'220045', 'label':'(ED) Heart Rate'},
+            'ED_resprate': {'id': 'ED_resprate', 'link_id':'220210', 'label':'(ED) Respiratory Rate'},
+            'ED_o2sat': {'id': 'ED_o2sat', 'link_id':'220277', 'label':'(ED) O2 saturation pulseoxymetry'},
+            'ED_sbp': {'id': 'ED_sbp', 'link_id': None, 'label':'(ED) sbp'},
+            'ED_dbp': {'id': 'ED_dbp', 'link_id': None, 'label':'(ED) dbp'}
         }}
         ed_item['label'] = {val['label']:val for val in ed_item['id'].values()}
 
-        # 抽取符合条件的患者id
-        extract_result = self.on_extract_subjects()
-        # 存储cache
+        subject_set, extra_information = self.on_extract_subjects()
+
         self._hosp_item = hosp_item
         self._icu_item = icu_item
         self._ed_item = ed_item
         self._all_items = {
-            'id': {key:val for d in [icu_item, hosp_item, ed_item] for key, val in d['id'].items()},
-            'label': {key:val for d in [icu_item, hosp_item, ed_item] for key, val in d['label'].items()}
+            'id': {key:val for d in [ed_item, icu_item, hosp_item] for key, val in d['id'].items()},
+            'label': {key:val for d in [ed_item, icu_item, hosp_item] for key, val in d['label'].items()}
         }
-        self._extract_result = extract_result
+        self._extract_result = (subject_set, extra_information)
         with open(pkl_path, 'wb') as fp:
             pickle.dump({
-                'extract_result': extract_result,
+                'extract_result': self._extract_result,
                 'icu_item': icu_item,
                 'hosp_item': self._hosp_item,
                 'ed_item': self._ed_item,
@@ -192,19 +197,20 @@ class MIMICIV(Dataset):
             return
 
         logger.info(f'MIMIC-IV: processing subjects and admissions')
-        # 构建subject
+
+        # construct subject
         patients = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'patients.csv'), encoding='utf-8')
-        for row in tqdm(patients.itertuples(), 'Construct Subjects', total=len(patients)):
+        for row in tqdm(patients.itertuples(), 'Construct Subjects', total=len(patients), miniters=len(patients)//100):
             s_id = row.subject_id
-            if s_id in self._extract_result:
+            if s_id in self._extract_result[0]:
                 subject = Subject(row.subject_id, birth_year=row.anchor_year - row.anchor_age)
-                self._subjects[s_id] = self.on_build_subject(s_id, subject, row, self._extract_result)
+                self._subjects[s_id] = self.on_build_subject(s_id, subject, row, self._extract_result[0], self._extract_result[1])
 
-        logger.info(f'Extract {len(self._subjects)} patients from {len(self._extract_result)} patients in extract_result')
+        logger.info(f'Extract {len(self._subjects)} patients from {len(self._extract_result[0])} patients in extract_result')
 
-        # 加入admission
+        # add admission
         admissions = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'admissions.csv'), encoding='utf-8')
-        for row in tqdm(admissions.itertuples(), 'Extract Admissions', total=len(admissions)):
+        for row in tqdm(admissions.itertuples(), 'Extract Admissions', total=len(admissions), miniters=len(admissions)//100):
             if row.subject_id in self._subjects:
                 self.on_extract_admission(self._subjects[row.subject_id], source='admission', row=row)
 
@@ -213,7 +219,7 @@ class MIMICIV(Dataset):
             ['icu', 'transfer']
         ):
             table = pd.read_csv(path, encoding='utf-8')
-            for row in tqdm(table.itertuples(), desc=f'Extract admission information from {prefix.upper()}', total=len(table)):
+            for row in tqdm(table.itertuples(), desc=f'Extract admission information from {prefix.upper()}', total=len(table), miniters=len(table)//100):
                 s_id = row.subject_id
                 if s_id in self._subjects:
                     self.on_extract_admission(self._subjects[s_id], source=prefix, row=row)
@@ -223,7 +229,7 @@ class MIMICIV(Dataset):
         ymd_convertor = tools.TimeConverter(format="%Y-%m-%d", out_unit='hour')
         table_omr = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'omr.csv'), encoding='utf-8') 
         # omr: [subject_id,chartdate,seq_num,result_name,result_value]
-        for row in tqdm(table_omr.itertuples(), 'Extract patient information from OMR', total=len(table_omr)):
+        for row in tqdm(table_omr.itertuples(), 'Extract patient information from OMR', total=len(table_omr), miniters=len(table_omr)//100):
             s_id = row.subject_id
             if s_id in self._subjects:
                 self._subjects[s_id].append_static(ymd_convertor(row.chartdate), row.result_name, row.result_value)
@@ -243,14 +249,17 @@ class MIMICIV(Dataset):
         ymdhms_converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
 
         # 决定捕捉哪些特征
-        collect_icu_set = set([id for id, row in self._icu_item['id'].items() if self.on_select_feature(id=id, row=row, source='icu')])
-        collect_ed_set = set([id for id in self._ed_item['id'].keys() if self.on_select_feature(id=id, row=None, source='ed')])
-        collect_hosp_set = set([id for id, row in self._hosp_item['id'].items() if self.on_select_feature(id=id, row=row, source='hosp')])
+        collect_icu_set = set([id for id, row in self._icu_item['id'].items() if self.on_select_feature(subject_id=id, row=row, source='icu')])
+        collect_ed_set = set([id for id in self._ed_item['id'].keys() if self.on_select_feature(subject_id=id, row=None, source='ed')])
+        collect_hosp_set = set([id for id, row in self._hosp_item['id'].items() if self.on_select_feature(subject_id=id, row=row, source='hosp')])
         
         if self._loc_conf['data_linkage']['ed']:
             # 采集ED内的数据
-            ed_vitalsign = pd.read_csv(os.path.join(self._mimic_dir, 'ed', 'vitalsign.csv'), encoding='utf-8')
-            for row in tqdm(ed_vitalsign.itertuples(), 'Extract vitalsign from MIMIC-IV-ED', total=len(ed_vitalsign)):
+            ed_vitalsign = pd.read_csv(os.path.join(self._mimic_dir, 'ed', 'vitalsign.csv'), 
+                                       dtype={'subject_id':int, 'charttime':str, 'temperature':str, "heartrate":str ,"resprate":str ,"o2sat":str, 'sbp':str, 'dbp':str, 'rhythm':str, 'pain':str}, 
+                                       encoding='utf-8'
+            )
+            for row in tqdm(ed_vitalsign.itertuples(), 'Extract vitalsign from MIMIC-IV-ED', total=len(ed_vitalsign), miniters=len(ed_vitalsign)//100):
                 s_id = row.subject_id
                 for itemid in ['temperature', 'heartrate', 'resprate', 'o2sat', 'sbp', 'dbp', 'rhythm', 'pain']:
                     if s_id in self._subjects and 'ED_'+itemid in collect_ed_set:
@@ -262,17 +271,20 @@ class MIMICIV(Dataset):
             del ed_vitalsign
 
         if self._loc_conf['data_linkage']['hosp']:
-            total_size = 10000000 * 12 # 大概需要10分钟
+            total_size = 10000000 * 12
             hosp_chunksize = 10000000
             hosp_labevents = pd.read_csv(
                 os.path.join(self._mimic_dir, 'hosp', 'labevents.csv'), encoding='utf-8', chunksize=hosp_chunksize,
                 usecols=['subject_id', 'itemid', 'charttime', 'valuenum'], engine='c',
-                dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':float}
+                dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':str}
             )
-            for chunk_idx, chunk in tqdm(enumerate(hosp_labevents), 'Extract labevent from hosp', total=total_size//hosp_chunksize):
-                chunk = chunk.to_numpy()
-                for row in tqdm(chunk, f'chunk {chunk_idx}'):
-                    s_id, itemid, charttime, valuenum = row
+            for chunk_idx, chunk in tqdm(
+                enumerate(hosp_labevents), 'Extract labevent from hosp', 
+                total=total_size//hosp_chunksize, 
+                miniters=total_size//hosp_chunksize//100
+            ):
+                for row in tqdm(chunk.itertuples(), f'chunk {chunk_idx}', miniters=len(chunk)//10): # NOTE: reserve dtypes for valuenum
+                    s_id, itemid, charttime, valuenum = row.subject_id, row.itemid, row.charttime, row.valuenum
                     if s_id in self._subjects and itemid in collect_hosp_set:
                         charttime = datetime.fromisoformat(charttime).timestamp() / 3600.0 # hour
                         self._subjects[s_id].append_dynamic(charttime=charttime, itemid=itemid, value=valuenum)
@@ -284,13 +296,17 @@ class MIMICIV(Dataset):
             icu_events_chunksize = 10000000
             icu_events = pd.read_csv(os.path.join(self._mimic_dir, 'icu', 'chartevents.csv'), 
                     encoding='utf-8', usecols=['subject_id', 'charttime', 'itemid', 'valuenum'], chunksize=icu_events_chunksize, engine='c',
-                    dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':float}
+                    dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':str}
             )
             
-            for chunk_idx, chunk in tqdm(enumerate(icu_events), 'Extract ICU events', total=total_size // icu_events_chunksize):
-                chunk = chunk.to_numpy()
-                for row in tqdm(chunk, f'chunk {chunk_idx}'):
-                    s_id, charttime, itemid, valuenum = row # 要和文件头保持相同的顺序
+            for chunk_idx, chunk in tqdm(
+                enumerate(icu_events), 
+                'Extract ICU events', 
+                total=total_size // icu_events_chunksize,
+                miniters=total_size // icu_events_chunksize // 100
+            ):
+                for row in tqdm(chunk.itertuples(), f'chunk {chunk_idx}', miniters=len(chunk)//10):
+                    s_id, charttime, itemid, valuenum = row.subject_id, row.charttime, row.itemid, row.valuenum # 要和文件头保持相同的顺序
                     if s_id in self._subjects and itemid in collect_icu_set: # do not double check subject id
                         charttime = datetime.fromisoformat(charttime).timestamp() / 3600.0 # hour
                         self._subjects[s_id].append_dynamic(charttime=charttime, itemid=itemid, value=valuenum)
@@ -308,15 +324,26 @@ class MIMICIV(Dataset):
                 self._subjects = pickle.load(fp)
             logger.info(f'Load numeric subject data from {p_numeric_subject}')
             return
-        
-        for s_id in tqdm(self._subjects, desc='update data'):
-            self._subjects[s_id].update_data()
 
-        invalid_count = 0
-        for s in tqdm(self._subjects.values(), 'Convert to numeric'):
-            invalid_count += self.on_convert_numeric(s)
+        invalid_record = {}
+        for s in tqdm(self._subjects.values(), 'Convert to numeric', miniters=len(self._subjects)//100):
+            r = self.on_convert_numeric(s)
+            for k,v in r.items():
+                if k not in invalid_record:
+                    invalid_record[k] = v
+                else:
+                    invalid_record[k]['count'] += v['count']
+                    if len(invalid_record[k]['examples']) < 5:
+                        invalid_record[k]['examples'] += v['examples']
+        for key in invalid_record:
+            count, examples = invalid_record[key]['count'], invalid_record[key]['examples']
+            logger.debug(f'Invalid: key={key}, count={count}, example={examples}')
+        invalid_count = sum([val['count'] for val in invalid_record.values()])
         logger.warning(f'Convert to numeric: find {invalid_count} invalid values in dynamic data')
         
+        for s_id in tqdm(self._subjects, desc='update data', miniters=len(self._subjects)//100):
+            self._subjects[s_id].update_data()
+
         self._subjects = self.on_select_admissions(rule=self._loc_conf['remove_rule']['pass1'], subjects=self._subjects)
 
         # TODO col_abnormal_rate = {}
@@ -425,39 +452,56 @@ class MIMICIV(Dataset):
         logger.info(f'Detected {len(self._static_keys)} available static features')
 
         default_missvalue = float(self._loc_conf['generate_table']['default_missing_value'])
-        for s_id in tqdm(self._subjects.keys(), desc='Generate aligned table'):
+        calculate_bin = self._loc_conf['generate_table']['calculate_bin']
+        for s_id in tqdm(self._subjects.keys(), desc='Generate aligned table', miniters=len(self._subjects)//100):
             s = self._subjects[s_id]
             adm = s.admissions[0]
             
             t_start, t_end = None, None
-            for id in self._loc_conf['generate_table']['align_target']:
-                t_start = max(adm[id][0,1], t_start) if t_start is not None else adm[id][0,1]
-                t_end = min(adm[id][-1,1], t_end) if t_end is not None else adm[id][-1,1]
+            if len(self._loc_conf['generate_table']['align_target']) == 0: # no target
+                for id in adm.keys():
+                    t_start = min(adm[id][0,1], t_start) if t_start is not None else adm[id][0,1]
+                    t_end = max(adm[id][-1,1], t_end) if t_end is not None else adm[id][-1,1]
+                t_start, t_end = max(t_start, 0), min(t_end, adm.dischtime - adm.admittime)
+            else:
+                for id in self._loc_conf['generate_table']['align_target']:
+                    t_start = max(adm[id][0,1], t_start) if t_start is not None else adm[id][0,1]
+                    t_end = min(adm[id][-1,1], t_end) if t_end is not None else adm[id][-1,1]
             t_step = self._loc_conf['generate_table']['delta_t_hour']
+            if t_end - t_start < t_step: # NOTE: e.g. all features are in the same tick. We can not made prediction in such cases.
+                continue
+
             ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
             # 生成表本身, 缺失值为-1
             individual_table = np.ones((len(collect_keys), ticks.shape[0]), dtype=np.float32) * default_missvalue
 
-            # 填充static data, 找最近的点
-            static_data = np.ones((len(self._static_keys))) * default_missvalue
-            for idx, key in enumerate(self._static_keys):
-                if key in self._subjects[s_id].static_data:
-                    value = self._subjects[s_id].nearest_static(key, t_start)
-                    static_data[idx] = self.on_build_table(self._subjects[s_id], key, value, t_start)
-            individual_table[:len(self._static_keys), :] = static_data[:, None]
+            # fulfill static data by nearest value
+            static_data = np.ones((len(self._static_keys), ticks.shape[0])) * default_missvalue
+            for t_idx, t in enumerate(ticks):
+                for idx, key in enumerate(self._static_keys):
+                    if key in self._subjects[s_id].static_data:
+                        value = self._subjects[s_id].latest_static(key, t+adm.admittime)
+                        if value is not None:
+                            static_data[idx, t_idx] = self.on_build_table(self._subjects[s_id], key, value, t_start)
+                
+            individual_table[:len(self._static_keys), :] = static_data
             self.check_nan(individual_table)
-            # 插值dynamic data
+            # interpolation of dynamic data
             for idx, key in enumerate(self._dynamic_keys):
-                if key in adm.keys():
+                if key in adm.keys() and key not in ['careunit']:
                     self.check_nan(adm[key])
                     if adm[key].shape[0] == 1:
                         individual_table[len(self._static_keys)+idx, :] = adm[key][0, 0]
                     else:
-                        individual_table[len(self._static_keys)+idx, :] = interp(fx=adm[key][:, 1], fy=adm[key][:, 0], x=ticks)
+                        individual_table[len(self._static_keys)+idx, :] = interp(
+                            fx=adm[key][:, 1], fy=adm[key][:, 0], x_start=ticks[0], 
+                            interval=t_step, n_bins=len(ticks), missing=default_missvalue, fill_bin=calculate_bin
+                        )
                     self.check_nan(individual_table)
             if individual_table.size > 0:
                 self.check_nan(individual_table)
                 tables.append(individual_table)
+        logger.info(f'Generated {len(tables)} individual tables')
         result = self.on_feature_engineering(tables, self._norm_dict, self._static_keys, self._dynamic_keys) # 特征工程
         tables, self._norm_dict, static_keys, dynamic_keys = result['tables'], result['norm_dict'], result['static_keys'], result['dynamic_keys']
         for table in tables:
@@ -468,7 +512,7 @@ class MIMICIV(Dataset):
         # step2: 时间轴长度对齐, 生成seqs_len, 进行某些特征的最后处理
         seqs_len = np.asarray([d.shape[1] for d in tables], dtype=np.int64)
         max_len = max(seqs_len)
-        for t_idx in tqdm(range(len(tables)), desc='Padding tables'):
+        for t_idx in tqdm(range(len(tables)), desc='Padding tables', miniters=len(tables)//100):
             if seqs_len[t_idx] == max_len:
                 continue
             padding = -np.ones((len(total_keys), max_len - seqs_len[t_idx]))
@@ -662,9 +706,9 @@ class MIMICIV(Dataset):
     
     def __getitem__(self, idx):
         assert(self._version_name is not None)
-        if self._data_index is None:
+        if self._data_index is None: # 'all' mode
             return {'data': self._data[idx, :, :], 'length': self._seqs_len[idx]}
-        else:
+        else:# k-fold mode
             return {'data': self._data[self._data_index[idx], :, :], 'length': self._seqs_len[self._data_index[idx]]}
 
     def __len__(self):
@@ -674,7 +718,7 @@ class MIMICIV(Dataset):
             return len(self._data_index)
 
     @abstractmethod
-    def on_extract_subjects(self) -> dict:
+    def on_extract_subjects(self) -> tuple:
         pass
 
     @abstractmethod
@@ -686,11 +730,11 @@ class MIMICIV(Dataset):
         pass
 
     @abstractmethod
-    def on_build_subject(self, id:int, subject:Subject, row:dict, _extract_result:dict) -> Subject:
+    def on_build_subject(self, subject_id:int, subject:Subject, row:dict, patient_set:set, extra_data:object) -> Subject:
         pass
 
     @abstractmethod
-    def on_select_feature(self, id:int, row:dict, source:str=['icu', 'hosp', 'ed']):
+    def on_select_feature(self, subject_id:int, row:dict, source:str=['icu', 'hosp', 'ed']):
         pass
 
     @abstractmethod
@@ -709,4 +753,4 @@ class MIMICIV(Dataset):
     def on_build_table(self, key, value, t_start):
         pass
 
-    
+
