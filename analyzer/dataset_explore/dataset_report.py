@@ -11,7 +11,6 @@ import yaml
 from datasets.derived_vent_dataset import MIMICIV_Vent_Dataset
 from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
 from datasets.derived_raw_dataset import MIMICIV_Raw_Dataset
-from datasets.mimiciv_core import MIMICIV_Core
 
 class DatasetReport():
     def __init__(self, params:dict, container:DataContainer) -> None:
@@ -33,24 +32,24 @@ class DatasetReport():
     
     def run(self):
         out_dir = os.path.join(self.paths['out_dir'], f'report_{self.params["dataset_name"]}')
-        out_path = os.path.join(self.dataset._paths['out_dir'], f'dataset_report_{self.params["dataset_version"]}.txt')
-        dist_dir = os.path.join(self.dataset._paths['out_dir'], 'report_dist')
-        dir_names = ['points', 'duration', 'frequency', 'value', 'static_value']
-        tools.reinit_dir(dist_dir, build=True)
+        tools.reinit_dir(out_dir, build=True)
+        report_path = osjoin(out_dir, f'dataset_report_{self.params["dataset_version"]}.txt')
+        dist_dir = os.path.join(out_dir, 'dist')
+        dir_names = ['points', 'duration', 'frequency', 'dynamic_value', 'static_value']
         for name in dir_names:
-            os.makedirs(os.path.join(dist_dir, name))
+            os.makedirs(os.path.join(dist_dir, name), exist_ok=True)
         logger.info('generating dataset report')
         write_lines = []
-        if params['basic']:
+        if self.params['basic']:
             # basic statistics
             write_lines.append('='*10 + 'basic' + '='*10)
-            write_lines.append(f'Version: {self.params['dataset_version']}')
+            write_lines.append(f'Version: {self.params["dataset_version"]}')
             write_lines.append(f'Static keys: {len(self.dataset.static_keys)}')
             write_lines.append(f'Dynamic keys: {len(self.dataset.dynamic_keys)}')
             write_lines.append(f'Subjects:{len(self.dataset)}')
             write_lines.append(f'Static feature: {[self.dataset.fea_label(id) for id in self.dataset.static_keys]}')
             write_lines.append(f'Dynamic feature: {[self.dataset.fea_label(id) for id in self.dataset.dynamic_keys]}')
-        if params['dynamic_dist']:
+        if self.params['dynamic_dist']:
             # dynamic feature explore
             for id in tqdm(self.dataset.dynamic_keys, 'plot dynamic dist'):
                 fea_name = self.dataset.fea_label(id)
@@ -87,14 +86,14 @@ class DatasetReport():
                 if np.size(arr_avg_value) != 0:
                     write_lines.append(f'average avg value per admission: {arr_avg_value.mean():.3f}')
                 # plot distribution
-                titles = ['points', 'duration', 'frequency', 'value', 'from_sepsis']
+                titles = ['points', 'duration', 'frequency', 'dynamic_value']
                 arrs = [arr_points, arr_duration, arr_frequency, arr_avg_value, arr_from_sepsis_time]
                 for title, arr in zip(titles, arrs):
                     if np.size(arr) != 0:
                         tools.plot_single_dist(
                             data=arr, data_name=f'{title}: {fea_name}', 
                             save_path=os.path.join(dist_dir, title, save_name + '.png'), discrete=False, adapt=True, bins=50)
-        if params['static_dist']:
+        if self.params['static_dist']:
             # static feature explore
             for id in tqdm(self.dataset.static_keys, 'generate static feature report'):
                 fea_name = self.dataset.fea_label(id)
@@ -110,7 +109,7 @@ class DatasetReport():
                     data=static_data, data_name=f'{fea_name}', 
                     save_path=os.path.join(dist_dir, 'static_value', save_name + '.png'), discrete=False, adapt=True, bins=50)
         # write report
-        with open(out_path, 'w', encoding='utf-8') as fp:
+        with open(report_path, 'w', encoding='utf-8') as fp:
             for line in write_lines:
                 fp.write(line + '\n')
-        logger.info(f'Report generated at {out_path}')
+        logger.info(f'Report generated at {report_path}')

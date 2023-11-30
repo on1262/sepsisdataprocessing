@@ -79,13 +79,13 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
 
         return subject
     
-    def on_extract_admission(self, subject:Subject, source:str, row:namedtuple):
+    def on_extract_admission(self, subject:Subject, source:str, row:namedtuple) -> bool:
         ymdhms_converter = tools.TimeConverter(format="%Y-%m-%d %H:%M:%S", out_unit='hour')
         if source == 'admission':
             admittime = ymdhms_converter(row.admittime)
             dischtime = ymdhms_converter(row.dischtime)
             if dischtime <= admittime:
-                return
+                return False
             adm = Admission(
                 unique_id=int(row.hadm_id*1e8),
                 admittime=admittime, 
@@ -100,8 +100,9 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
                 subject.append_static(admittime, name, discretizer[name][val] if val in discretizer[name] else discretizer[name]['Default'])
             
             subject.append_static(admittime, 'hosp_expire', row.hospital_expire_flag)
+            return True
         elif source == 'icu':
-            pass
+            return False
         elif source == 'transfer':
             if not np.isnan(row.hadm_id):
                 adm = subject.find_admission(int(row.hadm_id*1e8))
@@ -109,8 +110,10 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
                     discretizer = self._loc_conf['category_to_numeric']
                     careunit = discretizer['careunit'][row.careunit] if row.careunit in discretizer['careunit'] else discretizer['careunit']['Default']
                     subject.append_static(ymdhms_converter(row.intime), 'careunit', careunit) # it is not exactly in [admittime, dischtime]
+            return False
         else:
             assert(0)
+            return False
     
     def on_select_feature(self, subject_id:int, row:dict, source:str=['icu', 'hosp', 'ed']):
         if source == 'icu':
@@ -189,22 +192,28 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
         return {'all': {'count': invalid_count, 'examples':[]}}
 
     def on_select_admissions(self, rule:dict, subjects:dict[int, Subject]):
-        invalid_record = {'duration_positive':0, 'duration_limit':0, 'empty':0}
+        invalid_record = {'age':0, 'duration_positive':0, 'duration_limit':0, 'empty':0}
         for s_id in subjects:
-            if not subjects[s_id].empty():
-                retain_adms = []
-                for idx, adm in enumerate(subjects[s_id].admissions):
-                    dur = adm.dischtime - adm.admittime
-                    if dur <= 0:
-                        invalid_record['duration_positive'] += 1
+            if subjects[s_id].empty():
+                invalid_record['empty'] += 1
+                continue
+            retain_adms = []
+            for idx, adm in enumerate(subjects[s_id].admissions):
+                age = int(adm.admittime / (24*365) + 1970 - subjects[s_id].birth_year)
+                if age <= 18:
+                    invalid_record['age'] += 1
+                    continue
+                dur = adm.dischtime - adm.admittime
+                if dur <= 0:
+                    invalid_record['duration_positive'] += 1
+                    continue
+                if 'duration_minmax' in rule:
+                    dur_min, dur_max = rule['duration_minmax']
+                    if not (dur > dur_min and dur < dur_max):
+                        invalid_record['duration_limit'] += 1
                         continue
-                    if 'duration_minmax' in rule:
-                        dur_min, dur_max = rule['duration_minmax']
-                        if not (dur > dur_min and dur < dur_max):
-                            invalid_record['duration_limit'] += 1
-                            continue
-                    retain_adms.append(idx)
-                subjects[s_id].admissions = [subjects[s_id].admissions[idx] for idx in retain_adms]
+                retain_adms.append(idx)
+            subjects[s_id].admissions = [subjects[s_id].admissions[idx] for idx in retain_adms]
        
         pop_list = []
         for s_id in subjects:
@@ -215,7 +224,8 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
         for s_id in pop_list:
             subjects.pop(s_id)
         
-        # logger.info(f'invalid admissions without target id: {invalid_record["target"]}')
+        logger.info(f'invalid admissions with age <= 19: {invalid_record["age"]}')
+        logger.info(f'invalid subjects with no admission (empty): {invalid_record["empty"]}')
         logger.info(f'invalid admissions without positive duration: {invalid_record["duration_positive"]}')
         logger.info(f'invalid admissions exceed duration limitation: {invalid_record["duration_limit"]}')
         logger.info(f'remove_pass1: Deleted {len(pop_list)}/{len(pop_list)+len(subjects)} subjects')
@@ -256,7 +266,6 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
             logger.info(f'remove_pass2: iter[{n_iter}] Retain {len(self._subjects)}/{len(pop_subject_ids)+len(self._subjects)} subjects')
             logger.info(f'remove_pass2: iter[{n_iter}] Retain {len(post_dynamic_keys)+len(post_static_keys)}/{len(col_missrate)} keys in selected admission')
             n_iter += 1
-        logger.info(f'remove_pass2: selected {len(self._subjects)} subjects')
         return subjects
 
     def on_build_table(self, subject:Subject, key, value, t_start):

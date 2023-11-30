@@ -10,6 +10,7 @@ from analyzer.ards_nearest_cls import ArdsNearest4ClsAnalyzer
 from analyzer.ards_logistic_regression import ArdsLogisticRegAnalyzer
 
 from analyzer.cross_validation import CV_Analyzer
+from analyzer.dataset_explore.dataset_report import DatasetReport
 
 from analyzer.dataset_explore.ards_explore import ArdsFeatureExplorer
 from analyzer.dataset_explore.raw_explore import RawFeatureExplorer
@@ -42,6 +43,7 @@ class Analyzer:
             'vent_logistic_reg': VentLogisticRegAnalyzer,
 
             'cross_validation': CV_Analyzer,
+            'dataset_report': DatasetReport,
             'raw_feature_explore': RawFeatureExplorer,
             
         }

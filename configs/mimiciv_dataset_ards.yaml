@@ -31,7 +31,8 @@ generate_table:
 
 k-fold: 5
 validation_proportion: 0.15 # use 0.15*80% samples for validation
-compress_cache: True # compress cache file to speed up loading 
+compress_cache: True # compress cache file to speed up loading
+compress_suffix: .gz # zip: fast compression but slow loading. xz: slow compression but fast loading (smaller file size)
 
 version:
     ards@origin:

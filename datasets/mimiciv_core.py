@@ -13,7 +13,8 @@ from datetime import datetime
 from random import choice
 from .helper import Subject, KFoldIterator, interp
 
-class MIMICIV_Core(Dataset):
+_item:dict = None
+        self._icu_item:dict = Noneclass MIMICIV_Core(Dataset):
     _name = 'mimic-iv-core'
 
     def __init__(self, dataset_name):
@@ -25,8 +26,7 @@ class MIMICIV_Core(Dataset):
         
         # variable for phase 1
         self._extract_result:dict = None
-        self._hosp_item:dict = None
-        self._icu_item:dict = None
+        self._hosp
         # variable for phase 2
         self._subjects:dict[int, Subject] = {} # subject_id:Subject
         # preload data
@@ -99,7 +99,8 @@ class MIMICIV_Core(Dataset):
         cache_dir = self._paths['cache_dir']
         if not os.path.exists(cache_dir):
             tools.reinit_dir(cache_dir, build=True)
-        suffix = '.pkl' if not self._loc_conf['compress_cache'] else '.xz' # use lzma compression
+        suffix = '.pkl' if not self._loc_conf['compress_cache'] else self._loc_conf['compress_suffix']
+        
         # create pkl names for each phase
         pkl_paths = [os.path.join(cache_dir, name + suffix) for name in ['1_phase1', '2_phase2', '3_subjects', '4_numeric_subject', '5_norm_dict', '6_table_final']]
         version_files = [os.path.join(cache_dir, f'7_version_{version_name}' + suffix) for version_name in self._loc_conf['version'].keys()] + \
@@ -112,10 +113,15 @@ class MIMICIV_Core(Dataset):
             self._preprocess_phase5(pkl_paths[4], load_subject_only=True) # load subjects
         else:
             logger.info('MIMIC-IV: Bare Mode Disabled')
+            log_file = os.path.join(self._paths['out_dir'], 'build_dataset.log')
+            logger.info('Start logging to ' + log_file)
+            tools.reinit_dir(self._paths['out_dir'], build=True) # add logger
+            log_id = logger.add(log_file)
             for phase in range(1, 7):
                 func = getattr(self, '_preprocess_phase' + str(phase))
                 func(pkl_paths[phase-1])
             self._preprocess_phase7()
+            logger.remove(log_id)
  
     def _preprocess_phase1(self, pkl_path=None, dim_files_only=False):
         if os.path.exists(pkl_path):
@@ -170,6 +176,7 @@ class MIMICIV_Core(Dataset):
         ed_item['label'] = {val['label']:val for val in ed_item['id'].values()}
 
         subject_set, extra_information = self.on_extract_subjects()
+        logger.info(f'on_extract_subjects: Loaded {len(subject_set)} unique patients')
 
         self._hosp_item = hosp_item
         self._icu_item = icu_item
@@ -210,9 +217,12 @@ class MIMICIV_Core(Dataset):
 
         # add admission
         admissions = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'admissions.csv'), encoding='utf-8')
+        _total_adm, _extract_adm = 0, 0
         for row in tqdm(admissions.itertuples(), 'Extract Admissions', total=len(admissions), miniters=len(admissions)//100):
             if row.subject_id in self._subjects:
-                self.on_extract_admission(self._subjects[row.subject_id], source='admission', row=row)
+                _total_adm += 1
+                _extract_adm += self.on_extract_admission(self._subjects[row.subject_id], source='admission', row=row)
+        logger.info(f'Extracted {_extract_adm} admissions from {_total_adm} admissions which belongs to {len(self._subjects)} subjects')
 
         for path, prefix in zip(
             [os.path.join(self._mimic_dir, 'icu', 'icustays.csv'), os.path.join(self._mimic_dir, 'hosp', 'transfers.csv')], 
@@ -344,9 +354,10 @@ class MIMICIV_Core(Dataset):
         for s_id in tqdm(self._subjects, desc='update data', miniters=len(self._subjects)//100):
             self._subjects[s_id].update_data()
 
-        self._subjects = self.on_select_admissions(rule=self._loc_conf['remove_rule']['pass1'], subjects=self._subjects)
+        self._subjects:dict = self.on_select_admissions(rule=self._loc_conf['remove_rule']['pass1'], subjects=self._subjects)
 
-        # TODO col_abnormal_rate = {}
+        logger.info(f'Retain {len(self._subjects)} subjects and {np.sum([len(s.admissions) for s in self._subjects.values()])} admissions')
+
         value_clip = self._loc_conf['value_clip']
         for id_or_label in value_clip:
             id, label = self.fea_id(id_or_label), self.fea_label(id_or_label)
@@ -365,7 +376,7 @@ class MIMICIV_Core(Dataset):
     
     def _verify_subjects(self, subjects:dict[int, Subject]):
         try:
-            for s in tqdm(subjects.values(), 'verify subjects'):
+            for s in tqdm(subjects.values(), 'verify subjects', miniters=len(subjects)//100):
                 adm = s.admissions[0]
                 for v in s.static_data.values():
                     self.check_nan(v)
@@ -389,8 +400,10 @@ class MIMICIV_Core(Dataset):
 
         # 进一步筛选admission
         self._subjects = self.on_remove_missing_data(self._loc_conf['remove_rule']['pass2'], self._subjects)
+        logger.info(f'After remove missing data, retain {len(self._subjects)} subjects and {np.sum([len(s.admissions) for s in self._subjects.values()])} admissions')
+
         self._verify_subjects(self.subjects)
-        # 在pass2后，能够确定最终的static/dyanmic features
+        # determine static/dyanmic features
         self._static_keys = sorted(np.unique([k for s in self._subjects.values() for k in s.static_data.keys()]))
         self._dynamic_keys = sorted(np.unique([k for s in self._subjects.values() for k in s.admissions[0].keys()]))
 
@@ -453,6 +466,7 @@ class MIMICIV_Core(Dataset):
 
         default_missvalue = float(self._loc_conf['generate_table']['default_missing_value'])
         calculate_bin = self._loc_conf['generate_table']['calculate_bin']
+        invalid_record = {'length':0}
         for s_id in tqdm(self._subjects.keys(), desc='Generate aligned table', miniters=len(self._subjects)//100):
             s = self._subjects[s_id]
             adm = s.admissions[0]
@@ -469,6 +483,7 @@ class MIMICIV_Core(Dataset):
                     t_end = min(adm[id][-1,1], t_end) if t_end is not None else adm[id][-1,1]
             t_step = self._loc_conf['generate_table']['delta_t_hour']
             if t_end - t_start < t_step: # NOTE: e.g. all features are in the same tick. We can not made prediction in such cases.
+                invalid_record['length'] += 1
                 continue
 
             ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
@@ -501,7 +516,8 @@ class MIMICIV_Core(Dataset):
             if individual_table.size > 0:
                 self.check_nan(individual_table)
                 tables.append(individual_table)
-        logger.info(f'Generated {len(tables)} individual tables')
+        logger.info(f'Invalid table due to too short timestep: {invalid_record["length"]}')
+        logger.info(f'Generated {len(tables)} individual tables. ')
         result = self.on_feature_engineering(tables, self._norm_dict, self._static_keys, self._dynamic_keys) # 特征工程
         tables, self._norm_dict, static_keys, dynamic_keys = result['tables'], result['norm_dict'], result['static_keys'], result['dynamic_keys']
         for table in tables:
@@ -540,7 +556,8 @@ class MIMICIV_Core(Dataset):
         '''
         assert(self._idx_dict is not None)
         version_conf:dict = self._loc_conf['version']
-        suffix = '.pkl' if not self._loc_conf['compress_cache'] else '.xz' # use lzma compression
+        suffix = '.pkl' if not self._loc_conf['compress_cache'] else self._loc_conf['compress_suffix']
+
         for version_name in version_conf.keys():
             logger.info(f'Preprocessing version: {version_name}')
             # 检查是否存在pkl
@@ -676,7 +693,7 @@ class MIMICIV_Core(Dataset):
             return
         else:
             self._version_name = version_name
-        suffix = '.pkl' if not self._loc_conf['compress_cache'] else '.xz'
+        suffix = '.pkl' if not self._loc_conf['compress_cache'] else self._loc_conf['compress_suffix']
         p_version = os.path.join(self._paths['cache_dir'], f'7_version_{version_name}'+suffix)
         p_version_data = os.path.join(self._paths['cache_dir'], f'7_version_{version_name}.npz')
         assert(os.path.exists(p_version))
