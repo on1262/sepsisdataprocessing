@@ -4,7 +4,7 @@
 analyzer_params:
   # - ards_nearest_4cls
   # - ards_catboost_dynamic
-  - ards_feature_explore
+  # - ards_feature_explore
   # - ards_lstm
   # - ards_logistic_reg
 
@@ -16,4 +16,4 @@ analyzer_params:
   # - vent_logistic_reg
   
   # - cross_validation
-  - raw_feature_explore
+  # - raw_feature_explore

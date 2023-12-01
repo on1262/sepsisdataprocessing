@@ -5,10 +5,10 @@ import numpy as np
 import pandas as pd
 
 def plot_missrate_comp():
-    processed_row = tools.load_pkl('outputs/feature_explore[explore_version]/row_missrate.pkl').flatten()
-    processed_col = tools.load_pkl('outputs/feature_explore[explore_version]/col_missrate.pkl').flatten()
-    raw_row = tools.load_pkl('outputs/feature_explore[raw_version]/row_missrate.pkl').flatten()
-    raw_col = tools.load_pkl('outputs/feature_explore[raw_version]/col_missrate.pkl').flatten()
+    processed_row = tools.load_pkl('outputs/feature_explore[ards@origin]/row_missrate.pkl').flatten()
+    processed_col = tools.load_pkl('outputs/feature_explore[ards@origin]/col_missrate.pkl').flatten()
+    raw_row = tools.load_pkl('outputs/feature_explore[raw@version]/row_missrate.pkl').flatten()
+    raw_col = tools.load_pkl('outputs/feature_explore[raw@version]/col_missrate.pkl').flatten()
     row_data = np.concatenate([processed_row, raw_row], axis=0)
     col_data = np.concatenate([processed_col, raw_col], axis=0)
     for data, label in zip([row_data, col_data], ['row', 'col']):

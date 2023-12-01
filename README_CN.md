@@ -13,22 +13,24 @@ MIMIC-IV数据集广泛地用于各种医学研究，然而原始数据集并没
 
 analyzer: 分析模块
 1. analyzer: 按照序列运行anlayzer，添加新analyzer时需要注册
-2. container: 存放与模型无关的参数
-3. feature_explore: 生成数据集的探查报告，可配置生成参数
-3. utils: 工具方法
+2. analyzer_utils: 工具类
+3. container: 存放与模型无关的参数
+4. 其他文件: 每个文件代表一个独立的analyzer, 执行特定的下游任务
 
 configs: 每个数据集对应的配置文件
 1. global_config: 配置路径
-2. mimiciv_dataset: 对应`dataset/mimic_dataset.py`，默认配置用于提取Sepsis患者中包含氧合指数的患者以及对应的特征，推荐在该数据集上修改下游任务
-3. mimiciv_dataset_raw: 对应`dataset/mimic_raw_dataset.py`，提供一个最小化处理的数据集，用于数据探查
+2. mimiciv_dataset_XXX: 对应`dataset/derived_XXX_dataset.py`，是我们对不同pipeline的示例实现。默认提供三个实现，ards/vent/raw
+   1. ards：进行ARDS时序预测的四分类任务
+   2. vent：进行ventilation时序预测的二分类任务
+   3. raw：用于数据集可视化
 
-其他模块：
+其他模块:
 - data: 数据集文件
 - datasets: 数据集抽象, 包括数据提取/清洗/重新组织
 - models: 模型
 - outputs: 输出文件夹
 - tools: 工具类
-- main.py: 主入口
+- main.py: **主入口**
 - launch_list.yml 配置程序启动后运行哪些analyzer
 
 ## 部署方法
@@ -38,7 +40,7 @@ configs: 每个数据集对应的配置文件
 2. 第一步中关于pytorch的cuda版本问题参考下一小节
 3. 将MIMIC-IV数据集解压至`data/mimic-iv`文件夹下, 子文件夹有`hosp`,`icu`等
 4. （可选）如果有MIMIC-IV-ED文件，解压至`ed`子文件夹
-5. 将生成的`sepsis3.csv`存放在`data/mimic-iv/sepsis_result`下
+5. 将生成的`sepsis3.csv`存放在`data/mimic-iv/sepsis_result`下，ventilation类似（需要MIMIC-Code的结果才能生成标签）
 6. 运行`python -u main.py`，一次生成
 
 安装Pytorch对应的CUDA版本：
@@ -54,6 +56,12 @@ configs: 每个数据集对应的配置文件
 我们将对数据集的处理分为两个部分：`dataset specific processing`和`model & task specific processing`，前者主要处理数据集的内部结构产生的问题，后者对不同的下游任务会进行不同的处理。`datasets/mimiciv/MIMICIV`中的代码用于`dataset specific processing`，在一般情况下用户不需要修改其中的内容。
 
 `model & task specific processing`由派生类和`data_generator`共同完成。`datasets/mimic_dataset/MIMICIVDataset`是`MIMICIV`的派生类，通过重写以`on_`开头的抽象方法来实现对不同下游任务的灵活处理，用户需要对这部代码进行修改，用于满足不同的研究需求。`MIMICIV`的每个派生类都在`config`中拥有独立的配置文件，通过修改配置文件，可以在不修改代码的情况下调整`MIMICIV`的行为。
+
+### 一些重要概念
+
+`static/dynamic features`: 实际上我们不区分静态和动态特征，静态特征也可以有采样时刻。它们的区别主要是，前者可以不属于任何一个admission，按照时间被分配到某个admission中，而且时间轴不会减去起始时间。后者一定属于某个admission，在采集的时候就确定好了。
+
+`derived_XXX_dataset/dataset_version`：一个下游任务从`MIMIC_Core`中派生得到derived_XXX_dataset，derived_XXX_dataset可以有多个datset_version
 
 ### MIMICIV处理流程介绍
 
@@ -111,7 +119,9 @@ configs: 每个数据集对应的配置文件
 2. source: str, 取值可以是(`admission`, `icu`, `transfer`) 分别提取自 `hosp/admission.csv`, `icu/icu_stays.csv`, `hosp/transfers.csv`
 3. row: namedtuple,  从`source`对应的表中提取的行
 
-没有输出，通过`Subject.append_static()`和`Admission.append_dyanmic()`添加数据
+输出：bool，是否添加了admission，用于统计
+
+通过`Subject.append_static()`和`Admission.append_dyanmic()`添加数据
 
 **on_select_feature**
 

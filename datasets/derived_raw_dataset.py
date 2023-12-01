@@ -90,9 +90,12 @@ class MIMICIV_Raw_Dataset(MIMICIV_Core):
         invalid_record = {}
         def add_invalid(key, value):
             if key not in invalid_record:
-                invalid_record[key] = {'count':1, 'examples':[value]}
+                invalid_record[key] = {'count':1, 'examples':set()}
+                invalid_record[key]['examples'].add(value)
             else:
                 invalid_record[key]['count'] += 1
+                if len(invalid_record[key]['examples']) < 5:
+                    invalid_record[key]['examples'].add(value)
         
         static_data = s.static_data
         pop_keys = []

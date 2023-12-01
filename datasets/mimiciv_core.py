@@ -13,8 +13,7 @@ from datetime import datetime
 from random import choice
 from .helper import Subject, KFoldIterator, interp
 
-_item:dict = None
-        self._icu_item:dict = Noneclass MIMICIV_Core(Dataset):
+class MIMICIV_Core(Dataset):
     _name = 'mimic-iv-core'
 
     def __init__(self, dataset_name):
@@ -26,7 +25,8 @@ _item:dict = None
         
         # variable for phase 1
         self._extract_result:dict = None
-        self._hosp
+        self._hosp_item:dict = None
+        self._icu_item:dict = None
         # variable for phase 2
         self._subjects:dict[int, Subject] = {} # subject_id:Subject
         # preload data
@@ -285,8 +285,9 @@ _item:dict = None
             hosp_chunksize = 10000000
             hosp_labevents = pd.read_csv(
                 os.path.join(self._mimic_dir, 'hosp', 'labevents.csv'), encoding='utf-8', chunksize=hosp_chunksize,
-                usecols=['subject_id', 'itemid', 'charttime', 'valuenum'], engine='c',
-                dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':str}
+                usecols=['subject_id', 'itemid', 'charttime', 'value', 'valuenum'], engine='c',
+                dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'value':str, 'valuenum':str},
+                na_filter=False
             )
             for chunk_idx, chunk in tqdm(
                 enumerate(hosp_labevents), 'Extract labevent from hosp', 
@@ -294,9 +295,11 @@ _item:dict = None
                 miniters=total_size//hosp_chunksize//100
             ):
                 for row in tqdm(chunk.itertuples(), f'chunk {chunk_idx}', miniters=len(chunk)//10): # NOTE: reserve dtypes for valuenum
-                    s_id, itemid, charttime, valuenum = row.subject_id, row.itemid, row.charttime, row.valuenum
+                    s_id, itemid, charttime, valuenum, value = row.subject_id, row.itemid, row.charttime, row.valuenum, row.value
                     if s_id in self._subjects and itemid in collect_hosp_set:
                         charttime = datetime.fromisoformat(charttime).timestamp() / 3600.0 # hour
+                        if valuenum == '':
+                            valuenum = value
                         self._subjects[s_id].append_dynamic(charttime=charttime, itemid=itemid, value=valuenum)
             del hosp_labevents
 
@@ -344,7 +347,7 @@ _item:dict = None
                 else:
                     invalid_record[k]['count'] += v['count']
                     if len(invalid_record[k]['examples']) < 5:
-                        invalid_record[k]['examples'] += v['examples']
+                        invalid_record[k]['examples'].union(v['examples'])
         for key in invalid_record:
             count, examples = invalid_record[key]['count'], invalid_record[key]['examples']
             logger.debug(f'Invalid: key={key}, count={count}, example={examples}')
@@ -406,6 +409,9 @@ _item:dict = None
         # determine static/dyanmic features
         self._static_keys = sorted(np.unique([k for s in self._subjects.values() for k in s.static_data.keys()]))
         self._dynamic_keys = sorted(np.unique([k for s in self._subjects.values() for k in s.admissions[0].keys()]))
+
+        logger.info(f'Static keys: {[self.fea_label(key) for key in self._static_keys]}')
+        logger.info(f'Dynamic keys: {[self.fea_label(key) for key in self._dynamic_keys]}')
 
         norm_dict = {}
         for s in self._subjects.values():
@@ -739,7 +745,7 @@ _item:dict = None
         pass
 
     @abstractmethod
-    def on_extract_admission(self, source, row):
+    def on_extract_admission(self, source, row) -> bool:
         pass
 
     @abstractmethod

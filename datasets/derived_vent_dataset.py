@@ -189,7 +189,7 @@ class MIMICIV_Vent_Dataset(MIMICIV_Core):
                     adm.dynamic_data[key] = np.asarray(adm.dynamic_data[key]).astype(np.float64)
             for key in pop_keys:
                 adm.dynamic_data.pop(key)
-        return {'all': {'count': invalid_count, 'examples':[]}}
+        return {'all': {'count': invalid_count, 'examples':set()}}
 
     def on_select_admissions(self, rule:dict, subjects:dict[int, Subject]):
         invalid_record = {'age':0, 'duration_positive':0, 'duration_limit':0, 'empty':0}

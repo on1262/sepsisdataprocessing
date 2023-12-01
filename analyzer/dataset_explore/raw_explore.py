@@ -91,10 +91,15 @@ class RawFeatureExplorer:
             y = sorted(list(key_record.keys()), key=lambda x:key_record[x], reverse=True)
             total = sum(key_record.values())
             x = [xi/total for xi in x]
-            plot_in[key] = (x, y)
+            plot_in[key] = [x, y]
+            tools.plot_bar_with_label(data=np.asarray(x), labels=y, title=f'Category distribution for {key}', sort=False, out_path=osjoin(out_dir, f'category_{key}.png'))
         with open(osjoin(out_dir, 'categories.yml'), 'w', encoding='utf-8') as fp:
-            yaml.dump(plot_in, fp)
-            
+            out_dict = {}
+            for key in plot_in:
+                out_dict[key] = {name:idx+1 for idx, name in enumerate(plot_in[key][1]) if sum(plot_in[key][0][idx:]) > 0.02}
+                out_dict[key].update({'Default':0})
+            yaml.dump(out_dict, fp)
+        
         tools.plot_stack_proportion(plot_in, out_path=os.path.join(out_dir, f"stack_percentage.png"))
 
 
@@ -168,12 +173,13 @@ class RawFeatureExplorer:
         for adm in adms:
             for key in adm.keys():
                 if key not in count_hist.keys():
-                    count_hist[key] = {'count':0, 'interval':0}
+                    count_hist[key] = {'num':0, 'count':0, 'interval':0}
+                count_hist[key]['num'] += 1
                 count_hist[key]['count'] += adm[key].shape[0]
                 count_hist[key]['interval'] += ((adm[key][-1, 1] - adm[key][0, 1]) / adm[key].shape[0])
         for key in count_hist.keys():
-            count_hist[key]['count'] /= len(adms)
-            count_hist[key]['interval'] /= len(adms)
+            count_hist[key]['count'] /= count_hist[key]['num']
+            count_hist[key]['interval'] /= count_hist[key]['num']
         key_list = list(count_hist.keys())
         key_list = sorted(key_list, key=lambda x:count_hist[x]['count'])
         key_list = key_list[-40:] # 最多80, 否则vital_sig可能不准
