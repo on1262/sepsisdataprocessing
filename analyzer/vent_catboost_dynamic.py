@@ -71,7 +71,7 @@ class VentCatboostDynamicAnalyzer:
             if fold_idx == 0:
                 # plot sample
                 self.plot_examples(test_index, model, 20, osjoin(out_dir, 'samples'))
-                explorer = TreeFeatureImportance(map_func=lambda x:x[:, :, 1], fea_names=feature_names, n_approx=-1)
+                explorer = TreeFeatureImportance(map_func=lambda x:x[:, :, 1], fea_names=feature_names, missvalue=-1, n_approx=-1)
                 explorer.add_record(model, valid_X=X_valid)
                 explorer.plot_beeswarm(max_disp=10, plot_path=osjoin(out_dir, f'importance.png'))
         

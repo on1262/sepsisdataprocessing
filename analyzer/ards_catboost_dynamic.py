@@ -10,7 +10,7 @@ from catboost import Pool, CatBoostClassifier
 from tools.feature_importance import TreeFeatureImportance
 from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
 
-class ARDSCatboostRegressionAnalyzer:
+class ARDSCatboostAnalyzer:
     def __init__(self, params:dict, container:DataContainer) -> None:
         self.params = params
         self.paths = params['paths']
@@ -34,8 +34,8 @@ class ARDSCatboostRegressionAnalyzer:
             ),
             label_func=label_func_min,
             target_idx=self.target_idx,
-            limit_idx=[],
-            forbidden_idx=[]
+            limit_idx=[self.dataset.fea_idx(id) for id in self.params['limit_feas']],
+            forbidden_idx=[self.dataset.fea_idx(id) for id in self.params['forbidden_feas']]
         )
         feature_names = [self.dataset.fea_label(idx) for idx in generator.avail_idx]
         print(f'Available features: {feature_names}')
@@ -54,7 +54,8 @@ class ARDSCatboostRegressionAnalyzer:
                 iterations=self.params['iterations'],
                 learning_rate=self.params['learning_rate'],
                 loss_function=self.params['loss_function'],
-                class_weights=cal_label_weight(len(self.params['centers']), Y_train)
+                class_weights=cal_label_weight(len(self.params['centers']), Y_train),
+                use_best_model=True
             )
             pool_train = Pool(X_train, Y_train.argmax(axis=-1))
             pool_valid = Pool(X_valid, Y_valid.argmax(axis=-1))
@@ -66,7 +67,7 @@ class ARDSCatboostRegressionAnalyzer:
             for idx, map_dict in zip([0,1,2,3], [{0:0,1:1,2:1,3:1}, {0:0,1:1,2:0,3:0}, {0:0,1:0,2:1,3:0}, {0:0,1:0,2:0,3:1}]): # TODO 这里写错了
                 metric_2cls[idx].add_prediction(map_func(Y_test_pred, map_dict)[:, 1], map_func(Y_test, map_dict)[:, 1])
             if fold_idx == 0:
-                explorer = TreeFeatureImportance(map_func=lambda x:x[:, :, 1], fea_names=feature_names, n_approx=2000)
+                explorer = TreeFeatureImportance(map_func=lambda x:x[:, :, 1], fea_names=feature_names, missvalue=-1, n_approx=2000)
                 explorer.add_record(model, valid_X=X_valid)
                 explorer.plot_beeswarm(max_disp=10, plot_path=osjoin(out_dir, f'importance.png'))
         

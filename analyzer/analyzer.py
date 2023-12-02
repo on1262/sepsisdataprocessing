@@ -4,7 +4,7 @@ import os
 from tools import logger as logger
 from .container import DataContainer
 
-from analyzer.ards_catboost_dynamic import ARDSCatboostRegressionAnalyzer
+from analyzer.ards_catboost_dynamic import ARDSCatboostAnalyzer
 from analyzer.ards_lstm import ArdsLSTMAnalyzer
 from analyzer.ards_nearest_cls import ArdsNearest4ClsAnalyzer
 from analyzer.ards_logistic_regression import ArdsLogisticRegAnalyzer
@@ -31,14 +31,14 @@ class Analyzer:
         self.container = DataContainer()
         self.analyzer_dict = {
             'ards_nearest_4cls': ArdsNearest4ClsAnalyzer,
-            'ards_catboost_dynamic': ARDSCatboostRegressionAnalyzer,
+            'ards_catboost_dynamic': ARDSCatboostAnalyzer,
             'ards_feature_explore': ArdsFeatureExplorer,
             'ards_lstm': ArdsLSTMAnalyzer,
             'ards_logistic_reg': ArdsLogisticRegAnalyzer,
 
             'vent_feature_explore': VentFeatureExplorer,
             'vent_catboost_dynamic': VentCatboostDynamicAnalyzer,
-            'vent_nearest_3cls': VentNearest3ClsAnalyzer,
+            'vent_nearest_2cls': VentNearest3ClsAnalyzer,
             'vent_lstm': VentLSTMAnalyzer,
             'vent_logistic_reg': VentLogisticRegAnalyzer,
 

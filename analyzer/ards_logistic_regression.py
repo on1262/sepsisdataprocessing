@@ -34,8 +34,8 @@ class ArdsLogisticRegAnalyzer:
             norm=Normalization(self.dataset.norm_dict, self.dataset.total_keys),
             label_func=label_func_min,
             target_idx=self.target_idx,
-            limit_idx=[],
-            forbidden_idx=[]
+            limit_idx=[self.dataset.fea_idx(id) for id in self.params['limit_feas']],
+            forbidden_idx=[self.dataset.fea_idx(id) for id in self.params['forbidden_feas']]
         )
         feature_names = [self.dataset.fea_label(idx) for idx in generator.avail_idx]
         print(f'Available features: {feature_names}')

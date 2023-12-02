@@ -30,6 +30,11 @@ dataset_report:
 
 ards_feature_explore:
     dataset_version: ards@origin
+    coverrate:
+        enabled: true
+        class_names: [Severe, Moderate, Mild, No_ARDS]
+        window: 16
+        centers: [50, 150, 250, 350]
     plot_admission_dist: true
     plot_chart_vis:
         enabled: true
@@ -92,17 +97,17 @@ vent_feature_explore:
     
 ards_catboost_dynamic:
     dataset_version: ards@origin
-    window: 18
+    window: 16
     soft_label: false
     smoothing_band: 50
     loss_function: MultiClass
-    iterations: 300
+    iterations: 600
     depth: 5
-    learning_rate: 0.03
+    learning_rate: 0.05
     centers: [50, 150, 250, 350]
     class_names: [Severe, Moderate, Mild, No_ARDS]
     limit_feas: []
-    forbidden_feas: []
+    forbidden_feas: ['220224', '223835', 'PF_ratio']
 
 ards_lstm:
     dataset_version: ards@filled
@@ -114,6 +119,8 @@ ards_lstm:
     batch_size: 2048
     epoch: 100
     lr: 0.001
+    limit_feas: []
+    forbidden_feas: ['220224', '223835', 'PF_ratio']
 
 ards_nearest_4cls:
     dataset_version: ards@origin
@@ -129,8 +136,10 @@ ards_logistic_reg:
     centers: [50, 150, 250, 350]
     class_names: [Severe, Moderate, Mild, No_ARDS]
     max_iter: 1000
+    limit_feas: []
+    forbidden_feas: ['220224', '223835', 'PF_ratio']
 
-vent_nearest_3cls:
+vent_nearest_2cls:
     dataset_version: vent@origin
     window: 8
     centers: [0, 1]

@@ -11,10 +11,11 @@ import sys
 
 
 class TreeFeatureImportance():
-    def __init__(self, map_func, fea_names, n_approx=-1) -> None:
+    def __init__(self, map_func, fea_names, missvalue=None, n_approx=-1) -> None:
         self.map_func = map_func # map shape value of each class into a total shap value
         self.fea_names = fea_names
         self.n_approx = n_approx
+        self.missvalue = missvalue
         # register
         self.records = []
 
@@ -23,7 +24,13 @@ class TreeFeatureImportance():
         n_in = min(valid_X.shape[0], self.n_approx) if self.n_approx > 0 else valid_X.shape[0]
         permutation = np.random.permutation(valid_X.shape[0])[:n_in]
         shap_values = explainer(valid_X[permutation])
-        self.records.append((shap_values.base_values, shap_values.data, shap_values.values)) # (sample, n_fea)
+        if self.missvalue is not None:
+            data = shap_values.data # (N, n_fea)
+            values = shap_values.values # (N, n_fea, n_cls)
+            values[data == self.missvalue, :] = 0
+            self.records.append((shap_values.base_values, data, values)) # (sample, n_fea)
+        else:
+            self.records.append((shap_values.base_values, shap_values.data, shap_values.values)) # (sample, n_fea)
 
     def _update_record(self):
         if isinstance(self.records, list):
@@ -35,7 +42,7 @@ class TreeFeatureImportance():
             shap_values = self.map_func(shap_values)
             self.records = shap.Explanation(base_values=base_values, data=data, values=shap_values, feature_names=self.fea_names)
 
-    def plot_beeswarm(self, max_disp=20, disp_others=True, plot_path=None):
+    def plot_beeswarm(self, max_disp=20, plot_path=None):
         self._update_record()
         plt.subplots_adjust(left=0.3)
         shap.plots.beeswarm(self.records, order=self.records.abs.mean(0), max_display=max_disp, show=False, plot_size=(14,14))
