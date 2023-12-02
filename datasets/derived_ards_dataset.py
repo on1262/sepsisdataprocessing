@@ -342,6 +342,8 @@ class MIMICIV_ARDS_Dataset(MIMICIV_Core):
             norm_data = np.asarray([table[index_dict[key], 0] for table in tables]).flatten()
             norm_data = norm_data[np.abs(norm_data+1.0)>1e-3] # pick valid data
             norm_dict[key] = {'mean': norm_data.mean(), 'std': norm_data.std()}
+        for key in addi_dynamic:
+            self._register_item(key, key)
         return {
             'tables': tables,
             'norm_dict': norm_dict,

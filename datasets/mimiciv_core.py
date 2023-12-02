@@ -553,7 +553,8 @@ class MIMICIV_Core(Dataset):
                 'norm_dict': self._norm_dict,
                 'seqs_len': seqs_len,
                 'static_keys': self._static_keys,
-                'dynamic_keys': self._dynamic_keys
+                'dynamic_keys': self._dynamic_keys,
+                'all_item': self._all_items
             }, fp)
         logger.info(f'Aligned table dumped at {p_final_table}')
 
@@ -581,7 +582,7 @@ class MIMICIV_Core(Dataset):
                 limit_idx = list(self._idx_dict.values())
             
             total_keys = self.static_keys + self.dynamic_keys
-            forbidden_idx = set([self._idx_dict[ffea] for ffea in version_conf[version_name]['forbidden_feas'] if ffea in self._idx_dict])
+            forbidden_idx = set([self.fea_idx(ffea) for ffea in version_conf[version_name]['forbidden_feas'] if ffea in self._idx_dict])
             avail_static_idx = [idx for idx in limit_idx if idx not in forbidden_idx and total_keys[idx] in self.static_keys]
             avail_dynamic_idx = [idx for idx in limit_idx if idx not in forbidden_idx and total_keys[idx] in self.dynamic_keys]
             avail_idx = avail_static_idx + avail_dynamic_idx
@@ -619,10 +620,15 @@ class MIMICIV_Core(Dataset):
                 'idx_dict': derived_idx_dict,
                 'norm_dict': derived_norm_dict,
                 'kf': derived_kf_list,
+                'all_item': self._all_items
             }
             np.savez_compressed(p_version_data, derived_data_table.astype(np.float32))
             with open(p_version, 'wb') as fp:
                 pickle.dump(version_dict, fp)
+
+    def _register_item(self, fea_id:str, fea_label:str):
+        self._all_items['id'][fea_id] = {'id':fea_id, 'label':fea_label}
+        self._all_items['label'][fea_label] = {'id':fea_id, 'label':fea_label}
 
     def fea_label(self, x:[int, str]):
         # input must be idx or id
@@ -652,9 +658,11 @@ class MIMICIV_Core(Dataset):
             id = self._all_items['label'][x]['id']
             assert(id in self._idx_dict)
             return self._idx_dict[id]
-        elif x in self._all_items['id']:
+        elif x in self._all_items['id'] or x in self._idx_dict.keys():
             assert(x in self._idx_dict)
             return self._idx_dict[x]
+        else:
+            assert(0)
     
     def register_split(self, train_index, valid_index, test_index):
         self.train_index = train_index
@@ -673,25 +681,7 @@ class MIMICIV_Core(Dataset):
             self._data_index = None
         else:
             assert(0)
-
-    def get_norm_array(self):
-        '''返回一个array, [:,0]代表各个feature的均值, [:,1]代表方差'''
-        means = [[self._norm_dict[key]['mean'] , self._norm_dict[key]['std']] for key in self._total_keys]
-        return np.asarray(means)
-
-    def restore_norm(self, name_or_idx, data:np.ndarray, mask=None) -> np.ndarray:
-        '''
-        缩放到正常范围
-        mask: 只变换mask=True的部分
-        '''
-        if isinstance(name_or_idx, int):
-            name_or_idx = self._total_keys[name_or_idx]
-        norm = self._norm_dict[name_or_idx]
-        if mask is None:
-            return data * norm['std'] + norm['mean']
-        else:
-            assert(mask.shape == data.shape)
-            return (data * norm['std'] + norm['mean']) * (mask > 0) + data * (mask <= 0)
+    
 
     def load_version(self, version_name):
         '''更新dataset版本'''

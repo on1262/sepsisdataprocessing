@@ -17,16 +17,16 @@ cross_validation:
     learning_rate: 0.03
     centers: [50, 150, 250, 350]
     class_names: [Severe, Moderate, Mild, No_ARDS]
-    feature_limit: [gender, '223830', '224690', age, '220277', '220224', '223835', PF_ratio]
+    limit_feas: [gender, '223830', '224690', age, '220277', '220224', '223835', PF_ratio]
     forbidden_feas: []
     slice_len: 192
 
 dataset_report:
-    dataset_name: vent # ['ards', 'raw', 'vent']
-    dataset_version: vent@origin
+    dataset_name: ards # ['ards', 'raw', 'vent']
+    dataset_version: ards@origin
     basic: true
-    dynamic_dist: false
-    static_dist: false
+    dynamic_dist: true
+    static_dist: true
 
 ards_feature_explore:
     dataset_version: ards@origin
@@ -101,7 +101,7 @@ ards_catboost_dynamic:
     learning_rate: 0.03
     centers: [50, 150, 250, 350]
     class_names: [Severe, Moderate, Mild, No_ARDS]
-    feature_limit: []
+    limit_feas: []
     forbidden_feas: []
 
 ards_lstm:
@@ -145,6 +145,8 @@ vent_catboost_dynamic:
     learning_rate: 0.03
     centers: [0, 1]
     class_names: ['no_vent', 'use_vent']
+    limit_feas: []
+    forbidden_feas: ['vent_status']
 
 vent_logistic_reg:
     dataset_version: vent@filled

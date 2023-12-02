@@ -35,8 +35,8 @@ class VentCatboostDynamicAnalyzer:
             ),
             label_func=vent_label_func,
             target_idx=self.target_idx,
-            limit_idx=[],
-            forbidden_idx=[self.dataset.idx_dict[id] for id in ['vent_status']]
+            limit_idx=[self.dataset.fea_idx(id) for id in self.params['limit_feas']],
+            forbidden_idx=[self.dataset.fea_idx(id) for id in self.params['forbidden_feas']]
         )
         feature_names = [self.dataset.fea_label(idx) for idx in generator.avail_idx]
         print(f'Available features: {feature_names}')
@@ -58,7 +58,8 @@ class VentCatboostDynamicAnalyzer:
                 iterations=self.params['iterations'],
                 learning_rate=self.params['learning_rate'],
                 loss_function=self.params['loss_function'],
-                class_weights=label_weight
+                class_weights=label_weight,
+                use_best_model=True
             )
             pool_train = Pool(X_train, Y_train.argmax(axis=-1))
             pool_valid = Pool(X_valid, Y_valid.argmax(axis=-1))
@@ -70,7 +71,7 @@ class VentCatboostDynamicAnalyzer:
             if fold_idx == 0:
                 # plot sample
                 self.plot_examples(test_index, model, 20, osjoin(out_dir, 'samples'))
-                explorer = TreeFeatureImportance(map_func=lambda x:x[:, :, 1], fea_names=feature_names, n_approx=2000)
+                explorer = TreeFeatureImportance(map_func=lambda x:x[:, :, 1], fea_names=feature_names, n_approx=-1)
                 explorer.add_record(model, valid_X=X_valid)
                 explorer.plot_beeswarm(max_disp=10, plot_path=osjoin(out_dir, f'importance.png'))
         

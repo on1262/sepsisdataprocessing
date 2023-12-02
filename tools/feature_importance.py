@@ -11,7 +11,7 @@ import sys
 
 
 class TreeFeatureImportance():
-    def __init__(self, map_func, fea_names, n_approx=2000) -> None:
+    def __init__(self, map_func, fea_names, n_approx=-1) -> None:
         self.map_func = map_func # map shape value of each class into a total shap value
         self.fea_names = fea_names
         self.n_approx = n_approx
@@ -20,7 +20,7 @@ class TreeFeatureImportance():
 
     def add_record(self, model, valid_X:np.ndarray):
         explainer = shap.Explainer(model)
-        n_in = min(valid_X.shape[0], self.n_approx)
+        n_in = min(valid_X.shape[0], self.n_approx) if self.n_approx > 0 else valid_X.shape[0]
         permutation = np.random.permutation(valid_X.shape[0])[:n_in]
         shap_values = explainer(valid_X[permutation])
         self.records.append((shap_values.base_values, shap_values.data, shap_values.values)) # (sample, n_fea)

@@ -59,14 +59,10 @@ class DatasetReport():
                 arr_duration = []
                 arr_frequency = []
                 arr_avg_value = []
-                arr_from_sepsis_time = []
                 for s in self.dataset._subjects.values():
                     for adm in s.admissions:
                         if id in adm.keys():
                             dur = adm[id][-1,1] - adm[id][0,1]
-                            sepsis_time = s.nearest_static('sepsis_time', adm[id][0, 1])
-                            t_sep = adm[id][0, 1] + adm.admittime - sepsis_time
-                            arr_from_sepsis_time.append(t_sep)
                             arr_points.append(adm[id].shape[0])
                             arr_duration.append(dur)
                             if dur > 1e-3: # TODO 只有一个点无法计算
@@ -76,7 +72,6 @@ class DatasetReport():
                             arr_avg_value.append(adm[id][:,0].mean())
                 arr_points, arr_duration, arr_frequency, arr_avg_value = \
                     np.asarray(arr_points), np.asarray(arr_duration), np.asarray(arr_frequency), np.asarray(arr_avg_value)
-                arr_from_sepsis_time = np.asarray(arr_from_sepsis_time)
                 if np.size(arr_points) != 0:
                     write_lines.append(f'average points per admission: {arr_points.mean():.3f}')
                 if np.size(arr_duration) != 0:
@@ -87,7 +82,7 @@ class DatasetReport():
                     write_lines.append(f'average avg value per admission: {arr_avg_value.mean():.3f}')
                 # plot distribution
                 titles = ['points', 'duration', 'frequency', 'dynamic_value']
-                arrs = [arr_points, arr_duration, arr_frequency, arr_avg_value, arr_from_sepsis_time]
+                arrs = [arr_points, arr_duration, arr_frequency, arr_avg_value]
                 for title, arr in zip(titles, arrs):
                     if np.size(arr) != 0:
                         tools.plot_single_dist(

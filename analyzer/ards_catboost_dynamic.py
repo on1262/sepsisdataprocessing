@@ -7,6 +7,7 @@ from tools import logger as logger
 from .container import DataContainer
 from tools.data import SliceDataGenerator, LabelGenerator_cls, cal_label_weight, label_func_min, map_func
 from catboost import Pool, CatBoostClassifier
+from tools.feature_importance import TreeFeatureImportance
 from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
 
 class ARDSCatboostRegressionAnalyzer:
@@ -39,7 +40,7 @@ class ARDSCatboostRegressionAnalyzer:
         feature_names = [self.dataset.fea_label(idx) for idx in generator.avail_idx]
         print(f'Available features: {feature_names}')
         # step 2: train and predict
-        for idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()):
+        for fold_idx, (train_index, valid_index, test_index) in enumerate(self.dataset.enumerate_kf()):
             train_result = generator(self.dataset.data[train_index, :, :], self.dataset.seqs_len[train_index])
             X_train, Y_train = train_result['data'], train_result['label']
 
@@ -64,6 +65,10 @@ class ARDSCatboostRegressionAnalyzer:
             metric_4cls.add_prediction(Y_test_pred, Y_test) # 去掉mask外的数据
             for idx, map_dict in zip([0,1,2,3], [{0:0,1:1,2:1,3:1}, {0:0,1:1,2:0,3:0}, {0:0,1:0,2:1,3:0}, {0:0,1:0,2:0,3:1}]): # TODO 这里写错了
                 metric_2cls[idx].add_prediction(map_func(Y_test_pred, map_dict)[:, 1], map_func(Y_test, map_dict)[:, 1])
+            if fold_idx == 0:
+                explorer = TreeFeatureImportance(map_func=lambda x:x[:, :, 1], fea_names=feature_names, n_approx=2000)
+                explorer.add_record(model, valid_X=X_valid)
+                explorer.plot_beeswarm(max_disp=10, plot_path=osjoin(out_dir, f'importance.png'))
         
         metric_4cls.confusion_matrix(comment=self.model_name)
         for idx in range(4):

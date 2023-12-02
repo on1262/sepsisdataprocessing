@@ -49,7 +49,7 @@ class ArdsLogisticRegAnalyzer:
             X_test, Y_test = test_result['data'], test_result['label']
 
             class_weight = cal_label_weight(len(self.params['centers']), Y_train)
-            class_weight = {idx:class_weight[idx] for idx in len(class_weight)}
+            class_weight = {idx:class_weight[idx] for idx in range(len(class_weight))}
             logger.info(f'class weight: {class_weight}')
             
             model = LogisticRegression(max_iter=self.params['max_iter'], multi_class='multinomial', class_weight=class_weight)
