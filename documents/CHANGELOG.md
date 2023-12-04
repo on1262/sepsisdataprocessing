@@ -37,3 +37,10 @@ Upgrade to generic framework
 - fix bug: carrunit now is in static data
 - fix bug: generate label
 - empty align id is available
+
+## 2023.11.30
+
+- compressing format default: xz -> gz (faster)
+- value->valuenum in hosp extraction
+- add category filter (>2%)
+- 

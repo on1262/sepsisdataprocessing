@@ -8,8 +8,6 @@ from .plot import plot_confusion_matrix
 from tools import GLOBAL_CONF_LOADER
 import pandas as pd
 
-
-
 class DichotomyMetric:
     '''二分类评价指标'''
     def __init__(self) -> None:
@@ -18,7 +16,7 @@ class DichotomyMetric:
         self.annotate_thres= 10 # ROC曲线上显示多少个阈值
         self.is_calculated = False
         self.thres_eps = 0.01 # 当阈值间隔小于eps时, n_thres将被自动调整
-        self.interpolate_eps = 0.0001
+        self.eps = 0.001
         # calculation resources
         self.thres = []
         self.points = []
@@ -34,19 +32,25 @@ class DichotomyMetric:
             pred: (batch,)  gt: (batch,)
             gt取值是0/1, pred取值是一个概率
         '''
-        self.data.append(np.stack((pred.copy(), gt.copy()), axis=1))
+        assert(len(pred.shape)==1 and len(gt.shape)==1 and pred.shape[0]==gt.shape[0])
+        self.data.append(np.stack((pred.copy(), gt.copy()), axis=1)) # -> (batch, 2)
         self.is_calculated = False # 更新状态
 
     def _cal_single_point(self, Y_gt, Y_pred, thres):
         tp = np.sum(Y_pred[Y_gt > 0.5] > thres)
         fp = np.sum(Y_pred[Y_gt < 0.5] > thres)
-        fn = np.sum(Y_pred[Y_gt > 0.5] < thres)
-        tn = np.sum(Y_pred[Y_gt < 0.5] < thres)
+        fn = np.sum(Y_pred[Y_gt > 0.5] <= thres)
+        tn = np.sum(Y_pred[Y_gt < 0.5] <= thres)
         return {
             'tp': tp, 'fp':fp, 
             'tn': tn, 'fn':fn,
             'tpr':tp/(tp+fn), 'fpr':fp/(fp+tn), 
-            'acc':(tp+tn)/(tp+fp+tn+fn),'sens':tp/(tp+fn), 'spec':tn/(tn+fp), 'thres':thres
+            'acc':(tp+tn)/(tp+fp+tn+fn),
+            'recall':tp/(tp+fn), 
+            'spec':tn/(tn+fp), 
+            'prec': tp/(tp+fp) if tp + fp > 0 else 1,
+            'f1': 2*(tp/(tp+fp))*(tp/(tp+fn)) / (tp/(tp+fp) + tp/(tp+fn)) if tp + fp > 0 else 2*tp/(2*tp+fn),
+            'thres':thres
         }
     
     def _cal_thres(self):
@@ -59,9 +63,12 @@ class DichotomyMetric:
         thres = [data.min()]
         for n in range(1, self.n_thres, 1): # 1,2,3,...,n_thres-1
             idx = round((p_len-1)*n/(self.n_thres-1))
-            next_thres = sorted_pred[idx]
+            next_thres = sorted_pred[idx] # determined by percentage of prediction
             if np.abs(next_thres-thres[-1]) > self.thres_eps:
                 thres.append(next_thres)
+        # add threshold for calculate recall-precision
+        thres = np.asarray(sorted(np.unique(thres + [0.01, 0.02, 0.04, 0.08, 0.16, 0.99, 0.98, 0.96, 0.92, 0.84])))
+        # thres = thres[np.logical_and(thres >= self.eps, thres <= 1.0 - self.eps)] # prec = nan when thres=1
         self.n_thres = len(thres)
         self.thres = thres
     
@@ -102,26 +109,23 @@ class DichotomyMetric:
                 self.tpr_std.append(np.asarray(tprs).std())
         else:
             self.combined_points = self.points[0]
-            
+    
     
     '''
-    线性插值得到曲线上的某个点
+    线性插值得到曲线上的某个点， 例如，查询tpr=0.8时的fpr
     params:
-        key: 点的特征, value: 点的值
+        key: 查询特征名称, value: 查询值
         idx: 曲线的索引, -1表示对平均曲线查询
         search_keys: 需要知道的特征的名字, 例如'tpr', 'sens'
     return:
         一个dict, 每一项对应search_keys查找的值
     '''
-    def search_point(self, key:str, value:float, idx, search_keys:set):
+    def search_point(self, key:str, value:float, idx:int, search_keys:set):
         if self.is_calculated == False:
             logger.error("search point should be called after process_data.")
             assert(0)
         assert(idx < len(self.points))
-        if idx < 0:
-            points = self.combined_points
-        else:
-            points = self.points[idx]
+        points = self.combined_points if idx < 0 else self.points[idx]
         # 线性插值
         result = {}
         for k in search_keys:
@@ -142,65 +146,70 @@ class DichotomyMetric:
             if x[idx] not in valid_set:
                 valid_set.add(x[idx])
             else:
-                x[idx] = x[idx] - self.interpolate_eps
+                x[idx] = x[idx] - self.eps
         f1 = interp1d(x,y,kind='linear', fill_value='extrapolate')
         return f1([value])[0]
 
-    def plot_roc(self, title='roc', disp=False, save_path=None):
+    def plot_curve(self, curve_type=['roc', 'prc'], title='curve', save_path=None):
+        assert(curve_type in ['roc', 'prc'])
+        name_x = 'fpr' if curve_type == 'roc' else 'recall'
+        name_y = 'tpr' if curve_type == 'roc' else 'prec'
         len_data = len(self.data)
         if self.is_calculated == False:
             self.process_data()
         aucs = []
-        random_guess = [x for x in np.linspace(start=0, stop=1, num=10)]
         plt.figure(figsize=(8,8))
-        plt.plot(random_guess, random_guess, dashes=[6, 2])
+        if curve_type == 'roc':
+            random_guess = [x for x in np.linspace(start=0, stop=1, num=10)]
+            plt.plot(random_guess, random_guess, dashes=[6, 2])
         # draw each curve
         for idx in range(len_data):
-            aucs.append(sk_auc(self.points[idx]['fpr'], self.points[idx]['tpr']))
-            plt.plot(self.points[idx]['fpr'], self.points[idx]['tpr'], '0.7')
+            aucs.append(sk_auc(self.points[idx][name_x], self.points[idx][name_y]))
+            plt.plot(self.points[idx][name_x], self.points[idx][name_y], '0.7')
         # draw mean curve
-        plt.plot(self.combined_points['fpr'], self.combined_points['tpr'], 'b+-')
+        plt.plot(self.combined_points[name_x], self.combined_points[name_y], 'b+-')
         # add thres
-        for k in range(self.annotate_thres):
-            idx = round((len(self.thres)-1) * k / (self.annotate_thres - 1))
+        selected_thres = np.unique(np.asarray([np.argmin(np.abs(self.points[idx][name_x] - num)) for num in np.linspace(0, 1, 11)])).astype(int)
+        for k, idx in enumerate(selected_thres):
             thres_str = f"{self.combined_points['thres'][idx]:.2f}"
             if k == 0:
                 thres_str = "Thres:" + thres_str
+            xytext = (-10, 10) if curve_type == 'roc' else (10, 10)
+            ha, va = ('right', 'bottom') if curve_type == 'roc' else ('left', 'bottom')
             plt.annotate(thres_str,
-                xy=[self.combined_points['fpr'][idx],
-                self.combined_points['tpr'][idx]],
+                xy=[self.combined_points[name_x][idx],
+                self.combined_points[name_y][idx]],
                 fontsize=8, color="tab:blue",
-                xytext=(-10, 10), textcoords='offset points',
-                horizontalalignment='right', verticalalignment='bottom',
+                xytext=xytext, textcoords='offset points',
+                horizontalalignment=ha, verticalalignment=va,
                 arrowprops=dict(arrowstyle="->", color='tab:blue',alpha=0.7))
 
-        # draw std band
-        # draw_band(ax=plt.gca(), x=self.combined_points['fpr'], y=self.combined_points['tpr'], \
-        #     err=self.tpr_std, facecolor=f"C0", edgecolor="none", alpha=.2)
         auc_str = f'AUC={aucs[0]:.3f}' if len(aucs) == 1 else f'AUC={np.asarray(aucs).mean():.3f} (std {np.asarray(aucs).std():.3f})'
-
-        plt.annotate(auc_str, xy=[0.7, 0.05], fontsize=12)
+        if curve_type == 'roc':
+            plt.annotate(auc_str, xy=[0.7, 0.05], fontsize=12)
+        else:
+            plt.annotate(auc_str, xy=[0.05, 0.05], fontsize=12)
         plt.title(title)
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.05])
-        plt.xlabel("False Positive Rate")
-        plt.ylabel("True Positive Rate")
-        if disp:
-            plt.show()
-        elif save_path is not None:
+        plt.xlabel("False Positive Rate" if curve_type == 'roc' else 'Recall')
+        plt.ylabel("True Positive Rate" if curve_type == 'roc' else 'Precision')
+        if save_path is not None:
             plt.savefig(save_path)
         plt.close()
     
     # 生成需要关注的信息
-    def generate_info(self):
+    def write_result(self, fp=sys.stdout):
         assert(self.is_calculated == True)
-        # best acc
-        result = {'best_acc':0, 'best_acc_thres':0}
-        for idx in range(len(self.combined_points['acc'])):
-            if self.combined_points['acc'][idx] > result['best_acc']:
-                result['best_acc'] = self.combined_points['acc'][idx]
-                result['best_acc_thres'] = self.combined_points['thres'][idx]
-        return result
+        result = {}
+        for metric in ['acc', 'f1']:
+            result.update({f'best_{metric}':0, f'best_{metric}_thres':0})
+            for idx in range(len(self.combined_points[metric])):
+                if self.combined_points[metric][idx] > result[f'best_{metric}']:
+                    result[f'best_{metric}'] = self.combined_points[metric][idx]
+                    result[f'best_{metric}_thres'] = self.combined_points['thres'][idx]
+        for key, val in result.items():
+            print(f'{key}: {val}', file=fp)
 
 class MultiClassMetric:
     def __init__(self, class_names:list, out_dir:str) -> None:

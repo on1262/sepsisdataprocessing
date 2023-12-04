@@ -17,19 +17,24 @@ cross_validation:
     learning_rate: 0.03
     centers: [50, 150, 250, 350]
     class_names: [Severe, Moderate, Mild, No_ARDS]
-    feature_limit: [gender, '223830', '224690', age, '220277', '220224', '223835', PF_ratio]
+    limit_feas: [gender, '223830', '224690', age, '220277', '220224', '223835', PF_ratio]
     forbidden_feas: []
     slice_len: 192
 
 dataset_report:
-    dataset_name: vent # ['ards', 'raw', 'vent']
-    dataset_version: vent_version
+    dataset_name: ards # ['ards', 'raw', 'vent']
+    dataset_version: ards@origin
     basic: true
-    dynamic_dist: false
-    static_dist: false
+    dynamic_dist: true
+    static_dist: true
 
 ards_feature_explore:
-    dataset_version: explore_version
+    dataset_version: ards@origin
+    coverrate:
+        enabled: true
+        class_names: [Severe, Moderate, Mild, No_ARDS]
+        window: 16
+        centers: [50, 150, 250, 350]
     plot_admission_dist: true
     plot_chart_vis:
         enabled: true
@@ -55,7 +60,7 @@ ards_feature_explore:
     feature_count: true
 
 raw_feature_explore:
-    dataset_version: raw_version
+    dataset_version: raw@version
     plot_admission_dist: true
     plot_chart_vis:
         enabled: true
@@ -77,10 +82,10 @@ raw_feature_explore:
             Daily Weight: {min: 30, max: 200}
     miss_mat: true
     feature_count: true
-    correlation: true
+    correlation: false
 
 vent_feature_explore:
-    dataset_version: vent_version
+    dataset_version: vent@origin
     correlation:
         enabled: true
         target: vent_status
@@ -91,53 +96,80 @@ vent_feature_explore:
         n_plot: 10
     
 ards_catboost_dynamic:
-    dataset_version: original_version
-    window: 18
+    dataset_version: ards@origin
+    window: 16
     soft_label: false
     smoothing_band: 50
     loss_function: MultiClass
-    iterations: 300
+    iterations: 600
     depth: 5
-    learning_rate: 0.03
+    learning_rate: 0.05
     centers: [50, 150, 250, 350]
     class_names: [Severe, Moderate, Mild, No_ARDS]
-    feature_limit: [gender, '223830', '224690', age, '220277', '220224', '223835', PF_ratio]
-    forbidden_feas: []
+    limit_feas: []
+    forbidden_feas: ['220224', '223835', 'PF_ratio']
+
+ards_lstm:
+    dataset_version: ards@filled
+    window: 16
+    device: 'cuda:1'
+    centers: [50, 150, 250, 350]
+    class_names: [Severe, Moderate, Mild, No_ARDS]
+    hidden_size: 128
+    batch_size: 2048
+    epoch: 100
+    lr: 0.001
+    limit_feas: []
+    forbidden_feas: ['220224', '223835', 'PF_ratio']
 
 ards_nearest_4cls:
-    dataset_version: original_version
+    dataset_version: ards@origin
     window: 16
     soft_label: false
     centers: [50, 150, 250, 350]
     class_names: [Severe, Moderate, Mild, No_ARDS]
     smoothing_band: 50
 
-vent_nearest_3cls:
-    dataset_version: vent_version
+ards_logistic_reg:
+    dataset_version: ards@filled
     window: 16
-    centers: [0, 1, 2]
-    class_names: ['no_vent', 'non-invasive', 'invasive']
+    centers: [50, 150, 250, 350]
+    class_names: [Severe, Moderate, Mild, No_ARDS]
+    max_iter: 1000
+    limit_feas: []
+    forbidden_feas: ['220224', '223835', 'PF_ratio']
+
+vent_nearest_2cls:
+    dataset_version: vent@origin
+    window: 8
+    centers: [0, 1]
+    class_names: ['no_vent', 'use_vent']
 
 vent_catboost_dynamic:
-    dataset_version: vent_version
-    window: 16
+    dataset_version: vent@origin
+    window: 8
     loss_function: MultiClass
     iterations: 400
     depth: 5
     learning_rate: 0.03
-    centers: [0, 1, 2]
-    class_names: ['no_vent', 'non-invasive', 'invasive']
-    feature_limit: []
-    forbidden_feas: []
+    centers: [0, 1]
+    class_names: ['no_vent', 'use_vent']
+    limit_feas: []
+    forbidden_feas: ['vent_status']
+
+vent_logistic_reg:
+    dataset_version: vent@filled
+    window: 8
+    centers: [0, 1]
+    class_names: ['no_vent', 'use_vent']
+    max_iter: 1000
 
 vent_lstm:
-    dataset_version: vent_version
-    window: 16
+    dataset_version: vent@filled
+    window: 8
     device: 'cuda:1'
-    centers: [0, 1, 2]
-    class_names: ['no_vent', 'non-invasive', 'invasive']
-    feature_limit: []
-    forbidden_feas: []
+    centers: [0, 1]
+    class_names: ['no_vent', 'use_vent']
     hidden_size: 128
     batch_size: 2048
     epoch: 100

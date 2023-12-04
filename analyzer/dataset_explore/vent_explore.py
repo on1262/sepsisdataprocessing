@@ -36,7 +36,6 @@ class VentFeatureExplorer:
             self.vent_statistics(out_dir)
         if self.params['vent_sample']['enabled']:
             self.vent_sample(out_dir)
-        
     
     def correlation(self, out_dir, target_id_or_label):
         # plot correlation matrix

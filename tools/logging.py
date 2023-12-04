@@ -38,5 +38,3 @@ class SummaryWriter:
         if out_path is not None:
             plt.savefig(out_path)
         plt.close()
-
-

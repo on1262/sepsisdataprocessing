@@ -8,8 +8,60 @@ category_to_numeric:
     insurance: { Medicare: 1, Medicaid: 2, Other: 0, Default: 0}
     language: {ENGLISH: 1, Default: 0}
     marital_status: {WIDOWED: 1, SINGLE: 2, MARRIED: 3, DIVORCED: 4, Default: 0}
-    race: {WHITE: 1, Default: 0}
-    careunit: {'Emergency Department': 1, 'Medicine': 2, 'Emergency Department Observation': 3, 'Default': 0}
+    race:
+        ASIAN: 8
+        ASIAN - ASIAN INDIAN: 20
+        ASIAN - CHINESE: 9
+        ASIAN - SOUTH EAST ASIAN: 18
+        BLACK/AFRICAN: 14
+        BLACK/AFRICAN AMERICAN: 2
+        BLACK/CAPE VERDEAN: 11
+        BLACK/CARIBBEAN ISLAND: 13
+        Default: 0
+        HISPANIC OR LATINO: 7
+        HISPANIC/LATINO - DOMINICAN: 12
+        HISPANIC/LATINO - GUATEMALAN: 19
+        HISPANIC/LATINO - PUERTO RICAN: 5
+        OTHER: 3
+        PATIENT DECLINED TO ANSWER: 15
+        PORTUGUESE: 17
+        UNABLE TO OBTAIN: 16
+        UNKNOWN: 4
+        WHITE: 1
+        WHITE - EASTERN EUROPEAN: 21
+        WHITE - OTHER EUROPEAN: 6
+        WHITE - RUSSIAN: 10
+    careunit:
+        Cardiac Surgery: 17
+        Cardiac Vascular Intensive Care Unit (CVICU): 20
+        Coronary Care Unit (CCU): 26
+        Default: 0
+        Discharge Lounge: 5
+        Emergency Department: 1
+        Emergency Department Observation: 4
+        Hematology/Oncology: 9
+        Hematology/Oncology Intermediate: 25
+        Labor & Delivery: 15
+        Med/Surg: 6
+        Med/Surg/GYN: 12
+        Med/Surg/Trauma: 13
+        Medical Intensive Care Unit (MICU): 16
+        Medical/Surgical (Gynecology): 27
+        Medical/Surgical Intensive Care Unit (MICU/SICU): 19
+        Medicine: 3
+        Medicine/Cardiology: 7
+        Neurology: 8
+        Obstetrics (Postpartum & Antepartum): 21
+        PACU: 14
+        Psychiatry: 23
+        Surgery: 28
+        Surgery/Pancreatic/Biliary/Bariatric: 29
+        Surgery/Trauma: 18
+        Surgical Intensive Care Unit (SICU): 22
+        Transplant: 11
+        Trauma SICU (TSICU): 24
+        Vascular: 10
+        empty: 2
 
 remove_rule:
     pass1:
@@ -31,14 +83,15 @@ generate_table:
 
 k-fold: 5
 validation_proportion: 0.15 # use 0.15*80% samples for validation
-compress_cache: True # compress cache file to speed up loading 
+compress_cache: True # compress cache file to speed up loading
+compress_suffix: .gz # zip: fast compression but slow loading. xz: slow compression but fast loading (smaller file size)
 
 version:
-    explore_version:
+    ards@origin:
         fill_missvalue: none # do not fill miss value in feature explore status
         feature_limit: []
         forbidden_feas: []
-    original_version:
+    ards@filled:
         fill_missvalue: avg
         feature_limit: []
         forbidden_feas: [Weight, BMI, Height (Inches), '225677', '220545', '226730', '226531', Weight (Lbs), '227467', '220339', '227443', '220587', 'dod']

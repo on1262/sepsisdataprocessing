@@ -11,6 +11,7 @@ import pandas as pd
 import yaml
 from datasets.derived_ards_dataset import MIMICIV_ARDS_Dataset
 from scipy.signal import convolve2d
+from tools.data import DynamicDataGenerator, label_func_min, LabelGenerator_cls, cal_label_weight
 
 
 
@@ -22,6 +23,8 @@ class ArdsFeatureExplorer:
         self.dataset.load_version(params['dataset_version'])
         self.gbl_conf = container._conf
         self.data = self.dataset.data
+        self.dataset.mode('all')
+        self.target_idx = self.dataset.fea_idx('PF_ratio')
 
     def run(self):
         '''输出mimic-iv数据集的统计特征, 独立于模型和研究方法'''
@@ -30,6 +33,8 @@ class ArdsFeatureExplorer:
         out_dir = osjoin(self.params['paths']['out_dir'], f'feature_explore[{dataset_version}]')
         tools.reinit_dir(out_dir, build=True)
         # random plot sample time series
+        if self.params['coverrate']['enabled']:
+            self.plot_cover_rate(self.params['coverrate']['class_names'])
         if self.params['plot_samples']['enabled']:
             n_sample = self.params['plot_samples']['n_sample']
             id_list = [self.dataset.fea_id(x) for x in self.params['plot_samples']['features']]
@@ -174,43 +179,28 @@ class ArdsFeatureExplorer:
             plt.close()
 
 
-    def plot_cover_rate(self, class_names, labels, mask, out_dir):
-        '''
-        二分类/多分类问题的覆盖率探究
-        labels: (sample, seq_lens, n_cls)
-        mask: (sample, seq_lens)
-        out_dir: 输出文件夹
-        '''
-        assert(mask.shape == labels.shape[:-1])
-        assert(len(class_names) == labels.shape[-1])
-        mask_sum = np.sum(mask, axis=1)
-        valid = (mask_sum > 0) # 有效的行, 极少样本无效
-        logger.debug(f'sum valid: {valid.sum()}')
-        label_class = (np.argmax(labels, axis=-1) + 1) * mask # 被mask去掉的是0,第一个class从1开始
-        if len(class_names) == 2:
-            cover_rate = np.sum(label_class==2, axis=1)[valid] / mask_sum[valid] # ->(sample,)
-            tools.plot_single_dist(data=cover_rate, 
-                data_name=f'{class_names[1]} cover rate (per sample)', 
-                save_path=os.path.join(out_dir, 'cover_rate.png'), discrete=False, adapt=False,bins=10)
-        else:
-            cover_rate = []
-            names = []
-            for idx, name in enumerate(class_names):
-                arr = np.sum(label_class==idx+1, axis=1)[valid] / mask_sum[valid] # ->(sample,)
-                arr = arr[arr > 0]
-                names += [name for _ in range(len(arr))]
-                cover_rate += [arr]
-            cover_rate = np.concatenate(cover_rate, axis=0)
-            df = pd.DataFrame(data={'coverrate':cover_rate, 'class':names})
-            sns.histplot(
-                df,
-                x="coverrate", hue='class',
-                multiple="stack",
-                palette=sns.light_palette("#79C", reverse=True, n_colors=4),
-                edgecolor=".3",
-                linewidth=.5,
-                log_scale=False,
-            )
-            plt.savefig(os.path.join(out_dir, f'coverrate_4cls.png'))
-            plt.close()
-
+    def plot_cover_rate(self, class_names):
+        generator = DynamicDataGenerator(
+            window_points=self.params['coverrate']['window'],
+            n_fea=len(self.dataset.total_keys),
+            label_generator=LabelGenerator_cls(
+                centers=self.params['coverrate']['centers']
+            ),
+            label_func=label_func_min,
+            target_idx=self.target_idx,
+            limit_idx=[self.target_idx],
+            forbidden_idx=[]
+        )
+        result = generator(self.dataset.data, self.dataset.seqs_len)
+        label, mask = result['label'], result['mask']
+        weight = cal_label_weight(4, label[mask, :])
+        rw = 1 / weight
+        rw = rw / np.sum(rw)
+        logger.info(f'Slice label proportion: {rw}')
+        label = np.argmax(label, axis=-1)
+        label[np.logical_not(mask)] = 4
+        cls_label = [np.sum(np.min(label, axis=-1) == idx) for idx in range(4)]
+        cls_label = np.asarray(cls_label)
+        n_sum = np.sum(cls_label)
+        for idx, name in enumerate(class_names):
+            logger.info(f'{name}: n={cls_label[idx]}, proportion={cls_label[idx] / n_sum:.3f}')

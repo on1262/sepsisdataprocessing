@@ -49,8 +49,7 @@ def simple_plot(data, title='Title', out_path=None):
     plt.close()
 
 
-def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
-    '''打印柱状图, 按标签顺序'''
+def plot_bar_with_label(data:np.ndarray, labels:list, title:str, sort=True, out_path=None):
     # Validate the input
     if not isinstance(data, np.ndarray):
         raise ValueError("Input data must be a numpy array.")
@@ -58,9 +57,10 @@ def plot_bar_with_label(data:np.ndarray, labels:list, title:str, out_path=None):
         raise ValueError("Input labels must be a list of strings.")
 
     # sort
-    # ind = np.argsort(data)
-    # data = data[ind]
-    # labels = [labels[i] for i in ind]
+    if sort:
+        ind = np.argsort(data)
+        data = data[ind]
+        labels = [labels[i] for i in ind]
 
     # Set up the histogram
     fig, ax = plt.subplots(figsize=(12,12)) # Set figure size

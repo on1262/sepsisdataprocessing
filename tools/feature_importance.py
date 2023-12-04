@@ -11,34 +11,41 @@ import sys
 
 
 class TreeFeatureImportance():
-    def __init__(self, fea_names, n_approx=2000) -> None:
+    def __init__(self, map_func, fea_names, missvalue=None, n_approx=-1) -> None:
+        self.map_func = map_func # map shape value of each class into a total shap value
         self.fea_names = fea_names
         self.n_approx = n_approx
+        self.missvalue = missvalue
         # register
         self.records = []
 
     def add_record(self, model, valid_X:np.ndarray):
         explainer = shap.Explainer(model)
-        n_in = min(valid_X.shape[0], self.n_approx)
+        n_in = min(valid_X.shape[0], self.n_approx) if self.n_approx > 0 else valid_X.shape[0]
         permutation = np.random.permutation(valid_X.shape[0])[:n_in]
         shap_values = explainer(valid_X[permutation])
-        self.records.append((shap_values.base_values, shap_values.data, shap_values.values)) # (sample, n_fea)
+        if self.missvalue is not None:
+            data = shap_values.data # (N, n_fea)
+            values = shap_values.values # (N, n_fea, n_cls)
+            values[data == self.missvalue, :] = 0
+            self.records.append((shap_values.base_values, data, values)) # (sample, n_fea)
+        else:
+            self.records.append((shap_values.base_values, shap_values.data, shap_values.values)) # (sample, n_fea)
 
-    def update_record(self):
+    def _update_record(self):
         if isinstance(self.records, list):
             base_values = np.concatenate([record[0] for record in self.records], axis=0)
-            if len(base_values.shape) == 2:
+            if len(base_values.shape) == 2: # prediction bias for each category
                 base_values = np.mean(base_values, axis=-1)
             data = np.concatenate([record[1] for record in self.records], axis=0)
             shap_values = np.concatenate([record[2] for record in self.records], axis=0)
-            if len(shap_values.shape) == 3:
-                shap_values = 3*shap_values[:,:,0] + 2*shap_values[:,:,1] + shap_values[:,:,2]
+            shap_values = self.map_func(shap_values)
             self.records = shap.Explanation(base_values=base_values, data=data, values=shap_values, feature_names=self.fea_names)
 
-    def plot_beeswarm(self, plot_path):
-        self.update_record()
+    def plot_beeswarm(self, max_disp=20, plot_path=None):
+        self._update_record()
         plt.subplots_adjust(left=0.3)
-        shap.plots.beeswarm(self.records, order=self.records.abs.mean(0), max_display=20, show=False, plot_size=(14,14))
+        shap.plots.beeswarm(self.records, order=self.records.abs.mean(0), max_display=max_disp, show=False, plot_size=(14,14))
         plt.savefig(plot_path)
         plt.close()
 
@@ -49,7 +56,7 @@ class TreeFeatureImportance():
             int: 选择前k个特征输出
             None: 输出所有特征
         '''
-        self.update_record()
+        self._update_record()
         imp = self.records.abs.mean(0).values
         order = sorted(list(range(len(self.fea_names))), key=lambda x:imp[x], reverse=True)
         if isinstance(select, int):
@@ -69,7 +76,7 @@ class TreeFeatureImportance():
 
     def get_importance_array(self, feature_ids, fp=sys.stdout):
         '''返回特征重要性的排序'''
-        self.update_record()
+        self._update_record()
         imp = self.records.abs.mean(0).values
         order = sorted(list(range(len(self.fea_names))), key=lambda x:imp[x], reverse=True)
         ids = [feature_ids[idx] for idx in order]

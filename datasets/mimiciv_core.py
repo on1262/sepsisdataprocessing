@@ -99,7 +99,8 @@ class MIMICIV_Core(Dataset):
         cache_dir = self._paths['cache_dir']
         if not os.path.exists(cache_dir):
             tools.reinit_dir(cache_dir, build=True)
-        suffix = '.pkl' if not self._loc_conf['compress_cache'] else '.xz' # use lzma compression
+        suffix = '.pkl' if not self._loc_conf['compress_cache'] else self._loc_conf['compress_suffix']
+        
         # create pkl names for each phase
         pkl_paths = [os.path.join(cache_dir, name + suffix) for name in ['1_phase1', '2_phase2', '3_subjects', '4_numeric_subject', '5_norm_dict', '6_table_final']]
         version_files = [os.path.join(cache_dir, f'7_version_{version_name}' + suffix) for version_name in self._loc_conf['version'].keys()] + \
@@ -112,10 +113,15 @@ class MIMICIV_Core(Dataset):
             self._preprocess_phase5(pkl_paths[4], load_subject_only=True) # load subjects
         else:
             logger.info('MIMIC-IV: Bare Mode Disabled')
+            log_file = os.path.join(self._paths['out_dir'], 'build_dataset.log')
+            logger.info('Start logging to ' + log_file)
+            tools.reinit_dir(self._paths['out_dir'], build=True) # add logger
+            log_id = logger.add(log_file)
             for phase in range(1, 7):
                 func = getattr(self, '_preprocess_phase' + str(phase))
                 func(pkl_paths[phase-1])
             self._preprocess_phase7()
+            logger.remove(log_id)
  
     def _preprocess_phase1(self, pkl_path=None, dim_files_only=False):
         if os.path.exists(pkl_path):
@@ -170,6 +176,7 @@ class MIMICIV_Core(Dataset):
         ed_item['label'] = {val['label']:val for val in ed_item['id'].values()}
 
         subject_set, extra_information = self.on_extract_subjects()
+        logger.info(f'on_extract_subjects: Loaded {len(subject_set)} unique patients')
 
         self._hosp_item = hosp_item
         self._icu_item = icu_item
@@ -210,9 +217,12 @@ class MIMICIV_Core(Dataset):
 
         # add admission
         admissions = pd.read_csv(os.path.join(self._mimic_dir, 'hosp', 'admissions.csv'), encoding='utf-8')
+        _total_adm, _extract_adm = 0, 0
         for row in tqdm(admissions.itertuples(), 'Extract Admissions', total=len(admissions), miniters=len(admissions)//100):
             if row.subject_id in self._subjects:
-                self.on_extract_admission(self._subjects[row.subject_id], source='admission', row=row)
+                _total_adm += 1
+                _extract_adm += self.on_extract_admission(self._subjects[row.subject_id], source='admission', row=row)
+        logger.info(f'Extracted {_extract_adm} admissions from {_total_adm} admissions which belongs to {len(self._subjects)} subjects')
 
         for path, prefix in zip(
             [os.path.join(self._mimic_dir, 'icu', 'icustays.csv'), os.path.join(self._mimic_dir, 'hosp', 'transfers.csv')], 
@@ -275,8 +285,9 @@ class MIMICIV_Core(Dataset):
             hosp_chunksize = 10000000
             hosp_labevents = pd.read_csv(
                 os.path.join(self._mimic_dir, 'hosp', 'labevents.csv'), encoding='utf-8', chunksize=hosp_chunksize,
-                usecols=['subject_id', 'itemid', 'charttime', 'valuenum'], engine='c',
-                dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'valuenum':str}
+                usecols=['subject_id', 'itemid', 'charttime', 'value', 'valuenum'], engine='c',
+                dtype={'subject_id':int, 'itemid':str, 'charttime':str, 'value':str, 'valuenum':str},
+                na_filter=False
             )
             for chunk_idx, chunk in tqdm(
                 enumerate(hosp_labevents), 'Extract labevent from hosp', 
@@ -284,9 +295,11 @@ class MIMICIV_Core(Dataset):
                 miniters=total_size//hosp_chunksize//100
             ):
                 for row in tqdm(chunk.itertuples(), f'chunk {chunk_idx}', miniters=len(chunk)//10): # NOTE: reserve dtypes for valuenum
-                    s_id, itemid, charttime, valuenum = row.subject_id, row.itemid, row.charttime, row.valuenum
+                    s_id, itemid, charttime, valuenum, value = row.subject_id, row.itemid, row.charttime, row.valuenum, row.value
                     if s_id in self._subjects and itemid in collect_hosp_set:
                         charttime = datetime.fromisoformat(charttime).timestamp() / 3600.0 # hour
+                        if valuenum == '':
+                            valuenum = value
                         self._subjects[s_id].append_dynamic(charttime=charttime, itemid=itemid, value=valuenum)
             del hosp_labevents
 
@@ -334,7 +347,7 @@ class MIMICIV_Core(Dataset):
                 else:
                     invalid_record[k]['count'] += v['count']
                     if len(invalid_record[k]['examples']) < 5:
-                        invalid_record[k]['examples'] += v['examples']
+                        invalid_record[k]['examples'].union(v['examples'])
         for key in invalid_record:
             count, examples = invalid_record[key]['count'], invalid_record[key]['examples']
             logger.debug(f'Invalid: key={key}, count={count}, example={examples}')
@@ -344,9 +357,10 @@ class MIMICIV_Core(Dataset):
         for s_id in tqdm(self._subjects, desc='update data', miniters=len(self._subjects)//100):
             self._subjects[s_id].update_data()
 
-        self._subjects = self.on_select_admissions(rule=self._loc_conf['remove_rule']['pass1'], subjects=self._subjects)
+        self._subjects:dict = self.on_select_admissions(rule=self._loc_conf['remove_rule']['pass1'], subjects=self._subjects)
 
-        # TODO col_abnormal_rate = {}
+        logger.info(f'Retain {len(self._subjects)} subjects and {np.sum([len(s.admissions) for s in self._subjects.values()])} admissions')
+
         value_clip = self._loc_conf['value_clip']
         for id_or_label in value_clip:
             id, label = self.fea_id(id_or_label), self.fea_label(id_or_label)
@@ -365,7 +379,7 @@ class MIMICIV_Core(Dataset):
     
     def _verify_subjects(self, subjects:dict[int, Subject]):
         try:
-            for s in tqdm(subjects.values(), 'verify subjects'):
+            for s in tqdm(subjects.values(), 'verify subjects', miniters=len(subjects)//100):
                 adm = s.admissions[0]
                 for v in s.static_data.values():
                     self.check_nan(v)
@@ -389,10 +403,15 @@ class MIMICIV_Core(Dataset):
 
         # 进一步筛选admission
         self._subjects = self.on_remove_missing_data(self._loc_conf['remove_rule']['pass2'], self._subjects)
+        logger.info(f'After remove missing data, retain {len(self._subjects)} subjects and {np.sum([len(s.admissions) for s in self._subjects.values()])} admissions')
+
         self._verify_subjects(self.subjects)
-        # 在pass2后，能够确定最终的static/dyanmic features
+        # determine static/dyanmic features
         self._static_keys = sorted(np.unique([k for s in self._subjects.values() for k in s.static_data.keys()]))
         self._dynamic_keys = sorted(np.unique([k for s in self._subjects.values() for k in s.admissions[0].keys()]))
+
+        logger.info(f'Static keys: {[self.fea_label(key) for key in self._static_keys]}')
+        logger.info(f'Dynamic keys: {[self.fea_label(key) for key in self._dynamic_keys]}')
 
         norm_dict = {}
         for s in self._subjects.values():
@@ -453,6 +472,7 @@ class MIMICIV_Core(Dataset):
 
         default_missvalue = float(self._loc_conf['generate_table']['default_missing_value'])
         calculate_bin = self._loc_conf['generate_table']['calculate_bin']
+        invalid_record = {'length':0}
         for s_id in tqdm(self._subjects.keys(), desc='Generate aligned table', miniters=len(self._subjects)//100):
             s = self._subjects[s_id]
             adm = s.admissions[0]
@@ -469,6 +489,7 @@ class MIMICIV_Core(Dataset):
                     t_end = min(adm[id][-1,1], t_end) if t_end is not None else adm[id][-1,1]
             t_step = self._loc_conf['generate_table']['delta_t_hour']
             if t_end - t_start < t_step: # NOTE: e.g. all features are in the same tick. We can not made prediction in such cases.
+                invalid_record['length'] += 1
                 continue
 
             ticks = np.arange(t_start, t_end, t_step) # 最后一个会确保间隔不变且小于t_end
@@ -501,7 +522,8 @@ class MIMICIV_Core(Dataset):
             if individual_table.size > 0:
                 self.check_nan(individual_table)
                 tables.append(individual_table)
-        logger.info(f'Generated {len(tables)} individual tables')
+        logger.info(f'Invalid table due to too short timestep: {invalid_record["length"]}')
+        logger.info(f'Generated {len(tables)} individual tables. ')
         result = self.on_feature_engineering(tables, self._norm_dict, self._static_keys, self._dynamic_keys) # 特征工程
         tables, self._norm_dict, static_keys, dynamic_keys = result['tables'], result['norm_dict'], result['static_keys'], result['dynamic_keys']
         for table in tables:
@@ -531,7 +553,8 @@ class MIMICIV_Core(Dataset):
                 'norm_dict': self._norm_dict,
                 'seqs_len': seqs_len,
                 'static_keys': self._static_keys,
-                'dynamic_keys': self._dynamic_keys
+                'dynamic_keys': self._dynamic_keys,
+                'all_item': self._all_items
             }, fp)
         logger.info(f'Aligned table dumped at {p_final_table}')
 
@@ -540,7 +563,8 @@ class MIMICIV_Core(Dataset):
         '''
         assert(self._idx_dict is not None)
         version_conf:dict = self._loc_conf['version']
-        suffix = '.pkl' if not self._loc_conf['compress_cache'] else '.xz' # use lzma compression
+        suffix = '.pkl' if not self._loc_conf['compress_cache'] else self._loc_conf['compress_suffix']
+
         for version_name in version_conf.keys():
             logger.info(f'Preprocessing version: {version_name}')
             # 检查是否存在pkl
@@ -558,7 +582,7 @@ class MIMICIV_Core(Dataset):
                 limit_idx = list(self._idx_dict.values())
             
             total_keys = self.static_keys + self.dynamic_keys
-            forbidden_idx = set([self._idx_dict[ffea] for ffea in version_conf[version_name]['forbidden_feas'] if ffea in self._idx_dict])
+            forbidden_idx = set([self.fea_idx(ffea) for ffea in version_conf[version_name]['forbidden_feas'] if ffea in self._idx_dict])
             avail_static_idx = [idx for idx in limit_idx if idx not in forbidden_idx and total_keys[idx] in self.static_keys]
             avail_dynamic_idx = [idx for idx in limit_idx if idx not in forbidden_idx and total_keys[idx] in self.dynamic_keys]
             avail_idx = avail_static_idx + avail_dynamic_idx
@@ -596,10 +620,15 @@ class MIMICIV_Core(Dataset):
                 'idx_dict': derived_idx_dict,
                 'norm_dict': derived_norm_dict,
                 'kf': derived_kf_list,
+                'all_item': self._all_items
             }
             np.savez_compressed(p_version_data, derived_data_table.astype(np.float32))
             with open(p_version, 'wb') as fp:
                 pickle.dump(version_dict, fp)
+
+    def _register_item(self, fea_id:str, fea_label:str):
+        self._all_items['id'][fea_id] = {'id':fea_id, 'label':fea_label}
+        self._all_items['label'][fea_label] = {'id':fea_id, 'label':fea_label}
 
     def fea_label(self, x:[int, str]):
         # input must be idx or id
@@ -629,9 +658,11 @@ class MIMICIV_Core(Dataset):
             id = self._all_items['label'][x]['id']
             assert(id in self._idx_dict)
             return self._idx_dict[id]
-        elif x in self._all_items['id']:
+        elif x in self._all_items['id'] or x in self._idx_dict.keys():
             assert(x in self._idx_dict)
             return self._idx_dict[x]
+        else:
+            assert(0)
     
     def register_split(self, train_index, valid_index, test_index):
         self.train_index = train_index
@@ -650,25 +681,7 @@ class MIMICIV_Core(Dataset):
             self._data_index = None
         else:
             assert(0)
-
-    def get_norm_array(self):
-        '''返回一个array, [:,0]代表各个feature的均值, [:,1]代表方差'''
-        means = [[self._norm_dict[key]['mean'] , self._norm_dict[key]['std']] for key in self._total_keys]
-        return np.asarray(means)
-
-    def restore_norm(self, name_or_idx, data:np.ndarray, mask=None) -> np.ndarray:
-        '''
-        缩放到正常范围
-        mask: 只变换mask=True的部分
-        '''
-        if isinstance(name_or_idx, int):
-            name_or_idx = self._total_keys[name_or_idx]
-        norm = self._norm_dict[name_or_idx]
-        if mask is None:
-            return data * norm['std'] + norm['mean']
-        else:
-            assert(mask.shape == data.shape)
-            return (data * norm['std'] + norm['mean']) * (mask > 0) + data * (mask <= 0)
+    
 
     def load_version(self, version_name):
         '''更新dataset版本'''
@@ -676,7 +689,7 @@ class MIMICIV_Core(Dataset):
             return
         else:
             self._version_name = version_name
-        suffix = '.pkl' if not self._loc_conf['compress_cache'] else '.xz'
+        suffix = '.pkl' if not self._loc_conf['compress_cache'] else self._loc_conf['compress_suffix']
         p_version = os.path.join(self._paths['cache_dir'], f'7_version_{version_name}'+suffix)
         p_version_data = os.path.join(self._paths['cache_dir'], f'7_version_{version_name}.npz')
         assert(os.path.exists(p_version))
@@ -722,7 +735,7 @@ class MIMICIV_Core(Dataset):
         pass
 
     @abstractmethod
-    def on_extract_admission(self, source, row):
+    def on_extract_admission(self, source, row) -> bool:
         pass
 
     @abstractmethod
