@@ -2,7 +2,6 @@ captum==0.6.0
 compress_pickle==2.1.0
 matplotlib==3.8.0
 missingno==0.5.2
-numpy==1.22.3
 numpy==1.23.5
 pandas==2.0.2
 PyYAML==6.0.1
